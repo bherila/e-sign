@@ -57,12 +57,6 @@ enum EnvelopeState: string
         };
     }
 
-    /** True while recipients may still act on the envelope. */
-    public function isOpenForSigning(): bool
-    {
-        return $this === self::Sent || $this === self::InProgress;
-    }
-
     /**
      * @return list<string>
      */

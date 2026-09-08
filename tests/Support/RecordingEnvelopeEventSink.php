@@ -56,9 +56,4 @@ final class RecordingEnvelopeEventSink implements EnvelopeEventSink
 
         return null;
     }
-
-    public function reset(): void
-    {
-        $this->recorded = [];
-    }
 }

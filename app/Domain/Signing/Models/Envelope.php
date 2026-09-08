@@ -10,7 +10,6 @@ use App\Domain\Preparation\Documents\Models\DocumentRevision;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Signing\Envelopes\EnvelopeState;
 use App\Domain\Signing\Envelopes\EnvelopeStateMachine;
-use App\Domain\Signing\Envelopes\RecipientState;
 use App\Domain\Signing\Envelopes\SigningMode;
 use App\Models\User;
 use Carbon\CarbonImmutable;
@@ -207,15 +206,5 @@ class Envelope extends Model
     public function isContentFrozen(): bool
     {
         return $this->content_frozen_at !== null;
-    }
-
-    /** The 1-based signing stage currently eligible to act, or null when none is. */
-    public function activeStage(): ?int
-    {
-        $stage = $this->recipients()
-            ->where('state', RecipientState::Active->value)
-            ->min('order_index');
-
-        return $stage === null ? null : (int) $stage;
     }
 }

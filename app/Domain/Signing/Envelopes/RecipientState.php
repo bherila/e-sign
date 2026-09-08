@@ -26,11 +26,6 @@ enum RecipientState: string
     /** Refused. Declining one recipient declines the envelope. */
     case Declined = 'declined';
 
-    public function isTerminal(): bool
-    {
-        return $this === self::Signed || $this === self::Declined;
-    }
-
     /**
      * @return list<string>
      */

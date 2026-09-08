@@ -244,15 +244,20 @@ final readonly class EnvelopeStateMachine
                     $written[] = $field->id;
                 }
 
-                // A submission always advances the envelope: it is what makes an earlier
-                // review stale, and `sent` stops being accurate the moment somebody acts.
-                $changes = [];
+                // A submission that wrote something advances the envelope: the version bump
+                // is what makes an earlier review stale, and `sent` stops being accurate the
+                // moment somebody acts. A submission that wrote nothing is not a transition,
+                // and bumping the version for it would invalidate everybody else's review
+                // for no reason.
+                if ($written !== []) {
+                    $changes = [];
 
-                if ($locked->state === EnvelopeState::Sent) {
-                    $changes['state'] = EnvelopeState::InProgress->value;
+                    if ($locked->state === EnvelopeState::Sent) {
+                        $changes['state'] = EnvelopeState::InProgress->value;
+                    }
+
+                    $this->commitEnvelope($locked, $changes);
                 }
-
-                $this->commitEnvelope($locked, $changes);
                 $this->syncBack($recipient, $lockedRecipient);
 
                 return new ValueSubmissionResult(
@@ -324,7 +329,10 @@ final readonly class EnvelopeStateMachine
                     $written[] = $field->id;
                 }
 
-                $this->commitEnvelope($locked, []);
+                if ($written !== []) {
+                    $this->commitEnvelope($locked, []);
+                }
+
                 $this->syncBack($envelope, $locked);
 
                 return new ValueSubmissionResult(

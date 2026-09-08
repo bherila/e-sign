@@ -49,6 +49,24 @@ class EnvelopeFieldValuesTest extends TestCase
         $this->assertFalse($stored->isFrozen());
     }
 
+    /**
+     * A submission that wrote nothing is not a transition. Bumping the version for it would
+     * invalidate every other recipient's review for no reason at all.
+     */
+    public function test_an_empty_submission_changes_nothing(): void
+    {
+        $scenario = SigningScenario::create();
+        $envelope = $scenario->sent();
+        $before = $envelope->version;
+
+        $result = $scenario->machine()->submitValues($scenario->recipient($envelope, 'buyer'), []);
+
+        $this->assertSame([], $result->fieldIds);
+        $this->assertSame($before, $result->envelopeVersion);
+        $this->assertSame(EnvelopeState::Sent, $envelope->refresh()->state);
+        $this->assertSame($before, $envelope->version);
+    }
+
     public function test_a_recipient_cannot_submit_another_recipients_field(): void
     {
         $scenario = SigningScenario::create();

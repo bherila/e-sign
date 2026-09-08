@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Domain\Signing\Models;
 
-use App\Domain\Preparation\Schema\FieldDefinition;
 use App\Domain\Signing\Envelopes\RecipientState;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
@@ -95,15 +94,5 @@ class EnvelopeRecipient extends Model
     public function attestations(): HasMany
     {
         return $this->hasMany(RecipientAttestation::class, 'recipient_id')->orderBy('id');
-    }
-
-    /**
-     * The fields this recipient owns, read from the envelope's copied schema.
-     *
-     * @return list<FieldDefinition>
-     */
-    public function schemaFields(Envelope $envelope): array
-    {
-        return $envelope->fieldSchema()->fieldsFor($this->schema_recipient_id);
     }
 }

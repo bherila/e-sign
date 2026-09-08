@@ -79,7 +79,11 @@ class EnvelopeFactoryTest extends TestCase
         );
 
         $buyer = $scenario->recipient($envelope, 'buyer');
-        $this->assertSame([
+        // assertEquals, not assertSame: a MySQL `JSON` column does not preserve object key
+        // order, so the array that comes back out is not necessarily ordered the way it went
+        // in. Nothing reads this snapshot positionally or hashes it, so the order is not part
+        // of the contract — but asserting it would make the suite fail on one engine only.
+        $this->assertEquals([
             'source' => 'field_schema',
             'schema_recipient_id' => 'buyer',
             'name' => 'Example Buyer',

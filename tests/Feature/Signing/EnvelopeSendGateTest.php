@@ -235,6 +235,27 @@ class EnvelopeSendGateTest extends TestCase
         }
     }
 
+    /**
+     * Freezing twice must not move a freeze time that evidence already refers to.
+     */
+    public function test_freezing_an_already_frozen_envelope_changes_nothing(): void
+    {
+        $scenario = SigningScenario::create();
+        $envelope = $scenario->sent([
+            'field_schema' => SigningFixtures::parallelTwoSigners(),
+            'signing_mode' => 'parallel',
+        ]);
+        $frozenAt = $envelope->content_frozen_at;
+        $version = $envelope->version;
+
+        $result = $scenario->machine()->freezeForParallel($envelope);
+
+        $this->assertFalse($result->changedState());
+        $this->assertSame([], $result->eventNames());
+        $this->assertEquals($frozenAt, $envelope->refresh()->content_frozen_at);
+        $this->assertSame($version, $envelope->version);
+    }
+
     protected function tearDown(): void
     {
         CarbonImmutable::setTestNow();

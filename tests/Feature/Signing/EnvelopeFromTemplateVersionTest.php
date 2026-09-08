@@ -53,7 +53,8 @@ class EnvelopeFromTemplateVersionTest extends TestCase
         $this->assertSame($scenario->revision->sha256, $envelope->document_sha256);
         $this->assertSame($version->field_schema_sha256, $envelope->field_schema_sha256);
         $this->assertSame(SigningFixtures::CONSENT_VERSION, $envelope->consent_policy_version);
-        $this->assertSame(RenderSettings::defaults()->toArray(), $envelope->render_settings);
+        // assertEquals: MySQL does not preserve `JSON` object key order (see EnvelopeFactoryTest).
+        $this->assertEquals(RenderSettings::defaults()->toArray(), $envelope->render_settings);
         $this->assertSame(72, $envelope->expiration_hours);
         $this->assertSame(['buyer', 'seller'], $envelope->recipients()->pluck('schema_recipient_id')->all());
 

@@ -69,10 +69,14 @@ class EnvelopeAcceptanceTest extends TestCase
 
         $attestation = $scenario->machine()->accept($buyer->refresh(), $request)->attestation;
 
-        $this->assertSame([
+        // Read back from the row, not from the model that wrote it, and with assertEquals:
+        // MySQL does not preserve `JSON` object key order.
+        $stored = RecipientAttestation::query()->findOrFail($attestation->getKey());
+
+        $this->assertEquals([
             'ip' => '198.51.100.7',
             'user_agent' => 'SyntheticBrowser/1.0',
-        ], $attestation->client_evidence);
+        ], $stored->client_evidence);
     }
 
     public function test_the_hash_chain_links_each_acceptance_to_the_one_before_it(): void
@@ -102,7 +106,13 @@ class EnvelopeAcceptanceTest extends TestCase
     {
         $scenario = SigningScenario::create();
         $envelope = $scenario->sent();
-        $attestation = $scenario->signAs($envelope, $scenario->recipient($envelope, 'buyer'))->attestation;
+        $written = $scenario->signAs($envelope, $scenario->recipient($envelope, 'buyer'))->attestation;
+
+        // From the row, which is the claim being made. It matters that this survives the
+        // storage round trip: a MySQL `JSON` column does not preserve object key order, so
+        // the digest has to be independent of how `client_evidence` comes back out — which
+        // is why AttestationDigest re-minimizes it rather than hashing it as given.
+        $attestation = RecipientAttestation::query()->findOrFail($written->getKey());
 
         $recomputed = AttestationDigest::compute(
             $envelope->refresh()->public_id,
