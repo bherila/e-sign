@@ -40,7 +40,6 @@ class UnsupportedEndpointController extends Controller
             .FirmaProfile::NAME.'. It is refused rather than answered with an empty success, so that a '
             .'caller never records an action this service did not take. See '
             .'docs/compatibility/firma-capability-matrix.md for what is in profile.',
-            ['profile' => FirmaProfile::NAME],
         );
     }
 }

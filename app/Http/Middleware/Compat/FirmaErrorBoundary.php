@@ -122,10 +122,14 @@ class FirmaErrorBoundary
 
         // The shared credential middleware's own tokens first, so a 401 keeps saying what it
         // said; then the status, which covers everything the framework itself renders.
+        //
+        // The status is **not** rewritten. Only the body is re-dressed, so a response this
+        // middleware did not raise cannot end up saying `internal_error` over a `429` — a
+        // token that disagrees with its own status is worse than a vague one.
         $code = match ($existing) {
             'invalid_credential' => FirmaErrorCode::Unauthorized,
             'insufficient_scope' => FirmaErrorCode::Forbidden,
-            default => $this->codeForStatus($response->getStatusCode()) ?? FirmaErrorCode::InternalError,
+            default => $this->tokenForStatus($response->getStatusCode()),
         };
 
         $body = [
@@ -144,17 +148,27 @@ class FirmaErrorBoundary
         return $response;
     }
 
-    private function codeForStatus(int $status): ?FirmaErrorCode
+    /**
+     * The closest token in this profile's vocabulary for a status the framework rendered.
+     *
+     * Total on purpose: every status gets a token, so nothing leaves this surface in the
+     * framework's `{message}` shape. `405` maps to `not_found` because the vocabulary has no
+     * method token and "there is nothing here for you" is the honest reading — in practice
+     * the catch-all route in `routes/compat-firma.php` answers `501` before a `405` can
+     * happen, which is a better answer still.
+     */
+    private function tokenForStatus(int $status): FirmaErrorCode
     {
-        return match ($status) {
-            Response::HTTP_BAD_REQUEST => FirmaErrorCode::InvalidRequest,
-            Response::HTTP_UNAUTHORIZED => FirmaErrorCode::Unauthorized,
-            Response::HTTP_FORBIDDEN => FirmaErrorCode::Forbidden,
-            Response::HTTP_NOT_FOUND, Response::HTTP_METHOD_NOT_ALLOWED => FirmaErrorCode::NotFound,
-            Response::HTTP_CONFLICT => FirmaErrorCode::InvalidState,
-            Response::HTTP_UNPROCESSABLE_ENTITY => FirmaErrorCode::UnprocessableEntity,
-            Response::HTTP_NOT_IMPLEMENTED => FirmaErrorCode::Unsupported,
-            default => null,
+        return match (true) {
+            $status === Response::HTTP_UNAUTHORIZED => FirmaErrorCode::Unauthorized,
+            $status === Response::HTTP_FORBIDDEN => FirmaErrorCode::Forbidden,
+            $status === Response::HTTP_NOT_FOUND,
+            $status === Response::HTTP_METHOD_NOT_ALLOWED => FirmaErrorCode::NotFound,
+            $status === Response::HTTP_CONFLICT => FirmaErrorCode::InvalidState,
+            $status === Response::HTTP_UNPROCESSABLE_ENTITY => FirmaErrorCode::UnprocessableEntity,
+            $status === Response::HTTP_NOT_IMPLEMENTED => FirmaErrorCode::Unsupported,
+            $status >= 500 => FirmaErrorCode::InternalError,
+            default => FirmaErrorCode::InvalidRequest,
         };
     }
 }
