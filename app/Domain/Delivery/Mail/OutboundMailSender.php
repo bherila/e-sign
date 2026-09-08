@@ -8,6 +8,8 @@ use App\Domain\Delivery\Mail\Models\OutboundMail;
 use App\Domain\Evidence\Retention\Exceptions\RestoreDrillActive;
 use App\Domain\Evidence\Retention\RestoreDrill;
 use Illuminate\Contracts\Mail\Factory as MailFactory;
+use Illuminate\Mail\SentMessage;
+use Symfony\Component\Mime\Message;
 use Throwable;
 
 /**
@@ -81,7 +83,7 @@ final class OutboundMailSender
         // event listener rather than an exception. A row with no Message-ID can never be
         // matched to provider feedback, which is a limitation worth seeing rather than
         // papering over with a locally invented identifier.
-        $messageId = MessageId::normalize($sent?->getSymfonySentMessage()->getMessageId());
+        $messageId = MessageId::normalize($this->providerMessageId($sent));
 
         $mail->markSentToProvider($mailerName, $messageId);
         $mail->recordEvent(MailEventSource::App, 'sent_to_provider', [
@@ -89,5 +91,44 @@ final class OutboundMailSender
             'mailer' => $mailerName,
             'has_message_id' => $messageId !== null,
         ]);
+    }
+
+    /**
+     * The identifier the *provider* will use when it reports back on this message.
+     *
+     * Usually that is `SentMessage::getMessageId()`, which Symfony fills from the transport's
+     * own answer: the SMTP `250 Ok <id>` reply, or the id a Brevo API response returns.
+     *
+     * The SES API transport is the exception, and it was a silent one. Laravel's
+     * `Illuminate\Mail\Transport\SesTransport` takes the `MessageId` that `SendRawEmail`
+     * returns and adds it as the `X-Message-ID` and `X-SES-Message-ID` headers — it never
+     * calls `SentMessage::setMessageId()`. So `getMessageId()` falls back to the RFC 5322
+     * `Message-ID` Symfony generated locally, while every SES bounce, complaint, and delivery
+     * notification reports `mail.messageId`, which is the SES id. The two never match, so
+     * with `MAIL_MAILER=ses` every notification would have been recorded as an orphan and no
+     * message would ever have left `sent_to_provider`.
+     *
+     * Preferring the header fixes it at the one place that writes the column. It is a header
+     * read, not an `instanceof` on a transport: nothing here needs to know which mailer is
+     * configured, and a mailer that does not set the header is unaffected.
+     */
+    private function providerMessageId(?SentMessage $sent): ?string
+    {
+        if ($sent === null) {
+            return null;
+        }
+
+        $symfony = $sent->getSymfonySentMessage();
+        $original = $symfony->getOriginalMessage();
+
+        if ($original instanceof Message) {
+            $header = $original->getHeaders()->get('X-SES-Message-ID');
+
+            if ($header !== null && trim($header->getBodyAsString()) !== '') {
+                return trim($header->getBodyAsString());
+            }
+        }
+
+        return $symfony->getMessageId();
     }
 }

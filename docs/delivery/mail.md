@@ -197,13 +197,8 @@ row — active, invited more than `esign.signing.reminder_after_hours` ago, not 
 ## Provider feedback
 
 `sent_to_provider` only becomes `delivered`, `bounced`, or `complained` when a provider says
-so. Both endpoints are in `routes/mail-webhooks.php`.
-
-> **Not yet registered.** `bootstrap/app.php` does not yet include
-> `routes/mail-webhooks.php`; that file is owned by another change in flight. Add
-> `Route::group([], base_path('routes/mail-webhooks.php'));` to its `then:` closure to turn
-> these endpoints on. Until then the outbox works without them and messages simply stay at
-> `sent_to_provider`, which remains an honest statement of what is known.
+so. Both endpoints are in `routes/mail-webhooks.php`, registered from `bootstrap/app.php`'s
+`then:` closure.
 
 Feedback is matched to a row **by Message-ID only**. Matching by address would be the obvious
 alternative and is the wrong one: the same recipient can hold several open invitations, and
@@ -211,7 +206,9 @@ marking the wrong one bounced would tell a sender their counterparty is unreacha
 message that failed was a different agreement's reminder.
 
 Message-IDs are normalized — angle brackets stripped, lowercased — because Symfony, Brevo,
-and SES each spell the same identifier differently.
+and SES each spell the same identifier differently. SES goes further and reports an
+identifier of its own that is not the SMTP `Message-ID` at all; see
+[SES's message id is not the SMTP `Message-ID`](#sess-message-id-is-not-the-smtp-message-id).
 
 Feedback about a Message-ID with no row is recorded as an **orphan** rather than dropped.
 That happens routinely: a restored backup, a shared sending domain, a webhook pointed at the
@@ -263,47 +260,179 @@ for one unrecognized event would put the provider into a retry loop over an even
 application has already chosen to ignore. Entries with no event name are dropped before
 validation; a body with nothing event-shaped in it at all is a 422.
 
-### SES — `POST /webhooks/mail/ses`, and why it refuses everything
+### SES — `POST /webhooks/mail/ses`
 
-**This endpoint currently rejects every message, on purpose.** It is wired, reviewed, and
-tested, and it accepts nothing.
+SES publishes bounce, complaint, and delivery feedback through SNS, and SNS signs every
+message it sends. That signature is the whole authentication story for this endpoint:
+without it, the route is an unauthenticated POST that lets anyone mark any message bounced.
 
-SNS signs its messages, and verifying that signature is the only thing separating this route
-from an unauthenticated endpoint that lets anyone mark any message bounced. Doing it properly
-means fetching the certificate named by `SigningCertURL`, checking that the URL is an
-AWS-controlled `sns.<region>.amazonaws.com` host over HTTPS, rebuilding the canonical
-string-to-sign per message type, verifying with the certificate's public key, and caching
-certificates so a webhook storm is not also a certificate-fetch storm. That is what
-`aws/aws-sns-message-validator` does, and this project does not have it: `aws-sdk-php` is
-present only transitively through `league/flysystem-aws-s3-v3` and does not include the
-validator.
+**The topic allowlist is the switch.** `ESIGN_MAIL_SES_TOPIC_ARNS` is a comma-separated list
+of SNS topic ARNs and it is empty by default. Empty means
+`App\Domain\Delivery\Mail\Feedback\RejectingSnsMessageVerifier` is bound and every message
+is refused, so an unconfigured deployment fails closed.
 
-So rather than hand-roll it — or, far worse, accept unsigned input until someone gets round
-to it — the endpoint fails closed. `RejectingSnsMessageVerifier` refuses every message and
-the response is **503**, not 403: the caller has done nothing wrong and cannot fix it, and
-SNS treats 503 as retryable, so a deployment that later turns verification on does not lose
-the feedback that arrived in the meantime.
+That is not a formality. A valid AWS signature proves only that *some* AWS customer signed
+the message — anyone can create a topic and sign one — so without an allowlist there is no
+answer to "is this our topic?", and accepting on the signature alone would let any AWS
+customer move this deployment's mail rows. A topic ARN is not a secret (it is in console URLs
+and in CloudTrail), which is exactly why it is a routing decision and not the authentication.
 
-Everything behind the verifier is implemented and tested: the topic-ARN check
-(`ESIGN_MAIL_SES_TOPIC_ARN`, unset disables the endpoint), subscription confirmation, and the
-notification mapping.
+#### What is verified
 
-Subscription confirmation is the one outbound request this endpoint makes, to a URL that
-arrived in a request body, so it is guarded twice. The host is pinned to
-`sns.<region>.amazonaws.com` over HTTPS, which costs no DNS and rejects the obvious attempts
-(`sns.us-east-1.amazonaws.com.attacker.test`, a literal address, the metadata endpoint). Then
-the shared `DestinationPolicy` — the same one the webhook outbox and the timestamp authority
-use — refuses a host that *resolves* to a loopback, private, link-local, or reserved address
-and pins the connection to the addresses it checked. Redirects are never followed, because
-only the first hop was validated.
+`AwsSnsMessageVerifier` runs before anything touches a mail row. In order:
+
+1. **A topic is configured**, and the message names one on the list. `SesWebhookRequest`
+   checks the same thing first, so neither layer is load-bearing alone; the request's copy is
+   what makes a foreign topic a permanent **403** rather than a retryable 503.
+2. **`SignatureVersion` is 1 or 2**, and **1 is refused** unless
+   `ESIGN_MAIL_SES_ALLOW_SIGNATURE_VERSION_1=true`. Version 1 is SHA-1, and a signature over a
+   hash with practical collisions is not evidence. Set the topic's `SignatureVersion` to 2 in
+   SNS rather than turning this on.
+3. **`Timestamp` is inside the replay window** (`ESIGN_MAIL_SES_REPLAY_WINDOW_SECONDS`,
+   default 900), in *both* directions. An SNS signature never expires, so without this a
+   captured `Bounce` can be replayed for as long as the certificate lives; a future-dated
+   message is refused too, because that is an edited envelope rather than clock skew.
+4. **`SigningCertURL` names an AWS SNS signing certificate**: HTTPS, a `.pem` path, and a host
+   matching `sns.<region>.amazonaws.com` or `sns.<region>.amazonaws.com.cn`. That pattern
+   covers the commercial, GovCloud, and China partitions and nothing else — an S3 bucket on
+   `amazonaws.com` and `sns.us-east-1.amazonaws.com.attacker.test` are both out. Judged on the
+   spelling, so a hostile URL costs no outbound request at all.
+5. **The certificate is fetched through the shared `DestinationPolicy`** — the same one the
+   webhook outbox and the timestamp authority use. The name pin above cannot catch a
+   legitimate AWS name whose DNS answer points inside the network; the policy refuses a host
+   resolving to a loopback, private, link-local, or reserved address and pins the connection to
+   the addresses it checked. Redirects are never followed, because only the first hop was
+   validated. The answer must be PEM-shaped and under 16 KB.
+6. **The signature verifies** against the certificate's public key, over AWS's canonical
+   string-to-sign for the message's type.
+
+Step 6 is `aws/aws-php-sns-message-validator` rather than local code, and deliberately so.
+The delicate part of SNS verification is not the RSA call, it is the string-to-sign: an
+ordered field list that differs between `Notification`, `SubscriptionConfirmation`, and
+`UnsubscribeConfirmation`, where each present field is emitted and each absent one skipped.
+Getting the order or the presence rule wrong fails on the subset of real messages that carry
+a `Subject`, months later, in production — not loudly, in a test. AWS publishes that list;
+this uses AWS's copy of it, which is what `AGENTS.md`'s "no bespoke crypto where a library
+exists" asks for. The package is Apache-2.0, three files, and adds no transitive dependency:
+`aws/aws-sdk-php` was already in the tree through `league/flysystem-aws-s3-v3`, and
+`ext-openssl` and `psr/http-message` were already required.
+
+The test suite signs its messages with a keypair and a self-signed certificate generated in
+the process, served through a faked HTTP client, and rebuilds the string-to-sign from the AWS
+specification rather than calling the library's — so a disagreement about field order fails a
+test instead of passing quietly.
+
+**Certificates are cached** by URL for `ESIGN_MAIL_SES_CERT_CACHE_TTL_SECONDS` (default one
+hour). Without that, a notification flood is also a certificate-fetch flood against AWS, with
+the amplification factor chosen by whoever is sending the flood. Only successful fetches are
+cached: caching a failure would turn one bad minute at AWS into an hour of refused feedback.
+
+#### What is refused, and what a refusal looks like
+
+| Situation | Answer | Why that code |
+|---|---|---|
+| Topic not on the allowlist, or none configured | **403** | Permanent. SNS should stop retrying; the message is somebody else's. |
+| Malformed envelope (missing `Message`, `Timestamp`, `Signature`, `SigningCertURL`, …) | **422** | The body is malformed rather than declined, and the two should stay distinguishable. |
+| Signature invalid, wrong key, tampered body | **503** | Uninformative on purpose. |
+| SHA-1 signature with SHA-1 disabled | **503** | |
+| Timestamp outside the replay window | **503** | |
+| `SigningCertURL` not an AWS SNS host, or resolving somewhere private | **503** | Nothing is fetched. |
+| Certificate unreachable or not a PEM | **503** | Transient; SNS retries a 503. |
+
+503 rather than 403 for everything in the second group: the caller has done nothing wrong and
+cannot fix it, SNS treats 503 as retryable, and a deployment that fixes its configuration then
+does not lose the feedback that arrived in the meantime. The response body never says which
+check failed — an endpoint that mutates mail state should not explain to an unauthenticated
+caller how to satisfy it.
+
+**A refusal is never silent.** Every one writes an `outbound_mail_events` row with
+`outbound_mail_id` null — the same orphan shape unmatched feedback takes — carrying the reason
+token (`topic_not_allowlisted`, `signature_invalid`, `timestamp_outside_replay_window`, …) and
+the ARN the message claimed. An operator who has just mistyped `ESIGN_MAIL_SES_TOPIC_ARNS`
+otherwise sees nothing at all: SNS reports a 403 on its side, this side reports nothing, and
+nobody looks at the two together.
+
+Because this is an unauthenticated public POST, refusals **collapse**: one row per reason per
+`ESIGN_MAIL_SES_REFUSAL_WINDOW_SECONDS` (default 300), with the rest of the window logged and
+not written. One row per hostile request would be a storage-growth primitive anyone on the
+internet could pull. The log line carries the reason and nothing else — no signature, no
+certificate URL, no message body.
+
+```bash
+php artisan esign:mail:backlog --all   # refusals appear as `refused` events
+```
+
+#### Subscription confirmation, and why auto-confirm is off
+
+SNS asks a new endpoint to confirm its subscription by fetching a `SubscribeURL` it supplies
+in the request body. `ESIGN_MAIL_SES_AUTO_CONFIRM_SUBSCRIPTIONS` is **off by default**, and
+with it off a verified `SubscriptionConfirmation` from an allowlisted topic is answered
+**200 `not_confirmed`** and recorded.
+
+Confirming is the act that starts this deployment receiving a topic's traffic, and it is
+performed by dereferencing a URL that arrived in a request body. The default is therefore that
+a person does it once, in the SNS console, where they can see what they are subscribing to.
+200 rather than an error because the message was genuine and correctly addressed: a non-2xx
+would make SNS retry something this deployment declined on purpose.
+
+Turn it on for an automated deployment that recreates its own topic subscription. Even then
+the URL is guarded twice, exactly as the certificate fetch is: pinned by name to
+`sns.<region>.amazonaws.com` over HTTPS, then run through `DestinationPolicy`, which refuses a
+host that *resolves* to a loopback, private, link-local, or reserved address and pins the
+connection to the addresses it checked. Redirects are never followed. A URL that fails either
+guard is a **422** with no detail; AWS being briefly unreachable is a **503**, because losing
+a confirmation to a blip would leave the topic unsubscribed with nothing to say why.
+
+#### SES's message id is not the SMTP `Message-ID`
+
+Worth stating separately, because they are two different identifiers for one message and the
+row can hold either.
+
+`mail.messageId` in an SES notification is **SES's own** identifier: the value `SendRawEmail`
+returns, shaped like `0100019a7f3c0001-…`. The RFC 5322 `Message-ID` header is generated by
+Symfony before the message is handed over and looks like `abc@sending-host`. Which one
+`outbound_mails.message_id` holds depended on the transport:
+
+| `MAIL_MAILER` | What `SentMessage::getMessageId()` answered | Matched SES feedback |
+|---|---|---|
+| `smtp` against SES's SMTP endpoint | Symfony parses the id out of the `250 Ok <id>` reply and calls `setMessageId()`, so it is SES's | yes |
+| `ses` (the SES API) | Laravel's `SesTransport` adds the SES id as the `X-Message-ID`/`X-SES-Message-ID` headers and never calls `setMessageId()`, so it is the RFC 5322 header | **no** |
+
+So on the API transport every SES notification would have been recorded as an orphan and no
+message would ever have left `sent_to_provider`. `OutboundMailSender` now prefers the
+`X-SES-Message-ID` header when the transport set one, which fixes it at the one place that
+writes the column — a header read, not a check on which mailer is configured, so a transport
+that does not set the header is unaffected.
+
+Rows written before that fix are still matchable: `SesFeedbackProcessor` also offers the
+`Message-ID` out of `mail.headers` as a fallback candidate. SES includes original headers only
+when the notification or event destination is configured to, so it is a fallback rather than
+the primary — often it is simply absent.
+
+#### Event mapping
 
 | SES `notificationType` / `eventType` | State |
 |---|---|
 | `Send` | `accepted` |
 | `Delivery` | `delivered` |
-| `Bounce`, `Reject`, `Rendering Failure` | `bounced` |
+| `Bounce` (`Permanent`, `Transient`, `Undetermined`) | `bounced` |
+| `Reject`, `Rendering Failure` | `bounced` |
 | `Complaint` | `complained` |
 | `DeliveryDelay` | recorded, no change |
+| anything unrecognized | recorded, no change |
+
+**Every bounce type maps to `bounced`, and that is a decision.** The state means "it did not
+arrive", which is true of a full mailbox as well as a nonexistent address; `MailState` says so
+explicitly ("hard or soft"), and Brevo's `softBounce` already maps the same way, so switching
+providers does not silently change what an operator is looking at. Ranking is the other half
+of the reason: ordering is decided by `MailState::supersedes()` and `bounced` outranks
+`delivered`, so a softer state would have to sit *below* `delivered` to stay correctable — and
+then a transient bounce on a message that never arrived would be invisible.
+
+What the distinction is worth is diagnosis, so it is kept rather than discarded:
+`bounce_type` and `bounce_subtype` are recorded on the event payload, where an operator can
+tell `Transient`/`MailboxFull` from `Permanent`/`General` and only one of those is worth
+chasing.
 
 An event is stamped with its own time (`bounce.timestamp`, `complaint.timestamp`, …), not
 `mail.timestamp`, which is when the message was *sent* and is identical on every notification
@@ -311,9 +440,20 @@ about it. That value becomes `state_changed_at`, so the send time would stamp a 
 backwards to send and break both the operator timeline and the 24-hour windows the backlog
 probe and `esign:mail:backlog` read.
 
-**To turn SES feedback on:** add `aws/aws-sns-message-validator`, implement
-`SnsMessageVerifier` over `Aws\Sns\MessageValidator::validate()`, and bind it in
-`DeliveryServiceProvider` in place of `RejectingSnsMessageVerifier`. Nothing else changes.
+Feedback about a message id with no row is recorded as an orphan rather than answered 404, for
+the same reasons as Brevo's.
+
+#### Turning SES feedback on
+
+1. Create the SNS topic and set its `SignatureVersion` to 2.
+2. Point the SES identity's bounce/complaint/delivery notifications, or a configuration set's
+   event destination, at the topic. Enable "include original headers" if you have rows sent
+   before the message-id fix above.
+3. Subscribe `https://<your-host>/webhooks/mail/ses` to the topic, and confirm the
+   subscription in the SNS console.
+4. Set `ESIGN_MAIL_SES_TOPIC_ARNS` to the topic ARN and deploy.
+5. Send a real message and check `esign:mail:backlog --all` shows a `Delivery` event, not a
+   `refused` one.
 
 ## Redaction
 

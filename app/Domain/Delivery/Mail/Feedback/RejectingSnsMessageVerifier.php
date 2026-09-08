@@ -5,37 +5,32 @@ declare(strict_types=1);
 namespace App\Domain\Delivery\Mail\Feedback;
 
 /**
- * The shipped verifier: it rejects every SNS message.
+ * The verifier an unconfigured deployment gets: it rejects every SNS message.
  *
- * TODO(#35): implement real SNS signature verification.
+ * Real verification now exists (AwsSnsMessageVerifier), and DeliveryServiceProvider binds it
+ * whenever `esign.mail.ses.topic_arns` names at least one topic. This class is what is bound
+ * when that list is empty, and it is deliberately not a formality.
  *
- * SNS signs its messages, and verifying that signature is the only thing separating
- * `POST /webhooks/mail/ses` from an unauthenticated endpoint that lets anyone mark any
- * message bounced. Doing it properly means fetching the signing certificate named by
- * `SigningCertURL`, checking that the URL is an AWS-controlled `sns.<region>.amazonaws.com`
- * host over HTTPS, rebuilding the canonical string-to-sign for the message type, verifying
- * the signature with the certificate's public key, and caching certificates so a webhook
- * storm is not also a certificate-fetch storm. That is precisely what
- * `aws/aws-sns-message-validator` does, and this project does not have it: `aws-sdk-php` is
- * present only transitively, through `league/flysystem-aws-s3-v3`, and does not include the
- * validator.
+ * A deployment with no topic configured has told the application nothing about whose
+ * feedback it should believe. A valid AWS signature proves only that *some* AWS customer
+ * signed the message; without an allowlist there is no answer to "is this our topic?", and
+ * accepting on the signature alone would let anyone with an SNS topic mark this
+ * deployment's mail delivered, bounced, or complained about. So the endpoint fails closed
+ * rather than degrading to signature-only, and it does so by binding a different class,
+ * so the refusal is visible in the container rather than buried in a conditional.
  *
- * Rather than hand-roll it, or — far worse — accept unsigned input until someone gets round
- * to it, the endpoint fails closed. Every SES message is refused, the SES feedback path is
- * therefore inert, and Brevo remains the working provider-feedback route.
- *
- * To turn SES feedback on: add `aws/aws-sns-message-validator`, implement
- * SnsMessageVerifier over `Aws\Sns\MessageValidator::validate()`, and bind it in
- * DeliveryServiceProvider in place of this class. Nothing else has to change — the topic
- * check, the mapping, and the recorder are already tested behind this gate.
+ * The response is 503, not 403: the caller has done nothing wrong and cannot fix it, and SNS
+ * retries a 503, so a deployment that later configures a topic does not lose the feedback
+ * that arrived in the meantime.
  */
 final class RejectingSnsMessageVerifier implements SnsMessageVerifier
 {
     public function verify(array $envelope): void
     {
         throw new SnsVerificationException(
-            'SNS signature verification is not implemented, so the SES feedback endpoint refuses every message. '.
-            'See App\Domain\Delivery\Mail\Feedback\RejectingSnsMessageVerifier and docs/delivery/mail.md.'
+            'No SNS topic is configured, so the SES feedback endpoint refuses every message. '.
+            'Set ESIGN_MAIL_SES_TOPIC_ARNS; see docs/delivery/mail.md.',
+            'no_topic_configured',
         );
     }
 }

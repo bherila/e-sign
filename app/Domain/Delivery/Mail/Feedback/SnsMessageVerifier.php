@@ -7,9 +7,15 @@ namespace App\Domain\Delivery\Mail\Feedback;
 /**
  * Proves that an SNS envelope really came from AWS.
  *
- * A port with one implementation shipped (RejectingSnsMessageVerifier, which refuses
- * everything) so that the SES feedback path can exist, be reviewed, and be tested without
- * an unverified HTTP body ever being able to change a mail row.
+ * Two implementations. AwsSnsMessageVerifier does the real work — AWS's canonical
+ * string-to-sign, a certificate fetched through the destination policy and cached, a topic
+ * allowlist, a replay window — and is bound whenever a topic is configured.
+ * RejectingSnsMessageVerifier refuses everything and is bound when none is, so an
+ * unconfigured deployment cannot let an unverified HTTP body change a mail row.
+ *
+ * A port rather than a concrete call site because the choice between those two is made in
+ * the container, where a reader can see it, rather than inside a conditional on the request
+ * path.
  */
 interface SnsMessageVerifier
 {
