@@ -1,0 +1,32 @@
+{
+  "results": [
+    {
+      "id": "275f4946-d962-5991-b5af-76d01946c422",
+      "name": "Recipient 1",
+      "email": "recipient-1@example.test",
+      "first_name": "Recipient",
+      "last_name": "1",
+      "designation": "Signer",
+      "order": 1,
+      "finished_on": "2026-07-20T20:56:53.844+00:00",
+      "declined_on": null,
+      "decline_reason": null,
+      "phone_number": null,
+      "street_address": null,
+      "city": null,
+      "state_province": null,
+      "postal_code": null,
+      "country": null,
+      "title": null,
+      "company": null,
+      "custom_fields": {},
+      "required_fields": [
+        "email",
+        "first_name"
+      ],
+      "missing_fields": [],
+      "required_read_only_fields": [],
+      "ready_to_send": true
+    }
+  ]
+}

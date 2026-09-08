@@ -1,0 +1,62 @@
+{
+  "results": [
+    {
+      "id": "a71cc7f9-6798-5a89-86dd-d049607f46c4",
+      "name": "Recipient 1",
+      "email": "recipient-1@example.test",
+      "first_name": "Recipient",
+      "last_name": "1",
+      "designation": "Signer",
+      "order": 1,
+      "finished_on": "2026-06-26T15:52:51.258+00:00",
+      "declined_on": null,
+      "decline_reason": null,
+      "phone_number": null,
+      "street_address": "1 Example Street",
+      "city": "Exampleville",
+      "state_province": "CA",
+      "postal_code": "90000",
+      "country": "US",
+      "title": "Officer",
+      "company": "Example Practice 1",
+      "custom_fields": {},
+      "required_fields": [
+        "email",
+        "first_name",
+        "title"
+      ],
+      "missing_fields": [],
+      "required_read_only_fields": [],
+      "ready_to_send": true
+    },
+    {
+      "id": "aea64fc2-92b0-5d59-b5ff-be397bb186c2",
+      "name": "Recipient 2",
+      "email": "recipient-2@example.test",
+      "first_name": "Recipient",
+      "last_name": "2",
+      "designation": "Signer",
+      "order": 2,
+      "finished_on": null,
+      "declined_on": null,
+      "decline_reason": null,
+      "phone_number": null,
+      "street_address": null,
+      "city": null,
+      "state_province": null,
+      "postal_code": null,
+      "country": null,
+      "title": "Officer",
+      "company": "Example Practice 2",
+      "custom_fields": {},
+      "required_fields": [
+        "email",
+        "first_name",
+        "title"
+      ],
+      "missing_fields": [],
+      "required_read_only_fields": [],
+      "ready_to_send": true
+    }
+  ]
+}

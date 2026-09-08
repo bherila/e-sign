@@ -1,0 +1,60 @@
+{
+  "results": [
+    {
+      "id": "6605117a-cd47-5808-b732-f23aae82c902",
+      "name": "Recipient 1",
+      "email": "recipient-1@example.test",
+      "first_name": "Recipient",
+      "last_name": "1",
+      "designation": "Signer",
+      "order": 1,
+      "finished_on": null,
+      "declined_on": null,
+      "decline_reason": null,
+      "phone_number": null,
+      "street_address": null,
+      "city": null,
+      "state_province": null,
+      "postal_code": null,
+      "country": null,
+      "title": null,
+      "company": null,
+      "custom_fields": {},
+      "required_fields": [
+        "email",
+        "first_name"
+      ],
+      "missing_fields": [],
+      "required_read_only_fields": [],
+      "ready_to_send": true
+    },
+    {
+      "id": "02425b98-021d-5de9-917e-38bd13e46c77",
+      "name": "Recipient 2",
+      "email": "recipient-2@example.test",
+      "first_name": "Recipient",
+      "last_name": "2",
+      "designation": "Signer",
+      "order": 2,
+      "finished_on": null,
+      "declined_on": null,
+      "decline_reason": null,
+      "phone_number": null,
+      "street_address": null,
+      "city": null,
+      "state_province": null,
+      "postal_code": null,
+      "country": null,
+      "title": null,
+      "company": null,
+      "custom_fields": {},
+      "required_fields": [
+        "email",
+        "first_name"
+      ],
+      "missing_fields": [],
+      "required_read_only_fields": [],
+      "ready_to_send": true
+    }
+  ]
+}
