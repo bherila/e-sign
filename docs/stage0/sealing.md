@@ -99,16 +99,31 @@ Two trust modes, named per artifact in the manifest so nothing is inferred from 
 
 Result of the recorded run, all eight as required:
 
+Each artifact's required outcome is matched against pyHanko's **stated verdict**, not its exit
+status. pyHanko exits non-zero for an invalid signature, for a file it cannot parse, and for an
+environment error such as an unreadable `--trust` path alike, so an exit-status test would let
+a broken invocation satisfy every negative expectation. Three outcomes are distinguished:
+`valid` requires `judged VALID`, `invalid` requires `judged INVALID`, and `unreadable` requires
+`Failed to read PDF file`.
+
 | Artifact | Required | pyHanko |
 |---|---|---|
-| `sealed-b-b.pdf` | valid | VALID |
-| `sealed-b-t.pdf` | valid | VALID |
-| `sealed-b-t-untrusted-tsa.pdf` | invalid | INVALID (TSA untrusted) |
-| `negative-modified-content.pdf` | invalid | INVALID |
-| `negative-truncated.pdf` | invalid | error: EOF marker not found |
-| `negative-incremental-update.pdf` | invalid | INVALID |
-| `negative-forged-cms.pdf` | invalid | INVALID |
-| `negative-untrusted-signer.pdf` | invalid | INVALID (no path to trust anchor) |
+| `sealed-b-b.pdf` | valid | judged VALID |
+| `sealed-b-t.pdf` | valid | judged VALID |
+| `sealed-b-t-untrusted-tsa.pdf` | invalid | judged INVALID (TSA untrusted) |
+| `negative-modified-content.pdf` | invalid | judged INVALID |
+| `negative-byte-range-overclaim.pdf` | invalid | judged INVALID ("does not cover the entire file") |
+| `negative-truncated.pdf` | **unreadable** | Failed to read PDF file: EOF marker not found |
+| `negative-incremental-update.pdf` | invalid | judged INVALID |
+| `negative-forged-cms.pdf` | invalid | judged INVALID |
+| `negative-untrusted-signer.pdf` | invalid | judged INVALID (no path to trust anchor) |
+
+`negative-truncated.pdf` is labelled `unreadable` deliberately. Truncation takes the trailer
+with the tail, so pyHanko never opens the file and its refusal says nothing about the byte
+range. That refusal is real and worth pinning, but the coverage property needs a file a
+validator can actually parse — which is what `negative-byte-range-overclaim.pdf` is: the
+document is left intact and only the `/ByteRange` final length is inflated, at the same file
+length, so nothing but the coverage rule can reject it.
 
 ### pyHanko's stated limitation
 
@@ -158,6 +173,7 @@ unsigned passthrough, or partially sealed bytes.
 | TSA token refused (imprint, nonce, policy, genTime, TSA signature, EKU) | `TimestampTokenRejectedException` | mapped in `TcLibPdfSealer::translate()`; the checks themselves are tc-lib-pdf-sign's and are covered by its own suite |
 | Empty or non-PDF input | `SealFailedException` | `TcLibPdfSealerTest::test_it_refuses_an_empty_input`, `…_an_input_that_is_not_a_pdf` |
 | Artifact read back below the requested level | `SealFailedException` | `TcLibPdfSealerTest::test_it_refuses_to_return_an_artifact_that_does_not_reach_the_requested_level` |
+| Artifact signed by a certificate other than the configured material | `SealFailedException` | `TcLibPdfSealerTest::test_it_refuses_an_artifact_signed_by_material_other_than_the_configured_one` |
 
 ### Tamper detection on the produced artifact
 
@@ -185,11 +201,33 @@ follows a redirect, because only the first hop was checked.
 
 PHP's own `FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE` is not sufficient on its
 own, which was worth measuring rather than assuming. It covers RFC 1918, loopback,
-link-local, IPv6 unique-local, and IPv4-mapped IPv6, but it treats RFC 6598 carrier-grade
-NAT (`100.64.0.0/10`) as public — the address space a shared host's internal network
-typically sits in — along with RFC 6890 IETF protocol assignments (`192.0.0.0/24`) and
-benchmarking space (`198.18.0.0/15`). Those three are refused explicitly, and
-`HttpTimestampAuthorityTest` pins each, including its IPv4-mapped IPv6 form.
+link-local, IPv6 unique-local, and IPv4-mapped IPv6, and lets through:
+
+| Range | What it is | Why it matters |
+|---|---|---|
+| `100.64.0.0/10` | RFC 6598 carrier-grade NAT | the space a shared host's internal network typically sits in |
+| `192.0.0.0/24` | RFC 6890 IETF protocol assignments | not the public internet |
+| `192.88.99.0/24` | RFC 7526 6to4 relay anycast | reaches a relay, not a host |
+| `198.18.0.0/15` | RFC 2544 benchmarking | not the public internet |
+| `64:ff9b::/96`, `64:ff9b:1::/48` | RFC 6052/8215 NAT64 | **carries an embedded IPv4 address** |
+| `2002::/16` | RFC 3056 6to4 | **carries an embedded IPv4 address** |
+| `2001::/32` | RFC 4380 Teredo | tunnelled, endpoint not the named address |
+| `100::/64` | RFC 6666 discard-only | black hole |
+
+The last four are the interesting ones: a v6 literal can name a v4 destination the v4 checks
+would have refused. Measured, not assumed — before these prefixes were listed,
+`http://[64:ff9b::7f00:1]/` (NAT64-mapped `127.0.0.1`) and `http://[2002:7f00:1::1]/`
+(6to4-encapsulated `127.0.0.1`) both passed the entire policy. All eight are refused whole,
+since a timestamp authority is never inside any of them, and
+`HttpTimestampAuthorityTest` pins each refusal plus eight addresses immediately outside the
+prefixes so the list cannot over-reach.
+
+One residual, documented rather than fixed: an AAAA lookup that *fails* (SERVFAIL, timeout, a
+resolver refusing the query type) is indistinguishable from "no AAAA record" through
+`dns_get_record()`, and is treated as the latter — refusing on it would make sealing fail on
+any network whose resolver filters AAAA. The connection is pinned with `CURLOPT_RESOLVE` to
+the addresses that were checked, so an unvalidated record cannot be reached even if one
+existed.
 
 tc-lib-pdf's own transport validates the URL's *shape* only. The policy is applied by
 overriding the library's documented `postTimestampRequest()` transport seam
@@ -235,6 +273,24 @@ Only after the fixture was changed to redefine the page object did pyHanko judge
 The application's own rule — an artifact whose `/ByteRange` does not cover the whole file is
 refused, full stop — is therefore stricter than the validator's default judgment, and is
 what the publication gate uses.
+
+**`__debugInfo()` is not containment for a secret.** Symfony's VarDumper — which is what
+`dd()`, `dump()`, and an exception page's stack-frame locals use — *merges* `__debugInfo()`
+with the reflected property set rather than replacing it, so it descends into the underlying
+property anyway; `serialize()` and `var_export()` ignore the method outright. Measured on the
+first version of `SealMaterial`: `print_r()` and `var_dump()` were clean, while `dd()`,
+`serialize()`, and `var_export()` each wrote the unencrypted private key out in full. The key
+now lives inside a `\SensitiveParameterValue`, which redacts under all of those and refuses to
+serialize at all, and `SealMaterialTest` pins every vector separately. Worth recording because
+the redaction *looked* right and a review that only read the docblock would have passed it.
+
+**An exit status is not a verdict.** pyHanko exits non-zero for an invalid signature, for a
+file it cannot parse, and for an environment error such as an unreadable `--trust` path — all
+alike. The first version of `scripts/validate-seal.sh` treated any non-zero exit as
+"invalid", which meant `negative-truncated.pdf` "passed" on a parse error without pyHanko ever
+reading its signature, and a mistyped trust path would have satisfied every negative
+expectation at once. Outcomes are now matched against the printed verdict, and the truncation
+fixture is labelled for what it actually demonstrates.
 
 **A trailing zero byte in a signature is not padding.** The reserved `/Contents` field is
 fixed-size and zero-padded, and trimming trailing `0` characters to find the CMS corrupts
@@ -292,6 +348,13 @@ scripts/validate-seal.sh --regenerate
 ```
 
 The `validation` CI job runs the last command on every change under the backend or docker
-filters. When no timestamp authority answers, the B-T artifacts are skipped, the run emits a
-`::warning::` and a job-summary note, and the B-B result stands alone — a green run with no
-B-T evidence never looks like a B-T pass.
+filters. When no timestamp authority answers, the B-T rows stay in the manifest and the script
+reports them as `SKIPPED`, counts them in its own tally (`Checked N; M skipped`), and emits a
+`::warning::` plus a job-summary note. Listing them either way is the point: an artifact simply
+absent from the manifest would drop out of the tally silently, which is exactly how a run with
+no B-T evidence would come to look like a B-T pass. A run that is supposed to have egress can
+set `ESIGN_REQUIRE_ALL_ARTIFACTS=1` to turn a skip into a failure; CI deliberately does not,
+so a TSA outage is tolerated but never silent.
+
+An artifact that is missing *without* being recorded as skipped is a hard failure, so
+forgetting to regenerate the fixtures cannot pass either.

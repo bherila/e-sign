@@ -10,6 +10,7 @@ use DateTimeImmutable;
 use OpenSSLAsymmetricKey;
 use OpenSSLCertificate;
 use SensitiveParameter;
+use SensitiveParameterValue;
 
 /**
  * The configured service seal certificate and private key, already checked.
@@ -29,20 +30,21 @@ final class SealMaterial
     /**
      * @param  string  $keyId  Versioned identifier of this material.
      * @param  string  $certificatePem  PEM certificate of the service seal.
-     * @param  string  $privateKeyPem  PEM private key, decrypted.
+     * @param  SensitiveParameterValue  $privateKey  Decrypted PEM private key, wrapped.
      * @param  string  $chainPem  PEM bundle above the seal certificate, or ''.
      * @param  string  $digestAlgorithm  One of self::DIGEST_ALGORITHMS.
      * @param  string  $subject  Human-readable certificate subject, for evidence.
+     * @param  string  $certificateFingerprint  Lowercase hex SHA-256 over the certificate DER.
      * @param  DateTimeImmutable  $notAfter  Certificate expiry, for expiry monitoring.
      */
     private function __construct(
         public readonly string $keyId,
         private readonly string $certificatePem,
-        #[SensitiveParameter]
-        private readonly string $privateKeyPem,
+        private readonly SensitiveParameterValue $privateKey,
         private readonly string $chainPem,
         public readonly string $digestAlgorithm,
         public readonly string $subject,
+        public readonly string $certificateFingerprint,
         public readonly DateTimeImmutable $notAfter,
     ) {}
 
@@ -201,10 +203,11 @@ final class SealMaterial
         return new self(
             keyId: $keyId,
             certificatePem: $normalizedCertificate,
-            privateKeyPem: $decryptedKey,
+            privateKey: new SensitiveParameterValue($decryptedKey),
             chainPem: $chainPem,
             digestAlgorithm: $digestAlgorithm,
             subject: self::subjectOf($parsed),
+            certificateFingerprint: self::fingerprintOf($normalizedCertificate),
             notAfter: $notAfter,
         );
     }
@@ -222,7 +225,7 @@ final class SealMaterial
      */
     public function privateKeyPem(): string
     {
-        return $this->privateKeyPem;
+        return $this->privateKey->getValue();
     }
 
     public function chainPem(): string
@@ -231,7 +234,18 @@ final class SealMaterial
     }
 
     /**
-     * Keep the private key out of var_dump(), print_r(), and dd() output.
+     * Redact the material in var_dump() and print_r() output.
+     *
+     * This method is a courtesy, not the containment. `__debugInfo()` alone is
+     * not enough: Symfony's VarDumper — which is what `dd()` and `dump()` use,
+     * and what an exception page renders stack-frame locals with — *merges* this
+     * array with the reflected property set rather than replacing it, so it
+     * still descends into a raw string property. `serialize()` and
+     * `var_export()` ignore this method outright.
+     *
+     * The containment is the SensitiveParameterValue wrapper around the key:
+     * it redacts under VarDumper, var_export(), and var_dump(), and refuses to
+     * serialize at all. SealMaterialTest pins every one of those vectors.
      *
      * @return array<string, string>
      */
@@ -240,12 +254,41 @@ final class SealMaterial
         return [
             'keyId' => $this->keyId,
             'subject' => $this->subject,
+            'certificateFingerprint' => $this->certificateFingerprint,
             'digestAlgorithm' => $this->digestAlgorithm,
             'notAfter' => $this->notAfter->format(DATE_ATOM),
             'certificatePem' => '<'.strlen($this->certificatePem).' bytes>',
-            'privateKeyPem' => '***',
+            'privateKey' => '***',
             'chainPem' => $this->chainPem === '' ? '' : '<'.strlen($this->chainPem).' bytes>',
         ];
+    }
+
+    /**
+     * SHA-256 over the certificate DER, as a validator reports it.
+     *
+     * Lets the publication gate check that the artifact was sealed by the
+     * material the evidence record names, without re-parsing either side.
+     */
+    private static function fingerprintOf(string $certificatePem): string
+    {
+        $der = self::pemToDer($certificatePem);
+
+        return $der === '' ? '' : hash('sha256', $der);
+    }
+
+    /**
+     * The DER bytes of the first certificate in a PEM bundle, or ''.
+     */
+    public static function pemToDer(string $pem): string
+    {
+        $matches = [];
+        if (preg_match('/-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----/s', $pem, $matches) !== 1) {
+            return '';
+        }
+
+        $der = base64_decode((string) preg_replace('/\s+/', '', $matches[1]), true);
+
+        return $der === false ? '' : $der;
     }
 
     /**

@@ -81,9 +81,12 @@ final class TcLibPdfArtifactValidator implements ArtifactValidator
         }
 
         $signerSubject = '';
+        $signerFingerprint = '';
         $sound = false;
         try {
-            $signerSubject = $this->subjectOf((new SignedDataVerifier)->verify($der, $signedContent));
+            $signerCertificate = (new SignedDataVerifier)->verify($der, $signedContent);
+            $signerSubject = $this->subjectOf($signerCertificate);
+            $signerFingerprint = hash('sha256', $signerCertificate);
             $sound = true;
         } catch (SignException $e) {
             $failures[] = 'The CMS signature does not verify over the byte-ranged content: '.$e->getMessage();
@@ -100,6 +103,7 @@ final class TcLibPdfArtifactValidator implements ArtifactValidator
             hasSignatureTimestamp: $this->hasSignatureTimestamp($der),
             revisions: substr_count($pdf, '%%EOF'),
             signerSubject: $signerSubject,
+            signerFingerprint: $signerFingerprint,
             failures: $failures,
         );
     }

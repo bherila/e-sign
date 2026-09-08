@@ -15,6 +15,11 @@
 # check needs the European Commission DSS tool, which is out of scope for this
 # script (it is a Java runtime, and the repository's runtime is PHP only).
 #
+# Each artifact's required outcome is matched against pyHanko's stated verdict,
+# never against its exit status alone: pyHanko exits non-zero for an invalid
+# signature, for an unparsable file, and for an environment error alike, so an
+# exit-status test would let any of the three satisfy a negative expectation.
+#
 # Usage:
 #   scripts/validate-seal.sh                     # validate committed artifacts
 #   scripts/validate-seal.sh --regenerate        # reseal them first, then validate
@@ -97,6 +102,7 @@ fi
 
 failures=0
 checked=0
+skipped=0
 
 while IFS=$'\t' read -r file expectation trust note; do
     case "$file" in
@@ -105,8 +111,18 @@ while IFS=$'\t' read -r file expectation trust note; do
 
     path="$validation_dir/$file"
     if [ ! -f "$path" ]; then
-        log "MISSING  $file — listed in the manifest but not present"
-        failures=$((failures + 1))
+        # An artifact the fixture writer recorded as skipped (no timestamp
+        # authority answered) is reported and counted, not passed over. Anything
+        # else absent means the fixtures were not regenerated, which is a failure.
+        if [ -f "$validation_dir/b-t-skipped.txt" ] && grep -qF "$file:" "$validation_dir/b-t-skipped.txt"; then
+            log "SKIPPED  $file — no artifact was produced on the run that wrote these fixtures"
+            log "         $note"
+            log ''
+            skipped=$((skipped + 1))
+        else
+            log "MISSING  $file — listed in the manifest but not present"
+            failures=$((failures + 1))
+        fi
         continue
     fi
 
@@ -139,14 +155,41 @@ while IFS=$'\t' read -r file expectation trust note; do
 
     checked=$((checked + 1))
 
-    if [ "$expectation" = 'valid' ]; then
-        expected_status=0
-    else
-        expected_status=1
-    fi
+    # The verdict has to be matched in the output, not inferred from the exit
+    # status. pyHanko exits non-zero for an invalid signature, for a file it
+    # cannot parse, AND for an environment error such as an unreadable --trust
+    # file, so "non-zero" alone would let a broken invocation stand in for a
+    # signature verdict on every negative artifact.
+    case "$expectation" in
+        valid)
+            if [ "$status" -eq 0 ] && printf '%s' "$detail" | grep -q 'judged VALID'; then
+                met=1
+            else
+                met=0
+            fi
+            ;;
+        invalid)
+            if [ "$status" -ne 0 ] && printf '%s' "$detail" | grep -q 'judged INVALID'; then
+                met=1
+            else
+                met=0
+            fi
+            ;;
+        unreadable)
+            if [ "$status" -ne 0 ] && printf '%s' "$detail" | grep -q 'Failed to read PDF file'; then
+                met=1
+            else
+                met=0
+            fi
+            ;;
+        *)
+            log "FAIL     $file — unknown expectation '$expectation'"
+            failures=$((failures + 1))
+            continue
+            ;;
+    esac
 
-    if [ "$status" -eq "$expected_status" ] \
-        || { [ "$expectation" = 'invalid' ] && [ "$status" -ne 0 ]; }; then
+    if [ "$met" -eq 1 ]; then
         verdict='OK      '
     else
         verdict='FAIL    '
@@ -160,11 +203,21 @@ while IFS=$'\t' read -r file expectation trust note; do
     log ''
 done < "$manifest"
 
-log "Checked $checked artifact(s); $failures did not reach the required outcome."
+log "Checked $checked artifact(s); $skipped skipped; $failures did not reach the required outcome."
 
 if [ "$failures" -ne 0 ]; then
     echo "Validation failed. Full output in $output_file" >&2
     exit 1
 fi
 
-echo "Validation passed. Full output in $output_file"
+if [ "$skipped" -ne 0 ]; then
+    # Green, but say plainly what was not established. ESIGN_REQUIRE_ALL_ARTIFACTS=1
+    # turns a skip into a failure, for a run that is supposed to have egress.
+    echo "::warning title=Seal validation incomplete::$skipped artifact(s) were not produced and so were not validated."
+    if [ "${ESIGN_REQUIRE_ALL_ARTIFACTS:-0}" = '1' ]; then
+        echo "ESIGN_REQUIRE_ALL_ARTIFACTS=1 and $skipped artifact(s) were skipped." >&2
+        exit 1
+    fi
+fi
+
+echo "Validation passed ($checked checked, $skipped skipped). Full output in $output_file"

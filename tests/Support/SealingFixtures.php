@@ -187,11 +187,41 @@ final class SealingFixtures
     }
 
     /**
-     * Drop the tail of the file, so the /ByteRange over-claims.
+     * Drop the tail of the file.
+     *
+     * The result is not a readable PDF at all — the trailer and `%%EOF` go with
+     * the tail — so a validator refuses it before it reaches the signature.
+     * That is a real refusal and worth pinning, but it is NOT evidence about
+     * the byte-range rule; use overclaimByteRange() for that.
      */
     public static function truncate(string $pdf, int $bytes = 512): string
     {
         return substr($pdf, 0, max(1, strlen($pdf) - $bytes));
+    }
+
+    /**
+     * Inflate the /ByteRange's final length so it claims past the end of file.
+     *
+     * The complement of truncate(): the document still parses, so a validator
+     * opens it, reads the signature, and refuses it because the range does not
+     * describe the file. Same file length — only digits inside the array
+     * change, and the engine reserves padding after it — so no offset moves.
+     */
+    public static function overclaimByteRange(string $pdf, int $extraBytes = 5000): string
+    {
+        $matches = [];
+        if (preg_match('/\/ByteRange\[0 (\d+) (\d+) (\d+)\]/', $pdf, $matches) !== 1) {
+            throw new RuntimeException('The artifact has no /ByteRange array to inflate.');
+        }
+
+        $inflated = str_pad((string) ((int) $matches[3] + $extraBytes), strlen($matches[3]), '0', STR_PAD_LEFT);
+        if (strlen($inflated) !== strlen($matches[3])) {
+            throw new RuntimeException('The inflated /ByteRange length changed the file length.');
+        }
+
+        $replacement = '/ByteRange[0 '.$matches[1].' '.$matches[2].' '.$inflated.']';
+
+        return substr_replace($pdf, $replacement, (int) strpos($pdf, $matches[0]), strlen($matches[0]));
     }
 
     /**

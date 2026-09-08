@@ -1,12 +1,15 @@
 # Artifacts for scripts/validate-seal.sh. Regenerate with
 #   ESIGN_WRITE_VALIDATION_FIXTURES=1 php artisan test --filter=ValidationFixturesTest
 # Columns: file<TAB>expectation<TAB>trust-mode<TAB>note
-#   expectation: valid | invalid  (pyHanko exit status 0 | non-zero)
+#   expectation: valid       pyHanko opens the file and judges the signature VALID
+#                invalid     pyHanko opens the file and judges the signature INVALID
+#                unreadable  pyHanko refuses the file before reaching the signature
 #   trust-mode:  fixture-only          --trust-replace --trust root.test.crt
 #                fixture-plus-system   --trust root.test.crt, OS trust kept
 sealed-b-b.pdf	valid	fixture-only	PAdES B-B, sealed by the fixture leaf under the fixture root.
 negative-modified-content.pdf	invalid	fixture-only	Page geometry changed inside the signed byte range, same file length.
-negative-truncated.pdf	invalid	fixture-only	Tail removed, so the /ByteRange over-claims the file.
+negative-byte-range-overclaim.pdf	invalid	fixture-only	The /ByteRange claims past the end of a file that still parses, so the coverage rule is what refuses it.
+negative-truncated.pdf	unreadable	fixture-only	Tail removed with the trailer, so the file cannot be opened at all.
 negative-incremental-update.pdf	invalid	fixture-only	An unexpected revision appended, redefining the page object.
 negative-forged-cms.pdf	invalid	fixture-only	The CMS of another sealed document spliced into /Contents.
 negative-untrusted-signer.pdf	invalid	fixture-only	Cryptographically sound but sealed with a key outside the trusted root.

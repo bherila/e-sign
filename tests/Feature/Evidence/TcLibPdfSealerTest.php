@@ -156,6 +156,55 @@ final class TcLibPdfSealerTest extends TestCase
         $this->assertInstanceOf(PdfSealer::class, $this->app->make(PdfSealer::class));
     }
 
+    public function test_it_refuses_an_artifact_signed_by_material_other_than_the_configured_one(): void
+    {
+        // The report reaches the requested level but names a different signer
+        // certificate. Publishing it would attribute the artifact to a key id
+        // that did not seal it, so the evidence record would be wrong even
+        // though the signature is sound.
+        $wrongSigner = new class implements ArtifactValidator
+        {
+            public function validate(string $pdf): ValidationReport
+            {
+                return new ValidationReport(
+                    signed: true,
+                    subFilter: 'ETSI.CAdES.detached',
+                    digestAlgorithm: 'sha256',
+                    coversWholeFile: true,
+                    cryptographicallySound: true,
+                    hasSignatureTimestamp: false,
+                    revisions: 1,
+                    signerSubject: '/CN=someone else',
+                    signerFingerprint: str_repeat('a', 64),
+                    failures: [],
+                );
+            }
+        };
+
+        $sealer = new TcLibPdfSealer(
+            material: static fn () => SealingFixtures::material(),
+            timestampAuthority: new HttpTimestampAuthority(''),
+            validator: $wrongSigner,
+        );
+
+        $this->expectException(SealFailedException::class);
+        $this->expectExceptionMessageMatches('/signed by a certificate other than the configured seal material/');
+
+        $sealer->seal(SealingFixtures::request(SealingFixtures::syntheticPdf()));
+    }
+
+    public function test_the_positive_artifact_reports_the_configured_certificate(): void
+    {
+        $material = SealingFixtures::material();
+
+        $artifact = SealingFixtures::sealer($material)
+            ->seal(SealingFixtures::request(SealingFixtures::syntheticPdf()));
+
+        $report = (new TcLibPdfArtifactValidator)->validate($artifact->pdf);
+
+        $this->assertSame($material->certificateFingerprint, $report->signerFingerprint);
+    }
+
     public function test_it_refuses_to_return_an_artifact_that_does_not_reach_the_requested_level(): void
     {
         // A validator that reports an unsigned artifact stands in for the engine
