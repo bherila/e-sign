@@ -15,8 +15,9 @@ use Illuminate\Support\Facades\Schema;
  * snapshots, so a later edit to the template or the document cannot change what a signer
  * already reviewed (docs/HANDOFF.md section 6; docs/ARCHITECTURE.md invariants 2 and 4).
  * `source_template_version_id` records provenance only and deliberately carries no foreign
- * key: the template tables land in their own change, and an envelope must survive the
- * deletion of the version it came from.
+ * key: an envelope must survive the deletion of the version it came from, and it is a
+ * public ULID rather than a row id because that is the identifier
+ * App\Domain\Preparation\Templates\Models\TemplateVersion::snapshotForEnvelope() publishes.
  *
  * `state` and `signing_mode` and `assurance_level` are plain strings rather than native
  * ENUMs so the column reads identically on SQLite, MySQL 8, and MariaDB
@@ -42,8 +43,11 @@ return new class extends Migration
             $table->foreignId('workspace_id')->constrained('workspaces')->restrictOnDelete();
             $table->string('title');
 
-            // Provenance only. No FK: see the class docblock.
-            $table->unsignedBigInteger('source_template_version_id')->nullable();
+            // Provenance only, and the *public* id of the template version rather than
+            // its row id: that is what TemplateVersion::snapshotForEnvelope() exposes, and
+            // it is the identifier that appears in API payloads. No FK: see the class
+            // docblock.
+            $table->ulid('source_template_version_id')->nullable();
 
             // What is being signed, and proof of which bytes those are.
             $table->foreignId('document_revision_id')->constrained('document_revisions')->restrictOnDelete();

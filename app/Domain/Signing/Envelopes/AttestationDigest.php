@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Signing\Envelopes;
 
 use App\Domain\Signing\Fields\CanonicalValue;
+use App\Domain\Signing\Fields\ClientEvidence;
 
 /**
  * The digest that identifies one acceptance and links it to the one before it.
@@ -22,7 +23,11 @@ use App\Domain\Signing\Fields\CanonicalValue;
  * deliverable.
  *
  * `accepted_at` is formatted to whole seconds in UTC, matching what the column stores, so
- * the digest of a row can be recomputed from the row.
+ * the digest of a row can be recomputed from the row. The client evidence is put back
+ * through {@see ClientEvidence::minimize()} first, which is idempotent and emits the
+ * allowlist's own key order: a MySQL `JSON` column does not preserve object key order, so
+ * hashing the array as it comes back out of storage would give a different digest on MySQL
+ * than on SQLite. The templates module records the same trap for its field schema.
  */
 final class AttestationDigest
 {
@@ -58,7 +63,7 @@ final class AttestationDigest
             'session_ref' => $sessionRef,
             'accepted_at' => $acceptedAt,
             'verification_method' => $verificationMethod->value,
-            'client_evidence' => $clientEvidence,
+            'client_evidence' => ClientEvidence::minimize($clientEvidence),
             'prev' => $previousDigest,
         ]));
     }

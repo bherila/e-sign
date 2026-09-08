@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Signing;
 
+use App\Domain\Delivery\Webhooks\WebhookEventName;
 use App\Domain\Identity\Audit\AuditEvent;
 use App\Domain\Signing\Contracts\EnvelopeEventSink;
 use App\Domain\Signing\Envelopes\AuditEnvelopeEventSink;
@@ -154,6 +155,25 @@ class EnvelopeEventSinkTest extends TestCase
 
         $this->assertSame(EnvelopeState::Sent, $envelope->refresh()->state);
         $this->assertSame(0, AuditEvent::query()->count());
+    }
+
+    /**
+     * The other side of the seam.
+     *
+     * The webhook outbox refuses an event name it does not recognise rather than recording
+     * one no receiver handles, so every name this module publishes has to be one the outbox
+     * would accept — otherwise wiring the two together (issue #29) fails at runtime on the
+     * first decline. Asserted here rather than assumed, and without either module depending
+     * on the other at run time.
+     */
+    public function test_every_event_name_is_one_the_webhook_outbox_would_accept(): void
+    {
+        foreach (EnvelopeEvent::cases() as $event) {
+            $this->assertTrue(
+                WebhookEventName::isKnown($event->value),
+                $event->value.' would be refused by the webhook outbox.',
+            );
+        }
     }
 
     public function test_every_declared_event_name_is_either_a_profile_name_or_namespaced(): void

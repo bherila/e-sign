@@ -18,10 +18,11 @@ use App\Domain\Signing\Exceptions\InvalidEnvelopeSnapshot;
  * copies the selected version into the envelope. Later template changes never mutate
  * existing requests."
  *
- * It is built from a plain array on purpose. The templates work (issue #22) exposes
- * `TemplateVersion::snapshotForEnvelope()`, and the two modules meet at this array shape
- * rather than at each other's classes, so neither has to be merged before the other can be
- * written or tested. The accepted keys are:
+ * It is built from a plain array on purpose. The two modules that produce one meet this
+ * array shape rather than each other's classes, so neither has to know the other's types.
+ * {@see fromTemplateVersion()} maps `TemplateVersion::snapshotForEnvelope()` onto it; the
+ * key names differ in two places and translating them here, once, is the whole reason the
+ * boundary is an array. The accepted keys are:
  *
  * | Key | Required | Notes |
  * |---|---|---|
@@ -33,7 +34,7 @@ use App\Domain\Signing\Exceptions\InvalidEnvelopeSnapshot;
  * | `assurance_level` | no, default `pades-b-b` | `pades-b-b` or `pades-b-t` |
  * | `signing_mode` | no, default `sequential` | `sequential` or `parallel` |
  * | `render_settings` | no, default `[]` | snapshotted rendering settings |
- * | `source_template_version_id` | no | provenance only; no foreign key |
+ * | `source_template_version_id` | no | the template version's **public** ULID; provenance only, no foreign key |
  * | `expiration_hours` | no | expiry is computed from this at send, never before |
  *
  * `assurance_level` uses {@see AssuranceLevel}, the Evidence module's enum, rather than a
@@ -59,7 +60,7 @@ final readonly class EnvelopeSourceSnapshot
         public AssuranceLevel $assuranceLevel = AssuranceLevel::PadesBB,
         public SigningMode $signingMode = SigningMode::Sequential,
         public array $renderSettings = [],
-        public ?int $sourceTemplateVersionId = null,
+        public ?string $sourceTemplateVersionId = null,
         public ?int $expirationHours = self::DEFAULT_EXPIRATION_HOURS,
     ) {}
 
@@ -117,9 +118,42 @@ final readonly class EnvelopeSourceSnapshot
             assuranceLevel: self::assuranceLevel($snapshot),
             signingMode: self::signingMode($snapshot),
             renderSettings: self::renderSettings($snapshot),
-            sourceTemplateVersionId: self::nullableId($snapshot, 'source_template_version_id'),
+            sourceTemplateVersionId: self::nullablePublicId($snapshot, 'source_template_version_id'),
             expirationHours: self::expirationHours($snapshot),
         );
+    }
+
+    /**
+     * Map a published template version's snapshot onto this one.
+     *
+     * `TemplateVersion::snapshotForEnvelope()` names the same facts differently — its
+     * `document_revision_sha256` is our `document_sha256`, its `template_version_id` is our
+     * `source_template_version_id` — and carries several more for display that an envelope
+     * has no column for. Translating in this module rather than asking the templates module
+     * to emit our names keeps the dependency pointing one way: Signing knows what a template
+     * snapshot looks like, and Preparation knows nothing about envelopes.
+     *
+     * It also carries no title, no signing mode, no assurance level, and no expiry, because
+     * none of those is a property of the template — they are decisions made when the
+     * envelope is created. `$overrides` supplies them, and defaults the title to the
+     * template's name.
+     *
+     * @param  array<string, mixed>  $templateSnapshot  From `TemplateVersion::snapshotForEnvelope()`.
+     * @param  array<string, mixed>  $overrides  Any key this class accepts; wins over the snapshot.
+     *
+     * @throws InvalidEnvelopeSnapshot
+     */
+    public static function fromTemplateVersion(array $templateSnapshot, array $overrides = []): self
+    {
+        return self::fromArray(array_replace([
+            'title' => $templateSnapshot['template_name'] ?? null,
+            'source_template_version_id' => $templateSnapshot['template_version_id'] ?? null,
+            'document_revision_id' => $templateSnapshot['document_revision_id'] ?? null,
+            'document_sha256' => $templateSnapshot['document_revision_sha256'] ?? null,
+            'field_schema' => $templateSnapshot['field_schema'] ?? null,
+            'consent_policy_version' => $templateSnapshot['consent_policy_version'] ?? null,
+            'render_settings' => $templateSnapshot['render_settings'] ?? [],
+        ], $overrides));
     }
 
     /** The digest of the canonical form of the copied schema. */
@@ -227,16 +261,16 @@ final readonly class EnvelopeSourceSnapshot
     /**
      * @param  array<string, mixed>  $snapshot
      */
-    private static function nullableId(array $snapshot, string $key): ?int
+    private static function nullablePublicId(array $snapshot, string $key): ?string
     {
         $value = $snapshot[$key] ?? null;
 
-        if ($value === null) {
+        if ($value === null || $value === '') {
             return null;
         }
 
-        if (! is_int($value) || $value < 1) {
-            throw InvalidEnvelopeSnapshot::invalidProperty($key, 'expected a positive integer id or null.');
+        if (! is_string($value) || mb_strlen($value) > 64) {
+            throw InvalidEnvelopeSnapshot::invalidProperty($key, 'expected a public identifier string or null.');
         }
 
         return $value;

@@ -45,7 +45,7 @@ use RuntimeException;
  * @property string $public_id
  * @property int $workspace_id
  * @property string $title
- * @property int|null $source_template_version_id
+ * @property string|null $source_template_version_id
  * @property int $document_revision_id
  * @property string $document_sha256
  * @property array<string, mixed> $field_schema
