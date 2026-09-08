@@ -28,6 +28,7 @@ gating the rest by touched path:
 | `test` | frontend or backend changed | PHP 8.4 **and** 8.5. Frontend: `tsc --noEmit`, `eslint`, `jest`. Backend: `pint --parallel --test`, then `composer test` (`artisan test --parallel`, the `Unit`, `Feature` and `EndToEnd` suites on in-memory SQLite). |
 | `database` | backend changed | `php artisan migrate --force` and the feature suite against disposable **MySQL 8.4**, **MariaDB 11.4**, and **MariaDB 10.6** service containers, PHP 8.5. |
 | `licenses` | dependency manifests changed | Production-only installs, `composer licenses` + `pnpm licenses`, checked against an allowlist; builds and uploads an SBOM. Not a vulnerability check. |
+| `audit` | dependency manifests changed, **and weekly on a schedule** | `composer audit` + `pnpm audit`, checked against `.audit-allowlist.json` by `scripts/check-audit.php`. Scheduled as well as diff-gated, because an advisory database gains entries after a merge rather than when a lock file changes. |
 | `image` | backend, frontend, or docker changed | Builds the production image and smoke-tests the **web** role (`/up`, then `esign-healthcheck`) and **role dispatch** (`artisan`, `worker --stop-when-empty`), with `APP_ENV=production APP_DEBUG=false`. |
 | `validation` | backend or docker changed | PHP 8.4, installs pyHanko 0.37 + `pyhanko-cli`, runs `scripts/validate-seal.sh --regenerate` over every committed artifact against `tests/Fixtures/validation/manifest.tsv`. Uploads the validator output. |
 | `result` | always | Aggregating gate; fails if any of the above failed or was cancelled. |
@@ -336,7 +337,7 @@ Ordered by what a first production use would most want closed.
 | DSS profile-conformance check not run | 2 | [#7](https://github.com/bherila/e-sign/issues/7) |
 | No aggregate decompression budget or xref-entry cap in preflight | 3 | new — [`review-2026-09.md`](review-2026-09.md) U-1, U-2 |
 | The hazard scan fails open past depth 32, and on a null-resolving xref entry | 3 | new — [`review-2026-09.md`](review-2026-09.md) U-3, U-4 |
-| **No `composer audit` / `pnpm audit` in CI, and no static analysis beyond formatting and `tsc`** | all | new — [`review-2026-09.md`](review-2026-09.md) X-13 |
+| **No static analysis beyond formatting and `tsc`** (the `composer audit` / `pnpm audit` half of [`review-2026-09.md`](review-2026-09.md) X-13 landed as the `audit` job) | all | new — [`review-2026-09.md`](review-2026-09.md) X-13 |
 | Nothing in `app/` dispatches `FinalizeEnvelope`: an envelope that reaches `finalizing` waits for something to start the work, and in `tests/EndToEnd/` the harness plays that part | 6, 11 | new — found by [#36](https://github.com/bherila/e-sign/issues/36) |
 | `publish()` does not re-check object presence before committing | 6 | new — [`review-2026-09.md`](review-2026-09.md) B-2 |
 | `updateDraft()` races `send()` without a lock | 5 | [#33](https://github.com/bherila/e-sign/issues/33) |
