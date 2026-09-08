@@ -634,6 +634,35 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Finalization (Stage 3, issue #94)
+    |--------------------------------------------------------------------------
+    |
+    | Finalization is started by the last acceptance
+    | (App\Domain\Evidence\Finalization\FinalizationTrigger), which queues
+    | FinalizeEnvelope after the transition commits. This key belongs to the
+    | recovery pass behind it, `esign:finalization:resume`, scheduled every five
+    | minutes in routes/console.php, and to the `finalization_backlog` readiness
+    | probe, which counts exactly the set that command would re-dispatch.
+    |
+    | How long an envelope may sit in `finalizing` with no worker on it before
+    | the sweep queues it again. It is a floor on the wait, not a timeout: a run
+    | that started inside the window is a worker still sealing, and sealing a
+    | large document with a timestamp round trip is legitimately slow. Ten
+    | minutes is comfortably longer than any observed attempt and short enough
+    | that a lost job costs a signer minutes rather than a day.
+    |
+    | Raising it delays recovery; lowering it below the slowest real sealing time
+    | starts allocating competing generations, which is safe (the publishing
+    | compare-and-swap lets exactly one attempt publish) but wasteful.
+    |
+    */
+
+    'finalization' => [
+        'resume_after_minutes' => (int) env('ESIGN_FINALIZATION_RESUME_AFTER_MINUTES', 10),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Retention, legal hold, and deletion (Stage 5, issue #40)
     |--------------------------------------------------------------------------
     |
