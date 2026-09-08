@@ -21,6 +21,7 @@ jobs:
     outputs:
       frontend: ${{ steps.filter.outputs.frontend }}
       backend: ${{ steps.filter.outputs.backend }}
+      docker: ${{ steps.filter.outputs.docker }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -58,6 +59,10 @@ jobs:
               - 'routes/**'
               - 'tests/**'
               - '.github/workflows/**'
+            docker:
+              - '.docker/**'
+              - '.dockerignore'
+              - 'docker-compose.yml'
 
   test:
     name: Changed-area checks (PHP ${{ matrix.php }})
@@ -131,9 +136,43 @@ jobs:
           ./vendor/bin/pint --test
           composer test
 
+  image:
+    name: Production image builds
+    needs: changes
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true' || needs.changes.outputs.docker == 'true'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v3
+      - name: Build production target
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: .docker/Dockerfile
+          target: production
+          push: false
+          load: true
+          tags: bwh-esign:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test the web role
+        run: |
+          docker run -d --name esign-smoke -p 8080:8080 \
+            -e APP_KEY="base64:$(openssl rand -base64 32)" -e APP_ENV=production -e APP_DEBUG=false \
+            -e APP_URL=http://localhost:8080 -e DB_CONNECTION=sqlite -e DB_DATABASE=/tmp/esign.sqlite \
+            -e SESSION_DRIVER=file -e CACHE_STORE=file -e QUEUE_CONNECTION=sync -e LOG_CHANNEL=stderr \
+            bwh-esign:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/up >/dev/null; then echo "up after ${i}s"; exit 0; fi
+            sleep 1
+          done
+          docker logs esign-smoke
+          exit 1
+
   result:
     name: CI result
-    needs: [changes, test]
+    needs: [changes, test, image]
     if: always()
     runs-on: ubuntu-24.04-arm
     steps:
@@ -143,6 +182,9 @@ jobs:
             exit 1
           fi
           if [[ "${{ needs.test.result }}" == "failure" || "${{ needs.test.result }}" == "cancelled" ]]; then
+            exit 1
+          fi
+          if [[ "${{ needs.image.result }}" == "failure" || "${{ needs.image.result }}" == "cancelled" ]]; then
             exit 1
           fi
           echo "Required checks passed or no code paths changed."

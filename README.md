@@ -75,7 +75,8 @@ invite, sign, seal, download, validate, deliver a verified webhook, recover from
 interruption):
 
 - **Docker**: one image in web, worker, and scheduler roles behind an existing reverse proxy;
-  signing keys mounted only into the worker role.
+  signing keys mounted only into the worker role. See [DOCKER.md](DOCKER.md); the consumer's
+  compose stack has an `esign` profile that runs this image beside it.
 - **cPanel / shared hosting**: prebuilt assets, `public/` as document root, cron-driven bounded
   queue work with a database lease. `.github/workflows/deploy.yml` is the rsync path and is off
   until `DEPLOY_ENABLED` is set. Keys, `.env`, and private storage stay outside the synced tree.
