@@ -132,3 +132,12 @@ server {
 No Node, Python, Java, Chromium, or Redis at runtime (PHP-only baseline, `docs/HANDOFF.md` §13).
 No signing keys in any layer (`.dockerignore` excludes `*.pem`, `*.key`, `*.p12`, `*.pfx`, `.env`).
 No `storage/app` contents: documents live in a volume or an S3-compatible disk.
+
+## The other deployment profile
+
+Not every consumer runs containers. [docs/operations/cpanel.md](docs/operations/cpanel.md) is the shared-hosting
+counterpart to this document: a `tar.gz` release bundle instead of an image, cron-driven bounded
+queue work instead of a persistent `esign-worker` container, and `esign:doctor` instead of a
+`HEALTHCHECK`. It also documents a real limitation Docker's `esign-worker` isolation exists to
+avoid: on shared hosting, the web process and the queue worker are the same OS user, so the
+signing key cannot be isolated from the web-facing PHP process the way it is here.

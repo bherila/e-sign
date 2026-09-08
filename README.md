@@ -98,6 +98,9 @@ interruption):
 - **cPanel / shared hosting**: prebuilt assets, `public/` as document root, cron-driven bounded
   queue work with a database lease. `.github/workflows/deploy.yml` is the rsync path and is off
   until `DEPLOY_ENABLED` is set. Keys, `.env`, and private storage stay outside the synced tree.
+  See [docs/operations/cpanel.md](docs/operations/cpanel.md) for the release bundle
+  (`scripts/build-release.sh`), install steps, `esign:doctor`, the crontab lines, and the
+  shared-account key-isolation limitation.
 
 ## Secrets
 
