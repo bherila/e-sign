@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Domain\Delivery\Health\Console\DoctorCommand;
 use App\Domain\Delivery\Health\Probes\DatabaseProbe;
 use App\Domain\Delivery\Health\Probes\MailBacklogProbe;
 use App\Domain\Delivery\Health\Probes\MailProbe;
@@ -33,5 +34,14 @@ class HealthServiceProvider extends ServiceProvider
                 $app->make(TsaProbe::class),
             ]);
         });
+    }
+
+    public function boot(): void
+    {
+        if ($this->app->runningInConsole()) {
+            $this->commands([
+                DoctorCommand::class,
+            ]);
+        }
     }
 }
