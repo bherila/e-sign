@@ -116,4 +116,29 @@ return [
         ),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Authentication mode (Stage 1, issues #12 and #13)
+    |--------------------------------------------------------------------------
+    |
+    | Which sign-in surface this deployment exposes. See
+    | App\Domain\Identity\Enums\AuthMode and docs/operations/bootstrap.md.
+    |
+    |   auto   Single sign-on when an OAuth client has been issued for this
+    |          application, standalone password login when it has not. The
+    |          default, because an unconfigured install has to be able to
+    |          start.
+    |   sso    Always single sign-on. A missing setting is then an outage
+    |          (503) rather than a silent fall back to a password form, which
+    |          is what a deployment that means to use a provider wants.
+    |   local  Always standalone password login, even where an OAuth client
+    |          is configured.
+    |
+    | Routes are registered per mode, so run `php artisan route:clear` after
+    | changing this on a deployment that caches routes.
+    |
+    */
+
+    'auth_mode' => env('ESIGN_AUTH_MODE', 'auto'),
+
 ];

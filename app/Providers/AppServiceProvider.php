@@ -2,10 +2,12 @@
 
 namespace App\Providers;
 
+use App\Domain\Identity\Auth\EsignUserPolicy;
 use App\Domain\Identity\Credentials\CurrentPrincipal;
 use App\Domain\Identity\Models\Workspace;
 use App\Domain\Identity\Policies\WorkspacePolicy;
 use App\Listeners\UpdateLastLoginDate;
+use BWH\Auth\Contracts\AuthUserPolicy;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Support\Facades\Event;
@@ -28,6 +30,13 @@ class AppServiceProvider extends ServiceProvider
         // long-lived worker can never serve one caller's request with the credential bound
         // by the previous one.
         $this->app->scoped(CurrentPrincipal::class);
+
+        // The single gate for "may this account complete a login". Bound over the package's
+        // default so the SSO callback, the standalone password form, the passkey and
+        // two-factor paths, and the package's RequireActiveUser middleware all ask the same
+        // question and get the same answer. Registered here rather than in boot() because
+        // the package binds its default during registration.
+        $this->app->bind(AuthUserPolicy::class, EsignUserPolicy::class);
     }
 
     /**
