@@ -42,7 +42,13 @@ return new class extends Migration
             $table->timestamp('next_attempt_at')->nullable();
             $table->timestamps();
 
-            $table->unique(['outbox_event_id', 'webhook_endpoint_id', 'attempt']);
+            // Named explicitly: the conventional name Laravel would derive is 68
+            // characters, past MySQL's 64-character identifier limit, so the
+            // migration would pass on SQLite and fail on both production engines.
+            $table->unique(
+                ['outbox_event_id', 'webhook_endpoint_id', 'attempt'],
+                'webhook_deliveries_event_endpoint_attempt_unique',
+            );
             $table->index(['state', 'next_attempt_at']);
             $table->index(['webhook_endpoint_id', 'created_at']);
         });
