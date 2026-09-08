@@ -289,12 +289,13 @@ php artisan tinker --execute="
   application code.
 - Rotating `OAUTH_CLIENT_SECRET` does not affect existing bindings. Changing
   `OAUTH_PROVIDER` does — it is part of the binding tuple.
-- An SSO-only deployment should also set `routes.password_resets`, `routes.change_password`,
-  and `routes.two_factor` to false in `config/bherila-auth.php`. Nothing in SSO mode can use
-  a local password — there is no password login route, and the standalone controller refuses
-  any account that has an identity binding — but an endpoint that sets a credential nobody
-  needs is still an endpoint worth not having. Leave them on in standalone mode; that is
-  where they are the supporting flows for the login form.
+- `config/bherila-auth.php`'s `routes.password_resets`, `routes.change_password`,
+  `routes.two_factor`, and `routes.passkeys` follow the resolved auth mode automatically:
+  enabled in standalone mode, disabled in SSO mode. Nothing in SSO mode can use a local
+  password — there is no password login route, and the standalone controller refuses any
+  account that has an identity binding — but an endpoint that sets a credential nobody needs
+  is still an endpoint worth not having. Set `ESIGN_LOCAL_AUTH_ROUTES=on` or `=off` to
+  override the automatic choice; the default, `auto`, is what makes this automatic.
 - Authentication events (sign-in, sign-out, failures, lockouts) are in `auth_audit_log`.
   Provisioning and other application events are in the append-only `esign_audit_events`.
   Retention for the first is off by default; set `BHERILA_AUTH_AUDIT_RETENTION_DAYS` and

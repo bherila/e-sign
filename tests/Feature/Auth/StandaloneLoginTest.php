@@ -200,6 +200,24 @@ class StandaloneLoginTest extends TestCase
     }
 
     /**
+     * Standalone mode is where password reset, change-password, email two-factor, and
+     * passkeys are the login form's supporting flows, so `config/bherila-auth.php` leaves
+     * their route families registered here.
+     */
+    public function test_the_local_auth_route_families_are_registered(): void
+    {
+        // The exact status differs by route (some accept a guest, some require `auth`, some
+        // validate their payload); what all five must share is that a route exists to answer
+        // at all, i.e. never a 404.
+        $this->postJson('/api/auth/forgot-password', ['email' => 'user@example.test'])
+            ->assertStatus(200);
+        $this->post('/api/change-password')->assertStatus(401);
+        $this->postJson('/api/auth/two-factor/verify', [])->assertStatus(422);
+        $this->getJson('/api/passkeys')->assertStatus(401);
+        $this->postJson('/api/passkeys/auth/options', [])->assertStatus(200);
+    }
+
+    /**
      * @param  array<string, mixed>  $attributes
      */
     private function localUser(array $attributes = []): User
