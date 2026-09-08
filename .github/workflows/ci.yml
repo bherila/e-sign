@@ -5,6 +5,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    # Weekly, off the hour to avoid GitHub's top-of-hour scheduling crunch. Advisory databases
+    # gain new entries after a merge, not just when a lock file changes, so the `audit` job needs
+    # a trigger independent of the `changes` diff.
+    - cron: '17 5 * * 1'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -19,15 +24,21 @@ jobs:
     name: Detect changes
     runs-on: ubuntu-24.04-arm
     outputs:
-      frontend: ${{ steps.filter.outputs.frontend }}
-      backend: ${{ steps.filter.outputs.backend }}
-      docker: ${{ steps.filter.outputs.docker }}
-      licenses: ${{ steps.filter.outputs.licenses }}
+      # On a schedule run there is no PR/push diff to filter (dorny/paths-filter has no base to
+      # compare against), so every output defaults to 'true' instead: a scheduled run is a "run
+      # everything, including audit" full sweep rather than a partial one that could hide a
+      # newly published advisory behind a filter meant for source-code changes.
+      frontend: ${{ github.event_name == 'schedule' && 'true' || steps.filter.outputs.frontend }}
+      backend: ${{ github.event_name == 'schedule' && 'true' || steps.filter.outputs.backend }}
+      docker: ${{ github.event_name == 'schedule' && 'true' || steps.filter.outputs.docker }}
+      licenses: ${{ github.event_name == 'schedule' && 'true' || steps.filter.outputs.licenses }}
+      audit: ${{ github.event_name == 'schedule' && 'true' || steps.filter.outputs.licenses }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: dorny/paths-filter@v4
+        if: github.event_name != 'schedule'
         id: filter
         with:
           token: ''
@@ -72,6 +83,8 @@ jobs:
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
               - 'scripts/check-licenses.php'
+              - 'scripts/check-audit.php'
+              - '.audit-allowlist.json'
               - 'THIRD_PARTY_NOTICES.md'
               - '.github/workflows/**'
 
@@ -319,6 +332,83 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
+  audit:
+    name: Dependency vulnerability audit
+    needs: changes
+    if: needs.changes.outputs.audit == 'true'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: dom, curl, libxml, mbstring, zip
+          tools: composer
+          coverage: none
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install dependencies
+        timeout-minutes: 4
+        run: |
+          composer install --no-interaction --prefer-dist &
+          composer_pid=$!
+          pnpm install --frozen-lockfile &
+          pnpm_pid=$!
+          wait "$composer_pid"; composer_status=$?
+          wait "$pnpm_pid"; pnpm_status=$?
+          test "$composer_status" -eq 0 -a "$pnpm_status" -eq 0
+
+      - name: Run composer audit
+        # Never let composer's own exit code decide pass/fail: it fails on any advisory (which we
+        # want to route through the allowlist) and, with the default --abandoned=fail, on any
+        # abandoned package too (a maintenance signal, not a vulnerability, and out of scope
+        # here). `check-audit.php` is the sole verdict; `--locked` reads composer.lock directly so
+        # the report is not sensitive to what happens to be installed in vendor/.
+        run: |
+          mkdir -p build/audit
+          set +e
+          composer audit --format=json --locked --abandoned=report > build/audit/composer-audit.json
+          set -e
+          cat build/audit/composer-audit.json
+
+      - name: Run pnpm audit
+        # Same reasoning: pnpm's own exit code is ignored in favor of check-audit.php.
+        # --ignore-registry-errors keeps a registry hiccup from failing the build with a result
+        # that says nothing about our dependencies.
+        run: |
+          mkdir -p build/audit
+          set +e
+          pnpm audit --prod --audit-level=high --json --ignore-registry-errors > build/audit/pnpm-audit.json
+          set -e
+          cat build/audit/pnpm-audit.json
+
+      - name: Check the audit reports against the allowlist
+        run: |
+          php scripts/check-audit.php \
+            --composer=build/audit/composer-audit.json \
+            --pnpm=build/audit/pnpm-audit.json \
+            --allowlist=.audit-allowlist.json
+
+      - name: Upload the raw audit reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dependency-audit
+          path: build/audit/
+          retention-days: 14
+          if-no-files-found: error
+
   image:
     name: Production image builds
     needs: changes
@@ -438,7 +528,7 @@ jobs:
 
   result:
     name: CI result
-    needs: [changes, test, database, licenses, image, validation]
+    needs: [changes, test, database, licenses, audit, image, validation]
     if: always()
     runs-on: ubuntu-24.04-arm
     steps:
@@ -454,6 +544,9 @@ jobs:
             exit 1
           fi
           if [[ "${{ needs.licenses.result }}" == "failure" || "${{ needs.licenses.result }}" == "cancelled" ]]; then
+            exit 1
+          fi
+          if [[ "${{ needs.audit.result }}" == "failure" || "${{ needs.audit.result }}" == "cancelled" ]]; then
             exit 1
           fi
           if [[ "${{ needs.image.result }}" == "failure" || "${{ needs.image.result }}" == "cancelled" ]]; then
