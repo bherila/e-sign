@@ -20,6 +20,7 @@ use App\Domain\Evidence\Finalization\Artifacts\ArtifactStore;
 use App\Domain\Evidence\Finalization\CompletionReportDocument;
 use App\Domain\Evidence\Finalization\EnvelopeFinalizer;
 use App\Domain\Evidence\Finalization\ExecutedDocumentRenderer;
+use App\Domain\Evidence\Finalization\FinalizationTrigger;
 use App\Domain\Evidence\Finalization\Jobs\FinalizeEnvelope;
 use App\Domain\Identity\Credentials\IssuedServiceCredential;
 use App\Domain\Preparation\Contracts\PdfAssembler;
@@ -30,6 +31,7 @@ use App\Domain\Signing\Contracts\EnvelopeEventSink;
 use App\Domain\Signing\Envelopes\EnvelopeStateMachine;
 use App\Domain\Signing\Models\Envelope;
 use App\Domain\Signing\Sessions\SigningCookie;
+use Carbon\CarbonImmutable;
 use GuzzleHttp\Promise\PromiseInterface;
 use Illuminate\Foundation\Testing\TestCase;
 use Illuminate\Http\Client\ConnectionException;
@@ -80,10 +82,15 @@ use Tests\Support\SyntheticImages;
  * half of gate 12; {@see useDocumentsDisk()} exists so a test can prove the second half by
  * running the same flow onto a different backend.
  *
- * The one thing this harness does that no production code does is **dispatch
- * {@see FinalizeEnvelope}**. Nothing in `app/` dispatches it today: an envelope that reaches
- * `finalizing` waits for an operator or an integration to start the work. The consumer plays
- * that part here, and `tests/EndToEnd/README.md` records it as a gap rather than hiding it.
+ * **The finalization worker.** {@see FinalizeEnvelope} is faked on the queue alongside
+ * {@see DeliverWebhook}, for the same reason and nothing more: the real
+ * {@see FinalizationTrigger} queues it when the last recipient signs, and on the synchronous
+ * queue it would then seal the document *inside* the facade or guest request that caused it,
+ * which is not where a worker runs. Holding it puts the queue back between the two, and
+ * {@see runFinalizationWorker()} runs the job the trigger queued — it no longer creates one.
+ * This used to be the harness's own dispatch, standing in for wiring that did not exist
+ * (issue #94); the trigger is now real, and the harness asserts that it fired rather than
+ * compensating for it.
  *
  * All data is synthetic (AGENTS.md): `.test` and `.example.test` addresses that no resolver
  * answers, committed PDF fixtures, and the generated fixture seal key.
@@ -131,6 +138,7 @@ final class SyntheticConsumer
     {
         $consumer = new self($test);
 
+        $consumer->freezeTheClockOnAWholeSecond();
         $consumer->bootApplicationUnderTest();
         $consumer->bootConsumer();
 
@@ -433,19 +441,29 @@ final class SyntheticConsumer
     /* ================================================================== the worker side */
 
     /**
-     * Run the finalization job, which is what a queue worker does with it.
+     * Run the finalization job the application queued, which is what a worker does with it.
+     *
+     * The assertion first is the point of the method: nothing here dispatches the job any
+     * more, so if `FinalizationTrigger` stopped firing on the last acceptance — or an operator
+     * retry stopped re-dispatching — every workflow test fails here rather than quietly
+     * finalizing an envelope that production would have left in `finalizing` forever.
      *
      * @param  EnvelopeFinalizer|null  $finalizer  Bound for the duration of the run, so a test
      *                                             can interrupt a worker mid-publication.
      */
     public function runFinalizationWorker(string $envelopeId, ?EnvelopeFinalizer $finalizer = null): void
     {
+        Queue::assertPushed(
+            FinalizeEnvelope::class,
+            static fn (FinalizeEnvelope $job): bool => $job->envelopePublicId === $envelopeId,
+        );
+
         if ($finalizer !== null) {
             app()->instance(EnvelopeFinalizer::class, $finalizer);
         }
 
         try {
-            FinalizeEnvelope::dispatch($envelopeId);
+            (new FinalizeEnvelope($envelopeId))->handle(app(EnvelopeFinalizer::class));
         } finally {
             if ($finalizer !== null) {
                 app()->forgetInstance(EnvelopeFinalizer::class);
@@ -478,10 +496,18 @@ final class SyntheticConsumer
         );
     }
 
-    /** Put a visibly failed finalization back in the queue, as an operator would. */
+    /**
+     * Put a visibly failed finalization back in the queue, as an operator would.
+     *
+     * Both halves, because both are the operator's: `finalization_failed` is deliberately
+     * outside the `esign:finalization:resume` sweep and `retryFinalization()` publishes no
+     * event, so nothing in the application will queue this one. See {@see FinalizeEnvelope}.
+     */
     public function retryFinalization(string $envelopeId): void
     {
         app(EnvelopeStateMachine::class)->retryFinalization($this->envelope($envelopeId));
+
+        FinalizeEnvelope::dispatch($envelopeId);
     }
 
     /**
@@ -611,6 +637,34 @@ final class SyntheticConsumer
     /* ========================================================================= booting */
 
     /**
+     * One clock for the scenario, anchored to a whole second, moved only by `travel()`.
+     *
+     * Two decisions in this suite are made at second granularity and neither should be left
+     * to the wall clock:
+     *
+     * 1. **The consumer's out-of-order guard.** The profile envelope formats `created_at` to
+     *    whole seconds, and {@see ConsumerWebhookReceiver} refuses to apply an event older
+     *    than one it has already applied to the same signing request. `signing_request.created`
+     *    and `signing_request.sent` are recorded microseconds apart inside one request, so on
+     *    a slow engine a second can tick over between them — and a retried `created` is then
+     *    *legitimately* regressive and dropped. That is a fact about the clock, not about
+     *    retries, and it failed the MariaDB 10.6 CI job exactly once.
+     * 2. **What is due.** {@see drainWebhooks()} asks for `next_attempt_at <= now()`. Those
+     *    columns are second-precision `DATETIME`s, and MySQL 8 *rounds* a fractional value on
+     *    write while MariaDB *truncates* it — so a timestamp written half a second past the
+     *    boundary lands one second apart on the two engines, and a delivery can be due on one
+     *    and not on the other. Starting on a whole second removes the fraction entirely.
+     *
+     * `travelBack()` first: nothing in the framework clears a previous test's `setTestNow`,
+     * so the anchor is taken from the real clock rather than from whatever was left behind.
+     */
+    private function freezeTheClockOnAWholeSecond(): void
+    {
+        $this->test->travelBack();
+        $this->test->travelTo(CarbonImmutable::now()->startOfSecond());
+    }
+
+    /**
      * Put the application into the shape a deployment is in, with only external I/O faked.
      */
     private function bootApplicationUnderTest(): void
@@ -650,8 +704,8 @@ final class SyntheticConsumer
         // facade's percent conversion both read. `DocumentFactory` makes rows without it.
         $this->describePagesFrom(FirmaFacadeScenario::DOCUMENT_FIXTURE);
 
-        // Only the delivery job. Everything else stays on the synchronous queue.
-        Queue::fake([DeliverWebhook::class]);
+        // The two jobs a worker owns. Everything else stays on the synchronous queue.
+        Queue::fake([DeliverWebhook::class, FinalizeEnvelope::class]);
     }
 
     private function bootConsumer(): void

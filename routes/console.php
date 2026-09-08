@@ -3,6 +3,7 @@
 use App\Domain\Delivery\Events\Console\ExpireCommand;
 use App\Domain\Delivery\Events\Console\RemindCommand;
 use App\Domain\Delivery\Health\SchedulerHeartbeat;
+use App\Domain\Evidence\Finalization\Console\ResumeCommand;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -71,3 +72,28 @@ Schedule::command('esign:artifacts:verify')
     ->weeklyOn(0, '03:10')
     ->withoutOverlapping()
     ->name('artifacts:verify');
+
+/*
+ * The safety net under the finalization trigger (issue #94).
+ *
+ * `App\Domain\Evidence\Finalization\FinalizationTrigger` queues the work when the last
+ * recipient signs, and that is how every healthy finalization starts. This pass exists for
+ * the job that never ran: a worker killed before it picked the job up, a `jobs` table
+ * restored from a backup, a queue purged during an incident. Nothing further happens to an
+ * envelope in `finalizing`, so no later transition would ever notice.
+ *
+ * Every five minutes because the wait is a signer's: the agreement is executed and only the
+ * artifact is missing. The command itself only acts on envelopes that have been waiting
+ * longer than `esign.finalization.resume_after_minutes` (default 10), so a tick never
+ * interrupts a worker that is simply still sealing, and `finalization_failed` is left alone
+ * for the operator's explicit retry.
+ *
+ * `withoutOverlapping()` for the same reason as the passes above: a slow tick on the cPanel
+ * profile must not stack a second sweep queueing the same envelopes again. Re-dispatching is
+ * safe — the publishing compare-and-swap decides the race — but it would fill the queue with
+ * work that will decide to do nothing.
+ */
+Schedule::command(ResumeCommand::class)
+    ->everyFiveMinutes()
+    ->withoutOverlapping()
+    ->name('finalization:resume');

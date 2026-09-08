@@ -61,12 +61,15 @@ ESIGN_HEALTH_ALLOW_CIDRS=127.0.0.1/32,::1/128
 | `signing_material` | Certificate and private key paths are configured and readable, and the certificate expires more than `esign.health.cert_warn_days` (default 30) days out | Unset outside production, or the certificate expires within the warn window | Unset in production, unreadable, unparseable, or expired |
 | `tsa` | `ESIGN_TSA_URL` unset, or set and parses as `http`/`https` | — | Set but not a valid `http(s)` URL |
 | `artifact_integrity` | The last completed `esign:artifacts:verify` run passed and finished within `esign.retention.verification_warn_days` (default 8) | That run passed but is older than the window, or no verification has ever completed | The last completed run found a digest mismatch, a missing object, or a seal that no longer validates |
+| `finalization_backlog` | No envelope has been waiting to finalize longer than `esign.finalization.resume_after_minutes` (default 10) | At least one has | More than 10 have, one of them has waited an hour, or the tables are unreadable |
 
 The queue, scheduler, and certificate thresholds live in `config/esign.php` under the
 `health` key and are each overridable by an `ESIGN_HEALTH_*` environment variable. The mail
 backlog thresholds live under the `mail` key, overridable by `ESIGN_MAIL_BACKLOG_*` and
 `ESIGN_MAIL_FAILED_*`. The artifact-integrity window lives under `retention`, overridable by
-`ESIGN_RETENTION_VERIFICATION_WARN_DAYS`.
+`ESIGN_RETENTION_VERIFICATION_WARN_DAYS`. The finalization window lives under `finalization`,
+overridable by `ESIGN_FINALIZATION_RESUME_AFTER_MINUTES`; the count and the age at which that
+probe fails are fixed in the probe.
 
 **Overall status** is the worst of every probe: `ok` only if all probes are `ok`, `degraded`
 if the worst is a `warn`, `fail` if any probe `fail`s.
@@ -107,6 +110,18 @@ if the worst is a `warn`, `fail` if any probe `fail`s.
   broken on its first day. Artifacts belonging to an envelope retention soft-deleted are
   skipped: bytes removed on purpose are not an integrity failure
   (`docs/operations/retention.md`).
+- **`finalization_backlog` is not the `queue` probe.** `queue` measures work that is on the
+  queue and late. The failure this one exists to catch is the work that is not on the queue at
+  all: an envelope everybody signed, whose `FinalizeEnvelope` job was lost with a worker, a
+  restore, or a purge. The queue is then empty and green while a signer waits for an agreement
+  nothing will ever seal. It counts exactly the set `esign:finalization:resume` re-dispatches
+  every five minutes — both read the same reader, so an operator can never see a backlog the
+  sweep would not clear. Any waiting envelope warns rather than being ignored, because one
+  sweep should have cleared it: a backlog still there at the next scrape means the sweep is not
+  running or the work is not being picked up. Envelopes in `finalization_failed` are not
+  counted; that is a visible state with its own event, retried deliberately
+  (`docs/evidence/finalization.md`). The message carries a count and an age, never an envelope
+  id, a title, or a workspace.
 - **The scheduler heartbeat** is written by a task in `routes/console.php`
   (`Schedule::call(...)->everyMinute()`) that stores the current time under the cache key
   `App\Domain\Delivery\Health\SchedulerHeartbeat::CACHE_KEY`. If `scheduler` reports `fail`,

@@ -119,8 +119,11 @@ trip.
 ### Why two lines and not one, and what each does
 
 - **`schedule:run`** drives Laravel's scheduler: expiry (`signing:expire`, hourly), reminders
-  (`signing:remind`, daily), the API idempotency-key prune (hourly), and the scheduler
-  heartbeat itself (every minute — the fact `esign:doctor` and `/health/ready` both read).
+  (`signing:remind`, daily), the API idempotency-key prune (hourly), the finalization resume
+  sweep (`finalization:resume`, every five minutes — it matters most on this profile, where a
+  cron tick that never fires is the ordinary way a queued finalization is lost), and the
+  scheduler heartbeat itself (every minute — the fact `esign:doctor` and `/health/ready` both
+  read).
 - **`esign:queue:work-bounded`** is this profile's substitute for a persistent queue daemon
   (`docs/HANDOFF.md` section 13; `App\Domain\Delivery\Queue\Console\WorkBoundedCommand`). Cron
   fires it once a minute; it takes a database-backed lease (the `worker_leases` table) before
