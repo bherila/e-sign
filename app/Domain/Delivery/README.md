@@ -8,6 +8,9 @@ See docs/ARCHITECTURE.md for what this module owns. Keep cross-module calls behi
   administration commands. Contract and runbook: `docs/delivery/webhooks.md`.
 - `Mail/` — the transactional mail outbox: states, the enqueue and send path, provider
   feedback, and the operator commands. `docs/delivery/mail.md`.
+- `Events/` — the join between the signing state machine and the two outboxes: the
+  `signing_request.*` payload builder, the event sink, the mail fan-out, and the scheduled
+  reminder and expiry commands. `docs/delivery/envelope-events.md`.
 - `Health/` — readiness probes. `docs/operations/health.md`.
 
 ## Mail outbox
@@ -26,3 +29,14 @@ object, and the Mailables never learn what an envelope is.
 
 The SES feedback endpoint fails closed — see `Mail/Feedback/RejectingSnsMessageVerifier` for
 what implementing SNS signature verification involves and why it has not been hand-rolled.
+
+## Envelope events
+
+The rule that shapes `Events/`: the webhook row is written **inside** the transition's
+transaction and the mail is scheduled **after** it commits. An event and its state change are
+one atomic fact; a message is not, because mail has no undo.
+
+`SigningUrlMinter` throws when no link can be issued and `DownloadUrlMinter` returns null when
+there is nothing to link to. That asymmetry is deliberate: an invitation without a working
+link is a lie told to somebody with no support path, and a completion notice without one is
+still true.

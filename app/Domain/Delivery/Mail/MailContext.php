@@ -66,17 +66,31 @@ final class MailContext
     }
 
     /**
-     * Rehydrate from `outbound_mails.context`. Unknown keys are ignored rather than
-     * rejected: a row written by an older release must still render after a deploy that
-     * dropped a field, because the alternative is a queue of messages that can never be
-     * sent and never be explained.
+     * The salutation used when a stored row has no usable recipient name.
+     *
+     * Bland on purpose. See fromArray() for why substituting beats refusing.
+     */
+    public const UNNAMED_RECIPIENT = 'there';
+
+    /**
+     * Rehydrate from `outbound_mails.context`.
+     *
+     * Deliberately more forgiving than the constructor. Unknown keys are ignored and a
+     * missing recipient name becomes UNNAMED_RECIPIENT rather than an exception, because a
+     * row written by an older release must still render after a deploy that changed a
+     * field. The alternative is the failure this whole module exists to prevent: a message
+     * that can never be sent, burns every retry, and lands in `failed` for a reason no
+     * operator can act on.
+     *
+     * The constructor stays strict, so a *caller* still cannot enqueue a nameless message.
+     * This path is only ever reached by a row that was already accepted.
      *
      * @param  array<string, mixed>  $context
      */
     public static function fromArray(array $context): self
     {
         return new self(
-            recipientName: self::string($context, 'recipient_name') ?? '',
+            recipientName: self::string($context, 'recipient_name') ?? self::UNNAMED_RECIPIENT,
             senderName: self::string($context, 'sender_name') ?? '',
             agreementTitle: self::string($context, 'agreement_title') ?? '',
             actionUrl: self::string($context, 'action_url'),

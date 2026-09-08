@@ -393,6 +393,6 @@ input instead.
 
 | To | What |
 |---|---|
-| **#27 sender UI** | Nothing here mails an invitation. `InvitationIssuer::issue()` returns an absolute URL and `docs/delivery/mail.md`'s invitation Mailable takes an already-authorized URL string; wiring the two together belongs with the surface that presses "send". |
+| **#36 delivery binding** | Nothing here mails anything. `App\Domain\Delivery\Events\SigningUrlMinter` is the port the Delivery module calls for an invitation's one link, `PlaceholderSigningUrlMinter` refuses loudly until something is bound to it, and `InvitationIssuer::issue()` is what that binding will return — an absolute, credential-bearing URL with no query string. Binding the two is #36's, and deliberately not done here: it changes when live credentials start being minted, which is a decision the module that sends mail should make visibly. |
+| **Reminders** | `MailKind::Reminder` exists and `ReminderScheduler` schedules it. A reminder that re-sends the *same* link cannot work here, because the original invitation is one-shot: whoever wires #36 has to reissue on reminder, which revokes the earlier credential. That is correct behaviour and worth stating out loud, because it means an old reminder in a mailbox stops working. |
 | **#28 finalization** | The confirmation page promises a sealed copy once everyone signs. Producing, validating, storing, and delivering it is the finalizer's. |
-| **Reminders** | `MailKind::Reminder` exists and nothing schedules one. A reminder has to reissue the credential, because the original is one-shot; that decision belongs with the sender UI. |

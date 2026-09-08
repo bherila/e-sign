@@ -87,7 +87,10 @@ composer test
 2. When explicitly requested, use SQLite only: `php artisan migrate --database=sqlite --no-interaction`.
 3. For schema dumps: `php artisan schema:dump --database=sqlite`. Never use `--prune`.
 4. Tests must use SQLite in-memory. Do not configure tests to use any other driver.
-5. Production is MySQL 8 or MariaDB. Migrations must be valid on SQLite and both engines; never
+5. **Never edit a migration that has merged to `main`.** A deployed instance has already run it.
+   Ship a new migration that alters the schema, and make it valid on SQLite, MySQL, and MariaDB
+   (SQLite cannot `ALTER TABLE ADD CONSTRAINT`; rebuild the table there if needed).
+6. Production is MySQL 8 or MariaDB. Migrations must be valid on SQLite and both engines; never
    rely on an engine-specific feature without a CI test on the other engine. The only exception
    to rule 4 is the CI-only `database` job in `.github/workflows/ci.yml`, which runs
    `php artisan migrate --force` and the feature suite against disposable MySQL 8.4/MariaDB 11.4

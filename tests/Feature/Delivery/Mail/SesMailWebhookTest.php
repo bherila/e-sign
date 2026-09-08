@@ -167,6 +167,97 @@ class SesMailWebhookTest extends TestCase
         $this->assertSame($type, $event->event);
     }
 
+    public function test_an_event_is_stamped_with_its_own_time_not_the_send_time(): void
+    {
+        $this->withStubVerifier();
+
+        $mail = OutboundMail::factory()->sentToProvider('ses@mail.example.test')->create();
+
+        $envelope = $this->notification('Bounce', 'ses@mail.example.test');
+        $envelope['Message'] = json_encode([
+            'notificationType' => 'Bounce',
+            'mail' => [
+                'messageId' => 'ses@mail.example.test',
+                // When SES *sent* it. Identical on every notification about this message.
+                'timestamp' => '2026-09-08T09:00:00.000Z',
+            ],
+            'bounce' => [
+                'bounceType' => 'Permanent',
+                // When the bounce actually happened, an hour later.
+                'timestamp' => '2026-09-08T10:00:00.000Z',
+            ],
+        ]);
+
+        $this->postSns($envelope)->assertOk();
+
+        $mail->refresh();
+        $event = $mail->events()->where('source', MailEventSource::Ses->value)->sole();
+
+        // Using the send time would stamp state_changed_at backwards and break both the
+        // operator timeline and the 24-hour windows the backlog probe reads.
+        $this->assertSame('2026-09-08 10:00:00', $event->occurred_at?->utc()->toDateTimeString());
+        $this->assertSame('2026-09-08 10:00:00', $mail->state_changed_at->utc()->toDateTimeString());
+    }
+
+    public function test_the_send_time_is_the_fallback_when_the_event_carries_none(): void
+    {
+        $this->withStubVerifier();
+
+        OutboundMail::factory()->sentToProvider('ses@mail.example.test')->create();
+
+        $this->postSns($this->notification('Delivery', 'ses@mail.example.test'))->assertOk();
+
+        // A timestamp near the truth beats none.
+        $this->assertSame(
+            '2026-09-08 09:59:59',
+            OutboundMailEvent::query()->sole()->occurred_at?->utc()->toDateTimeString(),
+        );
+    }
+
+    public function test_the_envelope_keeps_the_fields_a_real_verifier_needs(): void
+    {
+        $seen = null;
+
+        $this->app->instance(SnsMessageVerifier::class, new class($seen) implements SnsMessageVerifier
+        {
+            public function __construct(public mixed &$seen) {}
+
+            public function verify(array $envelope): void
+            {
+                $this->seen = $envelope;
+            }
+        });
+
+        $envelope = $this->notification('Delivery', 'ses@mail.example.test');
+        $envelope['Token'] = 'synthetic-subscription-token';
+        $envelope['Subject'] = 'Amazon SES Email Event Notification';
+
+        $this->postSns($envelope)->assertOk();
+
+        // `Token` confirms a subscription and `Subject` enters the string-to-sign, so
+        // dropping either would make a genuine verifier fail the day SES is turned on.
+        $this->assertSame('synthetic-subscription-token', $seen['Token'] ?? null);
+        $this->assertSame('Amazon SES Email Event Notification', $seen['Subject'] ?? null);
+        $this->assertSame(self::TOPIC, $seen['TopicArn'] ?? null);
+        $this->assertArrayHasKey('Signature', $seen);
+        $this->assertArrayHasKey('SigningCertURL', $seen);
+    }
+
+    public function test_aws_being_unreachable_is_a_retryable_503_rather_than_a_refusal(): void
+    {
+        $this->withStubVerifier();
+        $this->withResolvedSnsHost(['203.0.113.10']);
+        Http::fake(['sns.us-east-1.amazonaws.com/*' => Http::response('', 503)]);
+
+        $envelope = $this->notification('Delivery', 'ses@mail.example.test');
+        $envelope['Type'] = 'SubscriptionConfirmation';
+        $envelope['SubscribeURL'] = 'https://sns.us-east-1.amazonaws.com/?Action=ConfirmSubscription';
+
+        // Not 422: the caller did nothing wrong, and SNS retries a 503, so a momentary
+        // blip does not silently leave the topic unsubscribed.
+        $this->postSns($envelope)->assertStatus(503)->assertJson(['status' => 'unconfirmed']);
+    }
+
     public function test_a_verified_notification_for_an_unknown_message_is_an_orphan(): void
     {
         $this->withStubVerifier();

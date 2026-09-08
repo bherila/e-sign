@@ -305,6 +305,27 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Signing lifecycle timing (Stage 4, issues #34 and #35)
+    |--------------------------------------------------------------------------
+    |
+    | Read by the scheduled commands in App\Domain\Delivery\Events. Both are
+    | measured from a fact on the row rather than from when the scheduler last
+    | ran, so an extra run of `esign:signing:remind` sends nothing extra. See
+    | docs/delivery/envelope-events.md.
+    |
+    */
+
+    'signing' => [
+        // Hours after an invitation was sent before the first reminder. Measured
+        // from `envelope_recipients.invited_at`.
+        'reminder_after_hours' => (int) env('ESIGN_SIGNING_REMINDER_AFTER_HOURS', 72),
+
+        // Minimum hours between two reminders to the same person.
+        'reminder_interval_hours' => (int) env('ESIGN_SIGNING_REMINDER_INTERVAL_HOURS', 24),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Authentication mode (Stage 1, issues #12 and #13)
     |--------------------------------------------------------------------------
     |

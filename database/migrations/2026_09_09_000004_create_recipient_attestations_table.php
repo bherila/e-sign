@@ -46,7 +46,10 @@ return new class extends Migration
 
             // The recipient session the assent was given in. Opaque to this module; the
             // guest access work (issue #25) owns what it means.
-            $table->string('session_ref', 191);
+            // Half of the idempotency key, and therefore compared byte-for-byte: two
+            // session references differing only in case are two sessions. See
+            // binaryCollation() below.
+            $table->string('session_ref', 191)->collation($this->binaryCollation());
 
             // Server time, never a client clock.
             $table->timestamp('accepted_at');
@@ -69,6 +72,29 @@ return new class extends Migration
             $table->unique('attestation_sha256');
             $table->index(['envelope_id', 'id']);
         });
+    }
+
+    /**
+     * The collation that makes a string column compare byte-for-byte, or null where the
+     * engine already does.
+     *
+     * The connection default is `utf8mb4_unicode_ci`, under which MySQL and MariaDB treat
+     * `notes` and `Notes` as the same value. SQLite's default is binary, so it treats them
+     * as two. Schema identifiers and session references are exact tokens, and a unique key
+     * over them that means different things on different engines is precisely the collation
+     * assumption docs/adr/0002-supported-databases.md rules out — here it would let one
+     * recipient's value overwrite another's, or two sessions collapse into one acceptance.
+     *
+     * Driver-conditional rather than a literal, because `utf8mb4_bin` is not a collation
+     * SQLite knows and Laravel's SQLite grammar emits the `collate` clause verbatim. The CI
+     * `database` job runs this migration on both engines, which is what
+     * docs/adr/0002-supported-databases.md asks of an engine-specific choice.
+     */
+    private function binaryCollation(): ?string
+    {
+        return in_array(Schema::getConnection()->getDriverName(), ['mysql', 'mariadb'], true)
+            ? 'utf8mb4_bin'
+            : null;
     }
 
     public function down(): void

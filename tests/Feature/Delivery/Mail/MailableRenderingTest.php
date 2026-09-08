@@ -7,6 +7,7 @@ namespace Tests\Feature\Delivery\Mail;
 use App\Domain\Delivery\Mail\MailContext;
 use App\Domain\Delivery\Mail\MailKind;
 use App\Mail\CompletedMail;
+use App\Mail\DeclinedMail;
 use App\Mail\InvitationMail;
 use App\Mail\OutboundMailable;
 use InvalidArgumentException;
@@ -70,10 +71,7 @@ class MailableRenderingTest extends TestCase
 
         // The framework's mail header links the brand name at APP_URL. That is a link to
         // the application root and carries nothing, so it is excluded rather than counted.
-        $links = array_values(array_filter(
-            $this->hrefsIn($rendered),
-            static fn (string $href): bool => rtrim($href, '/') !== rtrim((string) config('app.url'), '/'),
-        ));
+        $links = $this->foreignLinksIn($rendered);
 
         if ($url === null) {
             // A template with no link must have no link. Decline, cancellation, and
@@ -145,6 +143,88 @@ class MailableRenderingTest extends TestCase
         $this->assertSame([], $mailable->rawAttachments);
     }
 
+    /**
+     * @return array<string, array{MailKind}>
+     */
+    public static function kindsWithFreeText(): array
+    {
+        return [
+            'declined' => [MailKind::Declined],
+            'cancelled' => [MailKind::Cancelled],
+            'admin_failure' => [MailKind::AdminFailure],
+        ];
+    }
+
+    #[DataProvider('kindsWithFreeText')]
+    public function test_markdown_in_a_free_text_field_cannot_inject_a_link(MailKind $kind): void
+    {
+        // Blade escapes HTML, not Markdown, and these are Markdown mailables. A decline
+        // reason is typed by an external signer holding nothing but a signing link, and the
+        // notice goes to the sender — who has every reason to trust a link in a message
+        // from their own agreement service. See App\Mail\MailCopy.
+        $context = new MailContext(
+            recipientName: 'Blake Sender',
+            senderName: 'Example Holdings',
+            agreementTitle: 'Mutual Nondisclosure Agreement',
+            actorName: 'Avery Counterparty',
+            reason: "I declined.\n\n[Restore this agreement](https://evil.test/phish)",
+            failureSummary: "Finalization failed.\n\n[Retry now](https://evil.test/phish)",
+            reference: '[envelope](https://evil.test/phish)',
+        );
+
+        $rendered = $kind->mailable($context)->render();
+
+        $this->assertSame([], $this->foreignLinksIn($rendered));
+        // The text still reaches the reader; only its link syntax is inert.
+        $this->assertStringContainsString('Restore this agreement', $rendered);
+    }
+
+    #[DataProvider('kindsWithFreeText')]
+    public function test_markdown_in_a_name_or_title_cannot_inject_a_link(MailKind $kind): void
+    {
+        $context = new MailContext(
+            recipientName: '[Blake](https://evil.test/one)',
+            senderName: '[Example](https://evil.test/two)',
+            agreementTitle: '![NDA](https://evil.test/three)',
+            actorName: '[Avery][ref]',
+            reason: 'Fine.',
+            failureSummary: 'Failed.',
+            reference: 'envelope 01JQZX',
+        );
+
+        $this->assertSame([], $this->foreignLinksIn($kind->mailable($context)->render()));
+    }
+
+    public function test_a_bare_url_in_free_text_is_not_turned_into_a_link(): void
+    {
+        // Asserted rather than assumed: Laravel's mail Markdown environment loads only the
+        // CommonMark core and table extensions, with no autolink extension. If that ever
+        // changes, MailCopy has to grow a rule for bare URLs and this test says so.
+        $rendered = (new DeclinedMail(new MailContext(
+            recipientName: 'Blake Sender',
+            agreementTitle: 'Mutual Nondisclosure Agreement',
+            actorName: 'Avery Counterparty',
+            reason: 'See https://evil.test/bare and <https://evil.test/auto>.',
+        )))->render();
+
+        $this->assertSame([], $this->foreignLinksIn($rendered));
+    }
+
+    public function test_the_escaped_copy_never_reaches_the_subject_line(): void
+    {
+        // A subject is a header, never Markdown. Backslashes added for CommonMark's benefit
+        // would be read literally by every mail client.
+        $mailable = new InvitationMail(new MailContext(
+            recipientName: 'Avery Counterparty',
+            senderName: 'Smith_Jones & Co [Holdings]',
+            agreementTitle: 'Mutual NDA*',
+            actionUrl: SyntheticMailContext::SIGNING_URL,
+        ));
+
+        $this->assertStringContainsString('Smith_Jones & Co [Holdings]', $mailable->subjectLine());
+        $this->assertStringNotContainsString('\\', $mailable->subjectLine());
+    }
+
     public function test_branding_comes_from_the_app_name(): void
     {
         config()->set('app.name', 'Example Agreements');
@@ -157,6 +237,19 @@ class MailableRenderingTest extends TestCase
     private function kindMailable(MailKind $kind): OutboundMailable
     {
         return $kind->mailable(SyntheticMailContext::for($kind));
+    }
+
+    /**
+     * Every link in the message other than the mail header's link to APP_URL.
+     *
+     * @return string[]
+     */
+    private function foreignLinksIn(string $rendered): array
+    {
+        return array_values(array_filter(
+            $this->hrefsIn($rendered),
+            static fn (string $href): bool => rtrim($href, '/') !== rtrim((string) config('app.url'), '/'),
+        ));
     }
 
     /**
