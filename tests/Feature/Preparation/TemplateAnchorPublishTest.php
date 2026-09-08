@@ -16,6 +16,7 @@ use App\Domain\Preparation\Schema\ValidationCode;
 use App\Domain\Preparation\Templates\Models\Template;
 use App\Domain\Preparation\Templates\Models\TemplateVersion;
 use App\Domain\Preparation\Templates\TemplateService;
+use App\Domain\Preparation\Templates\TemplateStateException;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -179,6 +180,47 @@ class TemplateAnchorPublishTest extends TestCase
             'The PDF was parsed inside the publish transaction, holding the row lock across it.',
         );
         $this->assertNotNull($this->versionOf($template)->published_at);
+    }
+
+    /**
+     * A repeat publish refuses without opening the document.
+     *
+     * Publishing leaves an absent optional anchor unresolved on purpose, so a second request
+     * against an already-published version would otherwise resolve again — a blob read and a full
+     * parse — before the locked check told the caller what it already knew, turning a 409 into a
+     * long wait or a storage error.
+     */
+    public function test_a_second_publish_refuses_without_reading_the_document(): void
+    {
+        $template = $this->template();
+        $this->draft($template, $this->withOptionalAbsentNotes());
+
+        $service = app(TemplateService::class);
+        $service->publish($this->versionOf($template), $this->sender);
+
+        $reads = 0;
+        $locator = app(PdfTextLocator::class);
+
+        app()->instance(PdfTextLocator::class, new class($locator, $reads) implements PdfTextLocator
+        {
+            public function __construct(private readonly PdfTextLocator $inner, public int &$reads) {}
+
+            public function extract(string $pdfBytes, ?int $page = null): array
+            {
+                $this->reads++;
+
+                return $this->inner->extract($pdfBytes, $page);
+            }
+        });
+
+        try {
+            $service->publish($this->versionOf($template), $this->sender);
+            $this->fail('Expected the second publish to be refused.');
+        } catch (TemplateStateException $refused) {
+            $this->assertSame('version_already_published', $refused->reason);
+        }
+
+        $this->assertSame(0, $reads, 'The document was parsed for a publish that was never going to happen.');
     }
 
     /**

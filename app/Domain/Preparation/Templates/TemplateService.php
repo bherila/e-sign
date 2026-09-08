@@ -376,6 +376,15 @@ final readonly class TemplateService
             throw TemplateStateException::templateRetired($template);
         }
 
+        // Cheap refusal first. A published version that left an optional anchor unresolved — the
+        // absent-anchor case, which publishing reports without acting on — would otherwise reach
+        // the resolution below on every repeat request and pay for a document read and a full
+        // parse before the locked check told the caller what it already knew. The authoritative
+        // check is still the one under the lock; this one just declines to do the work twice.
+        if ($version->isPublished()) {
+            throw TemplateStateException::versionAlreadyPublished($version->public_id);
+        }
+
         // Outside the transaction, for the reason EnvelopeStateMachine::send() gives: resolving
         // means reading a document object and parsing its content streams, and doing that under
         // `lockForUpdate()` would hold the template-version row for the length of a PDF parse.

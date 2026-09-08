@@ -176,6 +176,50 @@ class FieldSchemaValidatorTest extends TestCase
         );
     }
 
+    /**
+     * A receipt answers one question, and it has to be the one the field is asking now.
+     *
+     * The receipt is what lets resolution be skipped, so moving the field to another page or
+     * asking for a different occurrence while keeping a service-issued receipt would publish and
+     * send at coordinates resolved for something else — with a receipt that looks well-formed.
+     */
+    public function test_a_receipt_for_another_page_is_refused(): void
+    {
+        $document = FieldSchemaFixture::asArray();
+        $document['fields'][5]['anchor']['resolved'] = self::receipt(['page' => 1]);
+
+        $result = (new FieldSchemaValidator)->validate($document);
+        $errors = $result->at('/fields/5/anchor/resolved/page');
+
+        $this->assertCount(1, $errors);
+        $this->assertSame(ValidationCode::PageOutOfRange, $errors[0]->code);
+    }
+
+    public function test_a_receipt_for_another_occurrence_is_refused(): void
+    {
+        $document = FieldSchemaFixture::asArray();
+        // The anchor asks for the sole occurrence, so the match taken is always the first.
+        $document['fields'][5]['anchor']['resolved'] = self::receipt(['occurrence_index' => 3]);
+
+        $errors = (new FieldSchemaValidator)->validate($document)->at('/fields/5/anchor/resolved/occurrence_index');
+
+        $this->assertCount(1, $errors);
+        $this->assertSame(ValidationCode::InvalidFormat, $errors[0]->code);
+        $this->assertStringContainsString('the sole occurrence', $errors[0]->message);
+    }
+
+    public function test_a_receipt_matching_an_indexed_occurrence_is_accepted(): void
+    {
+        $document = FieldSchemaFixture::asArray();
+        $document['fields'][9]['anchor']['resolved'] = self::receipt([
+            'occurrence_index' => 2,
+            'rect' => $document['fields'][9]['rect'],
+        ]);
+
+        // Field 9 asks for occurrence 2 of "Notes:" and the receipt records exactly that.
+        $this->assertTrue((new FieldSchemaValidator)->validate($document)->isValid());
+    }
+
     private static function sampleAnchorMember(string $member): mixed
     {
         return match ($member) {

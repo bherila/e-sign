@@ -678,6 +678,16 @@
               }
             }
           },
+          "503": {
+            "description": "The document behind the envelope could not be read, so its anchors could not be resolved (`document_unavailable`). Nothing about the request needs to change: this is a storage failure on the service side and the same call may succeed on a retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "500": {
             "description": "An unexpected failure. The body carries no stack trace, no file path, and no SQL.",
             "content": {

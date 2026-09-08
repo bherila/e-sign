@@ -200,7 +200,11 @@ class FieldSchemaRoundTripTest extends TestCase
                     $anchor['resolved'] = [
                         'document_sha256' => str_pad(dechex($index * 31 + $i), 64, '0', STR_PAD_LEFT),
                         'page' => $field['page'],
-                        'occurrence_index' => mt_rand(1, 4),
+                        // The receipt answers the anchor's own question: "sole" means the text
+                        // occurs once, so the match taken is the first.
+                        'occurrence_index' => $anchor['occurrence'] === AnchorPlacement::OCCURRENCE_SOLE
+                            ? 1
+                            : $anchor['occurrence'],
                         // A measurement, so it may start above the top of the page the way a
                         // heading's ascender does; the field's own rect never can.
                         'anchor_rect' => self::generateMeasuredRect(),

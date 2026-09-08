@@ -587,6 +587,7 @@ final class FieldSchemaValidator
                         ? $field['required']
                         : FieldDefinition::DEFAULT_REQUIRED,
                     $field['rect'] ?? null,
+                    $field['page'] ?? null,
                     $version,
                     $errors,
                 );
@@ -792,6 +793,7 @@ final class FieldSchemaValidator
         mixed $anchor,
         bool $fieldRequired,
         mixed $fieldRect,
+        mixed $fieldPage,
         ?SchemaVersion $version,
         array &$errors,
     ): void {
@@ -826,6 +828,8 @@ final class FieldSchemaValidator
                 $mode,
                 is_int($declaredTolerance) || is_float($declaredTolerance) ? (float) $declaredTolerance : null,
                 $fieldRect,
+                $fieldPage,
+                $anchor['occurrence'] ?? null,
                 $errors,
             );
         }
@@ -1108,6 +1112,8 @@ final class FieldSchemaValidator
         AnchorPlacementMode $mode,
         ?float $anchorTolerance,
         mixed $fieldRect,
+        mixed $fieldPage,
+        mixed $requestedOccurrence,
         array &$errors,
     ): void {
         if (! $this->isObject($resolved)) {
@@ -1135,6 +1141,8 @@ final class FieldSchemaValidator
             }
         }
 
+        $recorded = [];
+
         foreach (['page', 'occurrence_index'] as $name) {
             if (! array_key_exists($name, $resolved)) {
                 continue;
@@ -1158,8 +1166,14 @@ final class FieldSchemaValidator
                     $name === 'page' ? ValidationCode::PageOutOfRange : ValidationCode::InvalidFormat,
                     'anchor.resolved.'.$name.' is 1-based; got '.$value.'.',
                 );
+
+                continue;
             }
+
+            $recorded[$name] = $value;
         }
+
+        $this->checkReceiptAnswersTheRequest($path, $recorded, $fieldPage, $requestedOccurrence, $errors);
 
         // `anchor_rect` records where the text was, not where anything goes. A run's nominal box
         // is its advance by the font's ascent plus descent, so a heading near the top of the page
@@ -1190,6 +1204,63 @@ final class FieldSchemaValidator
         }
 
         $this->checkCrossCheckReceiptAgrees($path, $anchorTolerance, $resolved['rect'], $fieldRect, $errors);
+    }
+
+    /**
+     * A receipt answers one question, and it has to be the question the field is asking now.
+     *
+     * The receipt is what lets resolution be skipped, so nothing re-reads the document once one
+     * is present for its digest. Change `field.page` or `anchor.occurrence` afterwards and the
+     * old answer would be kept: the field would publish and send at coordinates resolved for a
+     * different page, or for a different occurrence of the same text, with a receipt that looks
+     * entirely well-formed. Requiring the receipt to restate the request is what makes editing
+     * the request invalidate it.
+     *
+     * @param  array<string, int>  $recorded
+     * @param  list<ValidationError>  $errors
+     */
+    private function checkReceiptAnswersTheRequest(
+        string $path,
+        array $recorded,
+        mixed $fieldPage,
+        mixed $requestedOccurrence,
+        array &$errors,
+    ): void {
+        $page = $this->asInteger($fieldPage);
+
+        if ($page !== null && isset($recorded['page']) && $recorded['page'] !== $page) {
+            $errors[] = new ValidationError(
+                $path.'/page',
+                ValidationCode::PageOutOfRange,
+                'anchor.resolved.page is '.$recorded['page'].' and the field is on page '.$page.'. An anchor is '
+                    .'searched on the page its field declares, so a receipt for another page answers a question '
+                    .'this field is no longer asking; move the field back or drop the receipt so it resolves again.',
+            );
+        }
+
+        if (! isset($recorded['occurrence_index'])) {
+            return;
+        }
+
+        // "sole" means the text occurs once, so the match taken is always the first.
+        $expected = $requestedOccurrence === AnchorPlacement::OCCURRENCE_SOLE
+            ? 1
+            : $this->asInteger($requestedOccurrence);
+
+        if ($expected === null || $recorded['occurrence_index'] === $expected) {
+            return;
+        }
+
+        $errors[] = new ValidationError(
+            $path.'/occurrence_index',
+            ValidationCode::InvalidFormat,
+            'anchor.resolved.occurrence_index is '.$recorded['occurrence_index'].' and the anchor asks for '
+                .($requestedOccurrence === AnchorPlacement::OCCURRENCE_SOLE
+                    ? 'the sole occurrence'
+                    : 'occurrence '.$expected)
+                .'. A receipt records which match was taken, so one for a different match is not an answer to '
+                .'this anchor; drop it so the anchor resolves again.',
+        );
     }
 
     /**

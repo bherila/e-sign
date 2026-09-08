@@ -12,10 +12,11 @@ use App\Domain\Identity\Credentials\ServiceCredential;
 use App\Domain\Identity\Models\Workspace;
 use App\Domain\Integration\Native\EnvelopeService;
 use App\Domain\Integration\Native\NewEnvelope;
-use App\Domain\Preparation\Documents\DocumentBlobStore;
 use App\Domain\Preparation\Documents\DocumentIntake;
+use App\Domain\Preparation\Documents\DocumentStorageException;
 use App\Domain\Preparation\Documents\Models\Document;
 use App\Domain\Preparation\Documents\Models\DocumentRevision;
+use App\Domain\Preparation\Documents\RevisionBytes;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\Recipient;
 use App\Domain\Preparation\Templates\Models\TemplateVersion;
@@ -84,7 +85,7 @@ final readonly class SigningRequestCreation
         private PageGeometryReader $pages,
         private DocumentIntake $intake,
         private CurrentPrincipal $principal,
-        private DocumentBlobStore $blobs,
+        private RevisionBytes $bytes,
     ) {}
 
     /**
@@ -263,17 +264,20 @@ final readonly class SigningRequestCreation
      */
     private function reviewBytes(DocumentRevision $revision): string
     {
-        $bytes = $this->blobs->disk((string) $revision->disk)->get((string) $revision->path);
+        try {
+            // Verified against the row's digest, because the receipt stamped below asserts that
+            // digest. Bytes that do not hash to it are not this revision, and measuring anchors
+            // in them would invite signers against a document the envelope is not bound to.
+            return $this->bytes->read($revision);
+        } catch (DocumentStorageException $failure) {
+            report($failure);
 
-        if (! is_string($bytes) || $bytes === '') {
             throw FirmaException::of(
                 FirmaErrorCode::InternalError,
                 'The document behind this signing request could not be read, so no anchor in it '
                 .'can be resolved.',
             );
         }
-
-        return $bytes;
     }
 
     /* ------------------------------------------------------------------ document */

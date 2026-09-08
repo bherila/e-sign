@@ -13,6 +13,7 @@ use App\Domain\Preparation\Contracts\PdfTextLocator;
 use App\Domain\Preparation\Documents\DocumentBlobStore;
 use App\Domain\Preparation\Documents\DocumentIntake;
 use App\Domain\Preparation\Documents\ReviewNormalizer;
+use App\Domain\Preparation\Documents\RevisionBytes;
 use App\Domain\Preparation\Preflight\PreflightLimits;
 use App\Domain\Preparation\Schema\FieldSchemaValidator;
 use App\Domain\Preparation\TcPdf\TcPdfAssembler;
@@ -93,7 +94,7 @@ class PreparationServiceProvider extends ServiceProvider
             RevisionAnchorResolver::class,
             fn (Application $app): RevisionAnchorResolver => new RevisionAnchorResolver(
                 $app->make(PdfTextLocator::class),
-                $app->make(DocumentBlobStore::class),
+                $app->make(RevisionBytes::class),
                 $app->make(SchemaAnchorResolver::class),
             ),
         );

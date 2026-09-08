@@ -5,10 +5,9 @@ declare(strict_types=1);
 namespace App\Domain\Preparation\Anchoring;
 
 use App\Domain\Preparation\Contracts\PdfTextLocator;
-use App\Domain\Preparation\Documents\DocumentBlobStore;
-use App\Domain\Preparation\Documents\DocumentStorageException;
 use App\Domain\Preparation\Documents\Models\DocumentRevision;
 use App\Domain\Preparation\Documents\PreflightPageSizes;
+use App\Domain\Preparation\Documents\RevisionBytes;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\ValidationCode;
 use App\Domain\Preparation\Text\TextExtractionException;
@@ -39,7 +38,7 @@ final readonly class RevisionAnchorResolver
 {
     public function __construct(
         private PdfTextLocator $text,
-        private DocumentBlobStore $blobs,
+        private RevisionBytes $bytes,
         private SchemaAnchorResolver $resolver,
     ) {}
 
@@ -84,7 +83,7 @@ final readonly class RevisionAnchorResolver
      */
     private function runs(FieldSchemaDocument $schema, string $documentSha256, DocumentRevision $revision): array
     {
-        $bytes = $this->bytes($revision);
+        $bytes = $this->readBytes($revision);
 
         try {
             return $this->text->extract($bytes);
@@ -99,33 +98,27 @@ final readonly class RevisionAnchorResolver
     }
 
     /**
-     * The revision's stored bytes.
+     * The revision's stored bytes, proven to be the revision's.
      *
      * A failure here is the storage layer's, not the caller's, so it leaves as
      * {@see AnchorDocumentUnavailable} rather than as something that tells a sender to correct a
-     * field set that is perfectly valid.
+     * field set that is perfectly valid. That covers an integrity mismatch too: bytes that are
+     * not what the row records are not a document anybody can be asked to sign.
      *
      * @throws AnchorDocumentUnavailable
      */
-    private function bytes(DocumentRevision $revision): string
+    private function readBytes(DocumentRevision $revision): string
     {
         try {
-            $bytes = $this->blobs->disk((string) $revision->disk)->get((string) $revision->path);
+            // Verified against the row's digest, not merely fetched. The receipt this resolution
+            // writes asserts that digest, so measuring anything in bytes that do not hash to it
+            // would put a true-looking label on a false measurement.
+            return $this->bytes->read($revision);
         } catch (Throwable $failure) {
             $this->log($revision, $failure);
 
             throw AnchorDocumentUnavailable::forRevision((string) $revision->public_id, $failure);
         }
-
-        if (! is_string($bytes) || $bytes === '') {
-            $this->log($revision, new DocumentStorageException(
-                'Document revision '.$revision->public_id.' has no readable bytes on disk ['.$revision->disk.'].',
-            ));
-
-            throw AnchorDocumentUnavailable::forRevision((string) $revision->public_id);
-        }
-
-        return $bytes;
     }
 
     /**

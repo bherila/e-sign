@@ -329,6 +329,34 @@ class EnvelopeAnchorResolutionTest extends TestCase
         $this->assertSame(EnvelopeState::Draft, $envelope->refresh()->state);
     }
 
+    /**
+     * Bytes that are not the revision are refused before anything is measured in them.
+     *
+     * The receipt asserts the revision's digest, so measuring anchors in replacement bytes and
+     * stamping them with the recorded digest would invite signers against a document the envelope
+     * is not bound to — and finalization would only notice afterwards, after signing.
+     */
+    public function test_bytes_that_are_not_the_revision_are_refused_before_anything_is_measured(): void
+    {
+        $envelope = $this->scenario->preparedDraft(['field_schema' => $this->anchoredSchema()]);
+
+        // The object is replaced after it was written and verified: the case a write-time check
+        // cannot see.
+        Storage::disk('documents')->put(
+            $this->scenario->revision->path,
+            PdfFixtures::bytes('multi-page-mixed-size'),
+        );
+
+        $this->expectException(AnchorDocumentUnavailable::class);
+
+        try {
+            $this->scenario->machine()->send($envelope);
+        } finally {
+            $this->assertSame(EnvelopeState::Draft, $envelope->refresh()->state);
+            $this->assertNull($envelope->fieldSchema()->field('seller_signature')?->anchor?->resolved);
+        }
+    }
+
     public function test_the_native_api_reports_unreadable_bytes_as_a_retryable_503(): void
     {
         $issued = $this->credential();

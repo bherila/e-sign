@@ -175,10 +175,21 @@ because resolution is a pure function of the field set and the document's bytes:
 records the digest of the field set it ran against, and a locked row that disagrees is resolved
 again under the lock rather than trusted.
 
-Two things make that guarantee checkable rather than a matter of care. Every receipt names the
-digest of the bytes it was measured in, so a field already resolved against an envelope's own
-document is skipped — and one carrying a receipt from a *different* revision is resolved again
-rather than trusted. And no code path outside `send()` and `publish()` calls the resolver at all;
+Three things make that guarantee checkable rather than a matter of care.
+
+Every receipt names the digest of the bytes it was measured in, so a field already resolved
+against an envelope's own document is skipped — and one carrying a receipt from a *different*
+revision is resolved again rather than trusted. That digest is **proved, not assumed**: the bytes
+are hashed when they are read and refused if they do not match the revision row
+(`Documents\RevisionBytes`). A write-time check cannot see an object replaced afterwards, and
+measuring replacement bytes while stamping the recorded digest would invite signers against a
+document the envelope is not bound to — with finalization noticing only after signing.
+
+A receipt also has to answer the question the field is asking *now*: its `page` must be the
+field's page and its `occurrence_index` the occurrence the anchor requests. Editing either while
+keeping the receipt would otherwise publish and send at coordinates resolved for something else.
+
+And no code path outside `send()` and `publish()` calls the resolver at all;
 `tests/Feature/Signing/EnvelopeAnchorResolutionTest.php` counts the calls through a send, two
 acceptances, and completion, and expects exactly one.
 
