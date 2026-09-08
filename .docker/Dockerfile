@@ -34,7 +34,7 @@ COPY .docker/scripts/entrypoint.sh  /usr/local/bin/esign-entrypoint
 RUN chmod +x /usr/local/bin/esign-entrypoint \
     && rm -f /etc/nginx/sites-enabled/default \
     && mkdir -p /tmp/nginx /var/www/html \
-    && chown -R www-data:www-data /var/www/html
+    && chown -R www-data:www-data /tmp/nginx /var/www/html
 EXPOSE 8080
 
 # ---------- dev: + Node/pnpm; code bind-mounted by docker compose ----------
