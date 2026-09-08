@@ -12,6 +12,7 @@ use App\Domain\Delivery\Mail\Models\OutboundMail;
 use App\Domain\Delivery\Mail\NonDeliveringMailerException;
 use App\Domain\Delivery\Mail\OutboundMailSender;
 use App\Domain\Delivery\Mail\ProductionMailerGuard;
+use App\Domain\Evidence\Retention\RestoreDrill;
 use App\Mail\InvitationMail;
 use Illuminate\Contracts\Mail\Factory as MailFactory;
 use Illuminate\Contracts\Mail\Mailer;
@@ -317,6 +318,7 @@ class SendOutboundMailTest extends TestCase
             $factory,
             $this->app->make(ProductionMailerGuard::class),
             new MailErrorRedactor,
+            $this->app->make(RestoreDrill::class),
         );
     }
 }

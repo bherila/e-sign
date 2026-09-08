@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Domain\Delivery\Mail;
 
 use App\Domain\Delivery\Mail\Models\OutboundMail;
+use App\Domain\Evidence\Retention\Exceptions\RestoreDrillActive;
+use App\Domain\Evidence\Retention\RestoreDrill;
 use Illuminate\Contracts\Mail\Factory as MailFactory;
 use Throwable;
 
@@ -26,6 +28,7 @@ final class OutboundMailSender
         private readonly MailFactory $mailer,
         private readonly ProductionMailerGuard $guard,
         private readonly MailErrorRedactor $redactor,
+        private readonly RestoreDrill $restoreDrill,
     ) {}
 
     /**
@@ -34,11 +37,17 @@ final class OutboundMailSender
      *                                      worker that has been running since before the
      *                                      change is exactly how a `log` mailer would
      *                                      otherwise get to claim a send.
+     * @throws RestoreDrillActive When this instance is a restored copy. Checked here and not
+     *                            only in MailOutbox for the same reason the mailer guard is:
+     *                            a restored database already holds rows that were queued
+     *                            before the backup was taken, so guarding only the enqueue
+     *                            end would suppress nothing that matters.
      * @throws Throwable Whatever the transport raised, so the queue can retry it.
      */
     public function send(OutboundMail $mail): void
     {
         $this->guard->assertDeliverable();
+        $this->restoreDrill->assertNotDrilling('to send outbound mail');
 
         $mailerName = $this->guard->mailerName();
 

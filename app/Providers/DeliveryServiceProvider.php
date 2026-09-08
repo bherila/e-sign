@@ -29,6 +29,7 @@ use App\Domain\Delivery\Webhooks\Console\EndpointRotateSecretCommand;
 use App\Domain\Delivery\Webhooks\Console\ReplayCommand;
 use App\Domain\Delivery\Webhooks\RetrySchedule;
 use App\Domain\Delivery\Webhooks\WebhookDispatcher;
+use App\Domain\Evidence\Retention\RestoreDrill;
 use App\Domain\Identity\Audit\AuditRecorder;
 use App\Domain\Signing\Contracts\EnvelopeEventSink;
 use App\Domain\Signing\Envelopes\AuditEnvelopeEventSink;
@@ -71,6 +72,7 @@ final class DeliveryServiceProvider extends ServiceProvider
             return new WebhookDispatcher(
                 schedule: RetrySchedule::fromConfig($config),
                 audit: $app->make(AuditRecorder::class),
+                restoreDrill: $app->make(RestoreDrill::class),
                 autoDisableAfter: max(1, (int) ($config['auto_disable_after'] ?? 10)),
                 queue: isset($config['queue']) ? (string) $config['queue'] : null,
             );

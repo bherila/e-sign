@@ -8,6 +8,8 @@ use App\Domain\Delivery\Webhooks\Jobs\DeliverWebhook;
 use App\Domain\Delivery\Webhooks\Models\OutboxEvent;
 use App\Domain\Delivery\Webhooks\Models\WebhookDelivery;
 use App\Domain\Delivery\Webhooks\Models\WebhookEndpoint;
+use App\Domain\Evidence\Retention\Exceptions\RestoreDrillActive;
+use App\Domain\Evidence\Retention\RestoreDrill;
 use App\Domain\Identity\Audit\AuditActor;
 use App\Domain\Identity\Audit\AuditRecorder;
 use Carbon\CarbonImmutable;
@@ -20,12 +22,22 @@ use Carbon\CarbonImmutable;
  * enabled and its filter names the event. A disabled endpoint is not queued
  * and silently dropped later — no row is created for it at all, so the delivery
  * history does not fill with attempts that were never going to be made.
+ *
+ * Nothing is queued at all while `ESIGN_RESTORE_DRILL` is set. A restored copy
+ * inherits the endpoint URLs of the instance it was copied from, and a drill
+ * that POSTs completion events at a production consumer has told that consumer
+ * agreements completed twice. The guard is on {@see queueAttempt()}, the single
+ * point every one of fan-out, replay, and retry passes through, and the
+ * delivery job checks again before it puts anything on the wire — a restored
+ * database already holds pending deliveries queued before the backup was taken.
+ * See {@see RestoreDrill}.
  */
 final class WebhookDispatcher
 {
     public function __construct(
         private readonly RetrySchedule $schedule,
         private readonly AuditRecorder $audit,
+        private readonly RestoreDrill $restoreDrill,
         private readonly int $autoDisableAfter,
         private readonly ?string $queue = null,
     ) {}
@@ -155,12 +167,17 @@ final class WebhookDispatcher
         $endpoint->save();
     }
 
+    /**
+     * @throws RestoreDrillActive When this instance is a restored copy.
+     */
     private function queueAttempt(
         OutboxEvent $event,
         WebhookEndpoint $endpoint,
         int $attempt,
         CarbonImmutable $dueAt,
     ): WebhookDelivery {
+        $this->restoreDrill->assertNotDrilling('to queue a webhook delivery');
+
         $delivery = WebhookDelivery::create([
             'outbox_event_id' => $event->getKey(),
             'webhook_endpoint_id' => $endpoint->getKey(),
