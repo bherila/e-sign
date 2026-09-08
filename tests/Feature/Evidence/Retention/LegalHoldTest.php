@@ -259,8 +259,10 @@ class LegalHoldTest extends TestCase
         $holds->place($envelope, 'Preservation notice 2026-14', AuditActor::console('esign:hold:place'));
         $holds->place($draft, 'Preservation notice 2026-14', AuditActor::console('esign:hold:place'));
 
-        // Path 1, 2, and 3: the authentication-log, abandoned-draft, and executed-agreement
-        // passes, plus the unreferenced-document pass that runs beside them.
+        // Paths 1, 2, and 3: the abandoned-draft, unreferenced-document, and
+        // executed-agreement passes. The fourth pass in this command deletes
+        // `auth_audit_log` rows, which belong to no envelope and cannot be soft-deleted, so
+        // there is nothing for it to consult and nothing here for it to spare.
         $this->artisan('esign:retention:run', ['--force' => true])->assertSuccessful();
 
         // Path 4: privacy erasure, which a hold refuses outright.
