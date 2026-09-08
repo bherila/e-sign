@@ -146,6 +146,73 @@ identities only.
 The pinned Firma OpenAPI document is deliberately **not** vendored, because no redistribution
 license is published for it. See `tests/Fixtures/firma/SCHEMA.md`.
 
+## CI-only tooling — not distributed
+
+**Nothing in this section ships.** The `licenses` CI job and everything above cover the
+Composer and pnpm trees, which are what the Docker image and the cPanel bundle contain. The
+independent validators are a third category: they run only in CI, against synthetic artifacts,
+and they are excluded from both distributions — `tools/` by `.dockerignore`, and by the
+explicit file list in `scripts/build-release.sh`, which copies named directories rather than
+the whole tree. The repository's runtime is PHP only (`AGENTS.md`); no Java or Python reaches
+production.
+
+They are recorded here anyway, because "the licence checker does not see it" is not the same
+as "its licence does not matter", and a reader auditing this repository should not have to
+reconstruct the list from a `pom.xml`.
+
+### European Commission DSS — `pades-profile` job, `scripts/validate-pades-profile.sh`
+
+Pinned in `tools/dss/pom.xml`. Used unmodified, as a separate CI-only process that reads PDFs
+and writes reports; nothing is linked into the application and no DSS source is copied into
+this repository.
+
+| Component | Version | License |
+|---|---|---|
+| `eu.europa.ec.joinup.sd-dss:dss-pades-pdfbox`, `dss-pades`, `dss-cades`, `dss-cms`, `dss-cms-object`, `dss-document`, `dss-validation`, `dss-spi`, `dss-model`, `dss-enumerations`, `dss-alert`, `dss-utils`, `dss-utils-apache-commons`, `dss-crl-parser`, `dss-crl-parser-x509crl`, `dss-policy-jaxb`, `dss-i18n`, `dss-xml-common`, `dss-jaxb-common`, `dss-jaxb-parsers`, `dss-diagnostic-jaxb`, `dss-simple-report-jaxb`, `dss-simple-certificate-report-jaxb`, `dss-detailed-report-jaxb`, `specs-validation-report`, `specs-xades`, `specs-xmldsig`, `specs-trusted-list-v211` | 6.5 | LGPL-2.1-or-later |
+| `org.apache.pdfbox:pdfbox`, `pdfbox-io`, `fontbox` | 3.0.8 | Apache-2.0 |
+| `org.bouncycastle:bcpkix-jdk18on`, `bcprov-jdk18on`, `bcutil-jdk18on` | 1.85 | Bouncy Castle Licence (MIT-style) |
+| `org.apache.commons:commons-lang3` | 3.20.0 | Apache-2.0 |
+| `org.apache.commons:commons-collections4` | 4.6.0 | Apache-2.0 |
+| `commons-codec:commons-codec` | 1.18.0 | Apache-2.0 |
+| `commons-io:commons-io` | 2.22.0 | Apache-2.0 |
+| `commons-logging:commons-logging` | 1.4.0 | Apache-2.0 |
+| `jakarta.xml.bind:jakarta.xml.bind-api` | 3.0.1 | EDL 1.0 (BSD-3-Clause) |
+| `com.sun.activation:jakarta.activation` | 2.0.1 | EDL 1.0 (BSD-3-Clause) |
+| `com.sun.istack:istack-commons-runtime` | 4.0.1 | EDL 1.0 (BSD-3-Clause) |
+| `org.glassfish.jaxb:jaxb-runtime`, `jaxb-core`, `txw2` | 3.0.2 | EDL 1.0 (BSD-3-Clause) |
+| `org.slf4j:slf4j-api` | 2.0.18 | MIT |
+| `org.slf4j:slf4j-simple` | 2.0.17 | MIT |
+
+47 artifacts in total, resolved transitively from the five direct dependencies plus the SLF4J
+binding named in `tools/dss/pom.xml`. Regenerate the list with:
+
+```bash
+cd tools/dss && mvn org.codehaus.mojo:license-maven-plugin:2.6.0:add-third-party
+```
+
+**On the LGPL.** DSS is LGPL-2.1-or-later, the same family as the `tecnickcom/tc-lib-*` PDF
+engine handled under [LGPL handling for the PDF engine](#lgpl-handling-for-the-pdf-engine) —
+but the obligations there are about *distribution*, and this code is not distributed. It is
+fetched from Maven Central by a CI job, run, and discarded with the runner. No LGPL notice
+obligation attaches to the Docker image or the release bundle on its account.
+
+`tools/dss/validation-policy.xml` is a different matter: it **is** committed to this
+repository. It is DSS's own default validation policy (`policy/constraint.xml`, from
+`dss-policy-jaxb-6.5.jar`) copied with two marked edits, so it is a modified copy of an
+LGPL-2.1 work. The file's header states its provenance, names both edits, and gives the exact
+command to diff it against the original, which is what the licence asks of a modified copy.
+
+### pyHanko — `validation` job, `scripts/validate-seal.sh`
+
+| Component | Version | License |
+|---|---|---|
+| `pyHanko` | 0.37.0 | MIT |
+| `pyhanko-cli` | 0.5.0 | MIT |
+
+Installed into a throwaway virtualenv by the job and never committed. Its transitive tree
+(`asn1crypto`, `cryptography`, `pyhanko-certvalidator`, and the rest) is resolved at install
+time and is not pinned here; nothing from it is distributed either.
+
 ## Composer production dependencies (116)
 
 | Package | Version | License |
