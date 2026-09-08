@@ -49,7 +49,7 @@ return new class extends Migration
             $table->char('code_hash', 64);
 
             $table->unsignedSmallInteger('attempts')->default(0);
-            $table->timestamp('expires_at');
+            $table->dateTime('expires_at');
             $table->timestamp('verified_at')->nullable();
             $table->timestamp('burned_at')->nullable();
 

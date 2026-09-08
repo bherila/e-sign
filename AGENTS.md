@@ -93,9 +93,10 @@ composer test
    exception is a migration that has never applied anywhere because it fails on a supported
    engine; fix it in place and say so in the PR.
 6. **Use `dateTime()` for NOT NULL date columns**, never a bare `timestamp()` without
-   `useCurrent()`. MariaDB 10.6 gives the second NOT NULL `TIMESTAMP` in a table a zero
-   default and refuses the table under `NO_ZERO_DATE`; 11.4 and MySQL 8 do not, so only the
-   CI matrix entry for 10.6 catches it.
+   `useCurrent()`. MariaDB 10.6 gives the first NOT NULL `TIMESTAMP` in a table an implicit
+   `ON UPDATE CURRENT_TIMESTAMP` (so any later UPDATE silently rewrites it) and gives the
+   second a zero default that `NO_ZERO_DATE` refuses. 11.4 and MySQL 8 do neither, so only
+   the CI matrix entry for 10.6 catches it.
 7. Production is MySQL 8 or MariaDB. Migrations must be valid on SQLite and both engines; never
    rely on an engine-specific feature without a CI test on the other engine. The only exception
    to rule 4 is the CI-only `database` job in `.github/workflows/ci.yml`, which runs
