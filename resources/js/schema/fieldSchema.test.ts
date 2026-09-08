@@ -93,10 +93,19 @@ describe("parseFieldSchema", () => {
     expect(document.fields[5]!.anchor).toEqual({
       text: "Counterparty signature:",
       occurrence: "sole",
+      placement: "replace",
       origin: "bottom_left",
       offset: { dx: 0, dy: 12.5 },
+      required: true,
     });
-    expect(document.fields[9]!.anchor).toEqual({ text: "Notes:", occurrence: 2 });
+    // The optional notes field carries the narrow compatibility option: its anchor may be
+    // absent, and then the field is omitted rather than placed anywhere.
+    expect(document.fields[9]!.anchor).toEqual({
+      text: "Notes:",
+      occurrence: 2,
+      placement: "replace",
+      required: false,
+    });
   });
 });
 

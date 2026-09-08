@@ -40,12 +40,59 @@ final readonly class FieldDefinition
         }
     }
 
+    public function isAnchored(): bool
+    {
+        return $this->anchor instanceof AnchorPlacement;
+    }
+
+    /**
+     * True when this field's anchor still has to be resolved against these exact bytes.
+     *
+     * A receipt written against a different revision is not reused: it records coordinates
+     * measured in a document that is not the one being sent. Re-resolution happens only before
+     * send, never after it.
+     */
+    public function anchorNeedsResolution(string $documentSha256): bool
+    {
+        return $this->anchor instanceof AnchorPlacement
+            && ! $this->anchor->isResolvedAgainst($documentSha256);
+    }
+
+    /**
+     * The same field with a resolved rectangle and the receipt that produced it.
+     *
+     * In `cross_check` mode the declared rectangle is authoritative and is kept; only the receipt
+     * is attached. In `replace` mode the resolved rectangle becomes the field's rectangle, and
+     * from that point the field is indistinguishable from a hand-placed one to everything that
+     * reads `rect` — the editor, assembly, signing, and finalization.
+     */
+    public function withResolvedAnchor(ResolvedAnchorRecord $record): self
+    {
+        if (! $this->anchor instanceof AnchorPlacement) {
+            throw new InvalidArgumentException('Field "'.$this->id.'" has no anchor to resolve.');
+        }
+
+        return new self(
+            $this->id,
+            $this->recipientId,
+            $this->type,
+            $this->page,
+            $this->anchor->placement->replacesRect() ? $record->rect : $this->rect,
+            $this->required,
+            $this->readOnly,
+            $this->label,
+            $this->alias,
+            $this->prefill,
+            $this->anchor->resolvedAs($record),
+        );
+    }
+
     /**
      * @param  array<string, mixed>  $field
      */
     public static function fromArray(array $field): self
     {
-        /** @var array{id: string, recipient_id: string, type: string, page: int, rect: array{x: int|float, y: int|float, width: int|float, height: int|float}, required?: bool, read_only?: bool, label?: string, alias?: string, prefill?: array{variable: string}, anchor?: array{text: string, occurrence: string|int, origin?: string, offset?: array{dx: int|float, dy: int|float}}} $field */
+        /** @var array{id: string, recipient_id: string, type: string, page: int, rect: array{x: int|float, y: int|float, width: int|float, height: int|float}, required?: bool, read_only?: bool, label?: string, alias?: string, prefill?: array{variable: string}, anchor?: array<string, mixed>} $field */
         return new self(
             $field['id'],
             $field['recipient_id'],

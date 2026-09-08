@@ -161,6 +161,6 @@ describe("the TypeScript mirror", () => {
 
   it("keeps the validation code list unique and stable", () => {
     expect(new Set(VALIDATION_CODES).size).toBe(VALIDATION_CODES.length);
-    expect(VALIDATION_CODES).toHaveLength(20);
+    expect(VALIDATION_CODES).toHaveLength(27);
   });
 });

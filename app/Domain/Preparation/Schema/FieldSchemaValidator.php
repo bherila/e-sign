@@ -96,10 +96,13 @@ final class FieldSchemaValidator
     public const RECT_REQUIRED = ['x', 'y', 'width', 'height'];
 
     /** @var list<string> */
-    public const ANCHOR_REQUIRED = ['text', 'occurrence'];
+    public const ANCHOR_REQUIRED = ['text', 'occurrence', 'placement'];
 
     /** @var list<string> */
-    public const ANCHOR_OPTIONAL = ['origin', 'offset'];
+    public const ANCHOR_OPTIONAL = ['origin', 'offset', 'required', 'tolerance', 'resolved'];
+
+    /** @var list<string> */
+    public const RESOLVED_ANCHOR_REQUIRED = ['document_sha256', 'page', 'occurrence_index', 'anchor_rect', 'rect'];
 
     /**
      * @param  array<string, mixed>  $document  A decoded document (`json_decode(..., true)`).
@@ -558,7 +561,16 @@ final class FieldSchemaValidator
             }
 
             if (array_key_exists('anchor', $field)) {
-                $this->checkAnchor($path.'/anchor', $field['anchor'], $errors);
+                $this->checkAnchor(
+                    $path.'/anchor',
+                    $field['anchor'],
+                    array_key_exists('required', $field) && is_bool($field['required'])
+                        ? $field['required']
+                        : FieldDefinition::DEFAULT_REQUIRED,
+                    $field['page'] ?? null,
+                    $pageSizes,
+                    $errors,
+                );
             }
         }
     }
@@ -752,10 +764,17 @@ final class FieldSchemaValidator
     }
 
     /**
+     * @param  bool  $fieldRequired  The field's own `required` flag, which bounds `anchor.required`.
      * @param  list<ValidationError>  $errors
      */
-    private function checkAnchor(string $path, mixed $anchor, array &$errors): void
-    {
+    private function checkAnchor(
+        string $path,
+        mixed $anchor,
+        bool $fieldRequired,
+        mixed $page,
+        ?PageSizes $pageSizes,
+        array &$errors,
+    ): void {
         if (! $this->isObject($anchor)) {
             $errors[] = new ValidationError($path, ValidationCode::InvalidType, 'anchor must be an object with the text to locate.');
 
@@ -770,6 +789,14 @@ final class FieldSchemaValidator
 
         if (array_key_exists('occurrence', $anchor)) {
             $this->checkAnchorOccurrence($path.'/occurrence', $anchor['occurrence'], $errors);
+        }
+
+        $mode = $this->checkAnchorPlacement($path.'/placement', $anchor, $errors);
+        $this->checkAnchorRequired($path, $anchor, $fieldRequired, $errors);
+        $this->checkAnchorTolerance($path.'/tolerance', $anchor, $mode, $errors);
+
+        if (array_key_exists('resolved', $anchor)) {
+            $this->checkResolvedAnchor($path.'/resolved', $anchor['resolved'], $page, $pageSizes, $errors);
         }
 
         if (array_key_exists('origin', $anchor)) {
@@ -822,6 +849,214 @@ final class FieldSchemaValidator
                     ValidationCode::CoordinateNotFinite,
                     'anchor.offset.'.$name.' must be a finite number; got '.var_export($value, true).'.',
                 );
+            }
+        }
+    }
+
+    /**
+     * Which of the field's two statements about position wins.
+     *
+     * Required, with no default. Schema 1.0 requires every field to carry a rectangle — it is
+     * what the editor draws and what assembly stamps, and an anchor never supplies a size — so a
+     * field that also carries an anchor holds two statements about where it goes. Defaulting one
+     * of them would be the same guess `anchor.occurrence` refuses: a document that does not say
+     * whether the anchor moves the box or merely checks it is under-specified, and both readings
+     * put a signature somewhere nobody agreed to.
+     *
+     * @param  array<string, mixed>  $anchor
+     * @param  list<ValidationError>  $errors
+     */
+    private function checkAnchorPlacement(string $path, array $anchor, array &$errors): ?AnchorPlacementMode
+    {
+        if (! array_key_exists('placement', $anchor)) {
+            return null;
+        }
+
+        $placement = $anchor['placement'];
+
+        if (! is_string($placement)) {
+            $errors[] = new ValidationError($path, ValidationCode::InvalidType, 'anchor.placement must be a string.');
+
+            return null;
+        }
+
+        $mode = AnchorPlacementMode::tryFrom($placement);
+
+        if (! $mode instanceof AnchorPlacementMode) {
+            $errors[] = new ValidationError(
+                $path,
+                ValidationCode::InvalidFormat,
+                'anchor.placement must be one of '.implode(', ', AnchorPlacementMode::values()).'; got "'.$placement
+                    .'". "'.AnchorPlacementMode::Replace->value.'" lets the anchor decide where the field goes and '
+                    .'keeps only the rectangle\'s size; "'.AnchorPlacementMode::CrossCheck->value.'" keeps the '
+                    .'declared rectangle and requires the anchor to agree with it. There is no default: a field '
+                    .'with a rectangle and an anchor that does not say which one governs is refused.',
+            );
+
+            return null;
+        }
+
+        return $mode;
+    }
+
+    /**
+     * The narrow compatibility option for an anchor that is allowed not to be there.
+     *
+     * `anchor.required: false` says "this text may legitimately be absent from this document, and
+     * if it is, do not place the field at all". That can only be true of a field nobody has to
+     * fill in, so it is refused on a required field rather than quietly making a required field
+     * unfillable. Ambiguity is never acceptable either way: an absent anchor is a decision the
+     * document can express, and two matches where one was asked for is always an error.
+     *
+     * @param  array<string, mixed>  $anchor
+     * @param  list<ValidationError>  $errors
+     */
+    private function checkAnchorRequired(string $path, array $anchor, bool $fieldRequired, array &$errors): void
+    {
+        if (! array_key_exists('required', $anchor)) {
+            return;
+        }
+
+        $required = $anchor['required'];
+
+        if (! is_bool($required)) {
+            $errors[] = new ValidationError($path.'/required', ValidationCode::InvalidType, 'anchor.required must be a boolean.');
+
+            return;
+        }
+
+        if ($required || ! $fieldRequired) {
+            return;
+        }
+
+        $errors[] = new ValidationError(
+            $path.'/required',
+            ValidationCode::AnchorOptionalOnRequiredField,
+            'anchor.required is false on a field whose own "required" is true. An absent anchor omits the field, '
+                .'and a required field that is never placed can never be completed. Make the field optional, or '
+                .'require the anchor.',
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $anchor
+     * @param  list<ValidationError>  $errors
+     */
+    private function checkAnchorTolerance(string $path, array $anchor, ?AnchorPlacementMode $mode, array &$errors): void
+    {
+        if (! array_key_exists('tolerance', $anchor)) {
+            return;
+        }
+
+        $tolerance = $anchor['tolerance'];
+
+        if (! is_int($tolerance) && ! is_float($tolerance)) {
+            $errors[] = new ValidationError($path, ValidationCode::InvalidType, 'anchor.tolerance must be a number of points.');
+
+            return;
+        }
+
+        if (! is_finite((float) $tolerance)) {
+            $errors[] = new ValidationError(
+                $path,
+                ValidationCode::CoordinateNotFinite,
+                'anchor.tolerance must be a finite number; got '.var_export($tolerance, true).'.',
+            );
+
+            return;
+        }
+
+        if ((float) $tolerance < 0.0) {
+            $errors[] = new ValidationError(
+                $path,
+                ValidationCode::InvalidFormat,
+                'anchor.tolerance is a distance in points and must not be negative; got '.$this->describeNumber((float) $tolerance).'.',
+            );
+
+            return;
+        }
+
+        if ($mode === AnchorPlacementMode::Replace) {
+            $errors[] = new ValidationError(
+                $path,
+                ValidationCode::InvalidFormat,
+                'anchor.tolerance only means something with anchor.placement "'.AnchorPlacementMode::CrossCheck->value
+                    .'". In "'.AnchorPlacementMode::Replace->value.'" mode the anchor decides the position outright, '
+                    .'so there is no declared rectangle to be within a tolerance of.',
+            );
+        }
+    }
+
+    /**
+     * The resolution receipt, which resolution writes and a round trip must be able to read back.
+     *
+     * It is validated as strictly as anything a caller sends. An envelope re-reads its own stored
+     * schema through this validator on every request, so a receipt this importer would refuse is a
+     * receipt that must never be written.
+     *
+     * @param  list<ValidationError>  $errors
+     */
+    private function checkResolvedAnchor(
+        string $path,
+        mixed $resolved,
+        mixed $page,
+        ?PageSizes $pageSizes,
+        array &$errors,
+    ): void {
+        if (! $this->isObject($resolved)) {
+            $errors[] = new ValidationError(
+                $path,
+                ValidationCode::InvalidType,
+                'anchor.resolved must be an object recording what resolution found.',
+            );
+
+            return;
+        }
+
+        $this->checkObjectShape($path, $resolved, self::RESOLVED_ANCHOR_REQUIRED, [], $errors);
+
+        if (array_key_exists('document_sha256', $resolved)) {
+            $digest = $resolved['document_sha256'];
+
+            if (! is_string($digest) || preg_match('/^[0-9a-f]{64}$/', $digest) !== 1) {
+                $errors[] = new ValidationError(
+                    $path.'/document_sha256',
+                    ValidationCode::InvalidFormat,
+                    'anchor.resolved.document_sha256 must be 64 lowercase hexadecimal characters: the digest of the '
+                        .'exact bytes the text was located in.',
+                );
+            }
+        }
+
+        foreach (['page', 'occurrence_index'] as $name) {
+            if (! array_key_exists($name, $resolved)) {
+                continue;
+            }
+
+            $value = $this->asInteger($resolved[$name]);
+
+            if ($value === null) {
+                $errors[] = new ValidationError(
+                    $path.'/'.$name,
+                    ValidationCode::InvalidType,
+                    'anchor.resolved.'.$name.' must be an integer.',
+                );
+
+                continue;
+            }
+
+            if ($value < 1) {
+                $errors[] = new ValidationError(
+                    $path.'/'.$name,
+                    $name === 'page' ? ValidationCode::PageOutOfRange : ValidationCode::InvalidFormat,
+                    'anchor.resolved.'.$name.' is 1-based; got '.$value.'.',
+                );
+            }
+        }
+
+        foreach (['anchor_rect', 'rect'] as $name) {
+            if (array_key_exists($name, $resolved)) {
+                $this->checkRect($path.'/'.$name, $resolved[$name], $page, $pageSizes, $errors);
             }
         }
     }

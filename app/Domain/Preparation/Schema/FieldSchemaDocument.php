@@ -154,6 +154,40 @@ final readonly class FieldSchemaDocument
     }
 
     /**
+     * The same document with a different field set: everything else is carried over verbatim.
+     *
+     * Anchor resolution is the only caller. It rewrites fields — a resolved rectangle onto an
+     * anchored field, or an intentionally omitted optional field removed — and must not be able
+     * to touch the recipients, the signing order, or the declared coordinate space while doing
+     * it. Passing a whole new document would make that a matter of care; this makes it
+     * structural.
+     *
+     * @param  list<FieldDefinition>  $fields
+     */
+    public function withFields(array $fields): self
+    {
+        return new self(
+            $this->schemaVersion,
+            $this->documentId,
+            $this->coordinateSpace,
+            $this->recipients,
+            $this->signingOrder,
+            array_values($fields),
+        );
+    }
+
+    /**
+     * @return list<FieldDefinition>
+     */
+    public function anchoredFields(): array
+    {
+        return array_values(array_filter(
+            $this->fields,
+            static fn (FieldDefinition $field): bool => $field->isAnchored(),
+        ));
+    }
+
+    /**
      * @return list<string>
      */
     public function recipientIds(): array

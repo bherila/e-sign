@@ -22,7 +22,14 @@
       "role": "Counterparty"
     }
   ],
-  "signing_order": [["buyer"], ["counterparty"]],
+  "signing_order": [
+    [
+      "buyer"
+    ],
+    [
+      "counterparty"
+    ]
+  ],
   "fields": [
     {
       "id": "buyer_signature",
@@ -122,11 +129,13 @@
       "anchor": {
         "text": "Counterparty signature:",
         "occurrence": "sole",
+        "placement": "replace",
         "origin": "bottom_left",
         "offset": {
           "dx": 0,
           "dy": 12.5
-        }
+        },
+        "required": true
       }
     },
     {
@@ -195,7 +204,9 @@
       "label": "Notes",
       "anchor": {
         "text": "Notes:",
-        "occurrence": 2
+        "occurrence": 2,
+        "placement": "replace",
+        "required": false
       }
     }
   ]

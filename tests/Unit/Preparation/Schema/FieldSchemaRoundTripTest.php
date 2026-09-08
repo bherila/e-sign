@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Preparation\Schema;
 
 use App\Domain\Preparation\Schema\AnchorPlacement;
+use App\Domain\Preparation\Schema\AnchorPlacementMode;
 use App\Domain\Preparation\Schema\CanonicalNumber;
 use App\Domain\Preparation\Schema\CoordinateSpaceDeclaration;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
@@ -153,9 +154,14 @@ class FieldSchemaRoundTripTest extends TestCase
             }
 
             if (mt_rand(0, 2) === 0) {
+                $crossCheck = mt_rand(0, 2) === 0;
+
                 $anchor = [
                     'text' => 'Anchor '.$i.':',
                     'occurrence' => mt_rand(0, 3) === 0 ? AnchorPlacement::OCCURRENCE_SOLE : mt_rand(1, 4),
+                    'placement' => $crossCheck
+                        ? AnchorPlacementMode::CrossCheck->value
+                        : AnchorPlacementMode::Replace->value,
                 ];
 
                 if (mt_rand(0, 1) === 1) {
@@ -166,6 +172,27 @@ class FieldSchemaRoundTripTest extends TestCase
                     $anchor['offset'] = [
                         'dx' => self::generateNumber(-40.0, 40.0),
                         'dy' => self::generateNumber(-40.0, 40.0),
+                    ];
+                }
+
+                // Always stated in the canonical form, like the field's own `required`, and
+                // only ever false on a field that is itself optional.
+                $anchor['required'] = $field['required'] ? true : mt_rand(0, 1) === 1;
+
+                if ($crossCheck && mt_rand(0, 1) === 1) {
+                    $anchor['tolerance'] = self::generateNumber(0.0, 8.0);
+                }
+
+                // A resolution receipt has to survive the round trip too: an envelope re-reads
+                // its own stored schema through the importer on every request, so a receipt that
+                // did not round-trip would be a document the service could write and not read.
+                if (mt_rand(0, 1) === 1) {
+                    $anchor['resolved'] = [
+                        'document_sha256' => str_pad(dechex($index * 31 + $i), 64, '0', STR_PAD_LEFT),
+                        'page' => $field['page'],
+                        'occurrence_index' => mt_rand(1, 4),
+                        'anchor_rect' => self::generateRect(),
+                        'rect' => $field['rect'],
                     ];
                 }
 

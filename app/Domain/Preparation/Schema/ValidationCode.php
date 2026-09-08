@@ -73,4 +73,31 @@ enum ValidationCode: string
 
     /** A `prefill.variable` that the supplied variable set cannot resolve. */
     case UnresolvedPrefillVariable = 'unresolved_prefill_variable';
+
+    /**
+     * `anchor.required: false` on a field that is itself required.
+     *
+     * The compatibility option for an absent anchor is narrow on purpose: it says "this box may
+     * legitimately not exist in this document", which can only be true of a box nobody has to
+     * fill in. See docs/preparation/anchors.md.
+     */
+    case AnchorOptionalOnRequiredField = 'anchor_optional_on_required_field';
+
+    /** A required anchor's text does not occur anywhere in scope. */
+    case AnchorNotFound = 'anchor_not_found';
+
+    /** An `occurrence` of `sole` matched more than once. Ambiguity is never resolved by guessing. */
+    case AnchorAmbiguous = 'anchor_ambiguous';
+
+    /** An `occurrence` index beyond the number of matches in scope. */
+    case AnchorOccurrenceOutOfRange = 'anchor_occurrence_out_of_range';
+
+    /** The document's positioned text could not be extracted, so no anchor in it can be resolved. */
+    case AnchorTextUnreadable = 'anchor_text_unreadable';
+
+    /** A `cross_check` anchor resolved further than its tolerance from the declared rectangle. */
+    case AnchorCrossCheckFailed = 'anchor_cross_check_failed';
+
+    /** An anchor resolved to a rectangle that does not fit on the page it was found on. */
+    case AnchorResolvedOffPage = 'anchor_resolved_off_page';
 }

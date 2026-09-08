@@ -89,11 +89,39 @@ export type AnchorOrigin = (typeof ANCHOR_ORIGINS)[number];
 
 export const DEFAULT_ANCHOR_ORIGIN: AnchorOrigin = "top_left";
 
+/**
+ * Which of a field's two statements about position wins.
+ *
+ * Every field carries a rect, so a field that also carries an anchor holds two of them.
+ * `"replace"` makes the anchor authoritative for x and y and keeps only the rect's size;
+ * `"cross_check"` keeps the declared rect and requires the anchor to resolve within
+ * `tolerance` points of it. Required, with no default: an unstated precedence is a guess.
+ */
+export const ANCHOR_PLACEMENTS = ["replace", "cross_check"] as const;
+
+export type AnchorPlacement = (typeof ANCHOR_PLACEMENTS)[number];
+
+/** Whether an anchor's text must be present. Omitted means true; false needs an optional field. */
+export const DEFAULT_ANCHOR_REQUIRED = true;
+
+/** What resolution found, written by the service and never authored in the editor. */
+export interface ResolvedAnchor {
+  document_sha256: string;
+  page: number;
+  occurrence_index: number;
+  anchor_rect: Rect;
+  rect: Rect;
+}
+
 export interface Anchor {
   text: string;
   occurrence: AnchorOccurrence;
+  placement: AnchorPlacement;
   origin?: AnchorOrigin;
   offset?: AnchorOffset;
+  required?: boolean;
+  tolerance?: number;
+  resolved?: ResolvedAnchor;
 }
 
 export interface Recipient {
@@ -157,6 +185,13 @@ export const VALIDATION_CODES = [
   "dimension_not_positive",
   "rect_out_of_page",
   "unresolved_prefill_variable",
+  "anchor_optional_on_required_field",
+  "anchor_not_found",
+  "anchor_ambiguous",
+  "anchor_occurrence_out_of_range",
+  "anchor_text_unreadable",
+  "anchor_cross_check_failed",
+  "anchor_resolved_off_page",
 ] as const;
 
 export type ValidationCode = (typeof VALIDATION_CODES)[number];
@@ -225,8 +260,16 @@ export const RECIPIENT_OPTIONAL = ["role"] as const;
 export const FIELD_REQUIRED = ["id", "recipient_id", "type", "page", "rect"] as const;
 export const FIELD_OPTIONAL = ["required", "read_only", "label", "alias", "prefill", "anchor"] as const;
 export const RECT_REQUIRED = ["x", "y", "width", "height"] as const;
-export const ANCHOR_REQUIRED = ["text", "occurrence"] as const;
-export const ANCHOR_OPTIONAL = ["origin", "offset"] as const;
+export const ANCHOR_REQUIRED = ["text", "occurrence", "placement"] as const;
+export const ANCHOR_OPTIONAL = ["origin", "offset", "required", "tolerance", "resolved"] as const;
+export const RESOLVED_ANCHOR_REQUIRED = [
+  "document_sha256",
+  "page",
+  "occurrence_index",
+  "anchor_rect",
+  "rect",
+] as const;
+const DOCUMENT_SHA256_PATTERN = /^[0-9a-f]{64}$/;
 
 /**
  * Round to the canonical precision, half away from zero.
@@ -363,12 +406,7 @@ function canonicaliseField(field: FieldDefinition): FieldDefinition {
     recipient_id: field.recipient_id,
     type: field.type,
     page: field.page,
-    rect: {
-      x: roundCoordinate(field.rect.x),
-      y: roundCoordinate(field.rect.y),
-      width: roundCoordinate(field.rect.width),
-      height: roundCoordinate(field.rect.height),
-    },
+    rect: canonicaliseRect(field.rect),
     required: field.required ?? true,
     read_only: field.read_only ?? false,
   };
@@ -386,23 +424,58 @@ function canonicaliseField(field: FieldDefinition): FieldDefinition {
   }
 
   if (field.anchor !== undefined) {
-    const anchor: Anchor = {
-      text: field.anchor.text,
-      occurrence: field.anchor.occurrence,
+    canonical.anchor = canonicaliseAnchor(field.anchor);
+  }
+
+  return canonical;
+}
+
+function canonicaliseRect(rect: Rect): Rect {
+  return {
+    x: roundCoordinate(rect.x),
+    y: roundCoordinate(rect.y),
+    width: roundCoordinate(rect.width),
+    height: roundCoordinate(rect.height),
+  };
+}
+
+/**
+ * Canonical anchor order: the required properties, then the optional ones, with `required`
+ * always stated — the same rule the field's own `required` follows, so a canonical document
+ * never leaves a requirement to a default.
+ */
+function canonicaliseAnchor(anchor: Anchor): Anchor {
+  const canonical: Anchor = {
+    text: anchor.text,
+    occurrence: anchor.occurrence,
+    placement: anchor.placement,
+  };
+
+  if (anchor.origin !== undefined) {
+    canonical.origin = anchor.origin;
+  }
+
+  if (anchor.offset !== undefined) {
+    canonical.offset = {
+      dx: roundCoordinate(anchor.offset.dx),
+      dy: roundCoordinate(anchor.offset.dy),
     };
+  }
 
-    if (field.anchor.origin !== undefined) {
-      anchor.origin = field.anchor.origin;
-    }
+  canonical.required = anchor.required ?? DEFAULT_ANCHOR_REQUIRED;
 
-    if (field.anchor.offset !== undefined) {
-      anchor.offset = {
-        dx: roundCoordinate(field.anchor.offset.dx),
-        dy: roundCoordinate(field.anchor.offset.dy),
-      };
-    }
+  if (anchor.tolerance !== undefined) {
+    canonical.tolerance = roundCoordinate(anchor.tolerance);
+  }
 
-    canonical.anchor = anchor;
+  if (anchor.resolved !== undefined) {
+    canonical.resolved = {
+      document_sha256: anchor.resolved.document_sha256,
+      page: anchor.resolved.page,
+      occurrence_index: anchor.resolved.occurrence_index,
+      anchor_rect: canonicaliseRect(anchor.resolved.anchor_rect),
+      rect: canonicaliseRect(anchor.resolved.rect),
+    };
   }
 
   return canonical;
@@ -793,7 +866,8 @@ function checkFields(
     }
 
     if ("anchor" in field) {
-      checkAnchor(`${path}/anchor`, field["anchor"], issues);
+      const fieldRequired = typeof field["required"] === "boolean" ? field["required"] : true;
+      checkAnchor(`${path}/anchor`, field["anchor"], fieldRequired, page, options.pageSizes, issues);
     }
   });
 }
@@ -984,7 +1058,14 @@ function checkPrefill(
   }
 }
 
-function checkAnchor(path: string, anchor: unknown, issues: ValidationIssue[]): void {
+function checkAnchor(
+  path: string,
+  anchor: unknown,
+  fieldRequired: boolean,
+  page: number | null,
+  pageSizes: PageSize[] | undefined,
+  issues: ValidationIssue[],
+): void {
   if (!isObject(anchor)) {
     issues.push(issue(path, "invalid_type", "anchor must be an object with the text to locate."));
 
@@ -999,6 +1080,14 @@ function checkAnchor(path: string, anchor: unknown, issues: ValidationIssue[]): 
 
   if ("occurrence" in anchor) {
     checkAnchorOccurrence(`${path}/occurrence`, anchor["occurrence"], issues);
+  }
+
+  const placement = checkAnchorPlacement(`${path}/placement`, anchor, issues);
+  checkAnchorRequired(path, anchor, fieldRequired, issues);
+  checkAnchorTolerance(`${path}/tolerance`, anchor, placement, issues);
+
+  if ("resolved" in anchor) {
+    checkResolvedAnchor(`${path}/resolved`, anchor["resolved"], page, pageSizes, issues);
   }
 
   if ("origin" in anchor) {
@@ -1060,6 +1149,179 @@ function checkAnchor(path: string, anchor: unknown, issues: ValidationIssue[]): 
 /**
  * `"sole"` or a 1-based index, and nothing else. See {@link AnchorOccurrence}.
  */
+function checkAnchorPlacement(
+  path: string,
+  anchor: Record<string, unknown>,
+  issues: ValidationIssue[],
+): AnchorPlacement | null {
+  if (!("placement" in anchor)) {
+    return null;
+  }
+
+  const placement = anchor["placement"];
+
+  if (typeof placement !== "string") {
+    issues.push(issue(path, "invalid_type", "anchor.placement must be a string."));
+
+    return null;
+  }
+
+  if (!(ANCHOR_PLACEMENTS as readonly string[]).includes(placement)) {
+    issues.push(
+      issue(
+        path,
+        "invalid_format",
+        `anchor.placement must be one of ${ANCHOR_PLACEMENTS.join(", ")}; got "${placement}". ` +
+          '"replace" lets the anchor decide where the field goes and keeps only the rectangle\'s size; ' +
+          '"cross_check" keeps the declared rectangle and requires the anchor to agree with it. There is ' +
+          "no default: a field with a rectangle and an anchor that does not say which one governs is refused.",
+      ),
+    );
+
+    return null;
+  }
+
+  return placement as AnchorPlacement;
+}
+
+function checkAnchorRequired(
+  path: string,
+  anchor: Record<string, unknown>,
+  fieldRequired: boolean,
+  issues: ValidationIssue[],
+): void {
+  if (!("required" in anchor)) {
+    return;
+  }
+
+  const required = anchor["required"];
+
+  if (typeof required !== "boolean") {
+    issues.push(issue(`${path}/required`, "invalid_type", "anchor.required must be a boolean."));
+
+    return;
+  }
+
+  if (required || !fieldRequired) {
+    return;
+  }
+
+  issues.push(
+    issue(
+      `${path}/required`,
+      "anchor_optional_on_required_field",
+      'anchor.required is false on a field whose own "required" is true. An absent anchor omits the field, ' +
+        "and a required field that is never placed can never be completed. Make the field optional, or " +
+        "require the anchor.",
+    ),
+  );
+}
+
+function checkAnchorTolerance(
+  path: string,
+  anchor: Record<string, unknown>,
+  placement: AnchorPlacement | null,
+  issues: ValidationIssue[],
+): void {
+  if (!("tolerance" in anchor)) {
+    return;
+  }
+
+  const tolerance = anchor["tolerance"];
+
+  if (typeof tolerance !== "number") {
+    issues.push(issue(path, "invalid_type", "anchor.tolerance must be a number of points."));
+
+    return;
+  }
+
+  if (!Number.isFinite(tolerance)) {
+    issues.push(issue(path, "coordinate_not_finite", `anchor.tolerance must be a finite number; got ${tolerance}.`));
+
+    return;
+  }
+
+  if (tolerance < 0) {
+    issues.push(
+      issue(path, "invalid_format", `anchor.tolerance is a distance in points and must not be negative; got ${tolerance}.`),
+    );
+
+    return;
+  }
+
+  if (placement === "replace") {
+    issues.push(
+      issue(
+        path,
+        "invalid_format",
+        'anchor.tolerance only means something with anchor.placement "cross_check". In "replace" mode the ' +
+          "anchor decides the position outright, so there is no declared rectangle to be within a tolerance of.",
+      ),
+    );
+  }
+}
+
+function checkResolvedAnchor(
+  path: string,
+  resolved: unknown,
+  page: number | null,
+  pageSizes: PageSize[] | undefined,
+  issues: ValidationIssue[],
+): void {
+  if (!isObject(resolved)) {
+    issues.push(issue(path, "invalid_type", "anchor.resolved must be an object recording what resolution found."));
+
+    return;
+  }
+
+  checkObjectShape(path, resolved, RESOLVED_ANCHOR_REQUIRED, [], issues);
+
+  if ("document_sha256" in resolved) {
+    const digest = resolved["document_sha256"];
+
+    if (typeof digest !== "string" || !DOCUMENT_SHA256_PATTERN.test(digest)) {
+      issues.push(
+        issue(
+          `${path}/document_sha256`,
+          "invalid_format",
+          "anchor.resolved.document_sha256 must be 64 lowercase hexadecimal characters: the digest of the " +
+            "exact bytes the text was located in.",
+        ),
+      );
+    }
+  }
+
+  for (const name of ["page", "occurrence_index"] as const) {
+    if (!(name in resolved)) {
+      continue;
+    }
+
+    const value = resolved[name];
+
+    if (typeof value !== "number" || !Number.isInteger(value)) {
+      issues.push(issue(`${path}/${name}`, "invalid_type", `anchor.resolved.${name} must be an integer.`));
+
+      continue;
+    }
+
+    if (value < 1) {
+      issues.push(
+        issue(
+          `${path}/${name}`,
+          name === "page" ? "page_out_of_range" : "invalid_format",
+          `anchor.resolved.${name} is 1-based; got ${value}.`,
+        ),
+      );
+    }
+  }
+
+  for (const name of ["anchor_rect", "rect"] as const) {
+    if (name in resolved) {
+      checkRect(`${path}/${name}`, resolved[name], page, pageSizes, issues);
+    }
+  }
+}
+
 function checkAnchorOccurrence(path: string, occurrence: unknown, issues: ValidationIssue[]): void {
   if (typeof occurrence === "string") {
     if (occurrence === ANCHOR_OCCURRENCE_SOLE) {
