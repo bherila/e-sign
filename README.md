@@ -65,6 +65,7 @@ pnpm run type-check && pnpm run lint && pnpm run test && pnpm run build
 | `docs/HANDOFF.md` | The implementation specification: data model, invariants, native JSON schema, compatibility contract, security policy, deployment profiles, release gates. |
 | `docs/BRIEF.md` | The project brief that motivated the specification. |
 | `docs/adr/` | Architecture decision records. |
+| `docs/operations/` | Operator runbooks. [`bootstrap.md`](docs/operations/bootstrap.md) provisions the first workspace owner; there is no default administrator. |
 | `tests/Fixtures/` | Synthetic PDFs, captured API fixtures, and validation vectors. Never real agreements or real people. |
 | `THIRD_PARTY_NOTICES.md` | License inventory. Original code is MIT; dependencies keep their own licenses. |
 
