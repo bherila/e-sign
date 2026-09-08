@@ -1,5 +1,9 @@
 * text=auto eol=lf
 
+# A sealed PDF is signed bytes. Any line-ending normalization changes the region
+# the signature covers and invalidates it, so these are never text.
+*.pdf binary
+
 *.blade.php diff=html
 *.css diff=css
 *.html diff=html

@@ -59,6 +59,7 @@ jobs:
               - 'database/**'
               - 'routes/**'
               - 'tests/**'
+              - 'scripts/**'
               - '.github/workflows/**'
             docker:
               - '.docker/**'
@@ -241,9 +242,65 @@ jobs:
           docker logs esign-smoke
           exit 1
 
+  validation:
+    name: Independent seal validation (pyHanko)
+    needs: changes
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.docker == 'true'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          # The sealing path is pure PHP + OpenSSL; the supported floor is the
+          # version the artifact has to be reproducible on.
+          php-version: '8.4'
+          extensions: dom, curl, libxml, mbstring, zip, bcmath, intl, gd, exif, iconv, openssl
+          coverage: none
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v6
+        with:
+          path: vendor
+          key: composer-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Prepare Laravel environment
+        run: cp .env.example .env && php artisan key:generate --no-interaction --force
+
+      - name: Install pyHanko
+        run: |
+          python3 -m venv /tmp/pyhanko-venv
+          /tmp/pyhanko-venv/bin/pip install --quiet --upgrade pip
+          # The CLI ships as its own distribution: installing pyhanko alone
+          # gives the library and no `pyhanko` entry point.
+          /tmp/pyhanko-venv/bin/pip install --quiet pyhanko pyhanko-cli
+
+      - name: Reseal the artifacts and validate them
+        env:
+          PYHANKO_VENV: /tmp/pyhanko-venv
+        run: scripts/validate-seal.sh --regenerate
+
+      - name: Upload the validator output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pyhanko-validation
+          path: |
+            tests/Fixtures/validation/pyhanko-output.txt
+            tests/Fixtures/validation/manifest.tsv
+            tests/Fixtures/validation/*.pdf
+          if-no-files-found: warn
+          retention-days: 7
+
   result:
     name: CI result
-    needs: [changes, test, licenses, image]
+    needs: [changes, test, licenses, image, validation]
     if: always()
     runs-on: ubuntu-24.04-arm
     steps:
@@ -259,6 +316,9 @@ jobs:
             exit 1
           fi
           if [[ "${{ needs.image.result }}" == "failure" || "${{ needs.image.result }}" == "cancelled" ]]; then
+            exit 1
+          fi
+          if [[ "${{ needs.validation.result }}" == "failure" || "${{ needs.validation.result }}" == "cancelled" ]]; then
             exit 1
           fi
           echo "Required checks passed or no code paths changed."
