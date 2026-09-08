@@ -69,9 +69,26 @@ class OwnerBootstrapper
                     return [$user, $binding];
                 }
 
+                $placeholderEmail = $this->placeholderEmail($issuer, $subject);
+
+                // A binding is the only thing that links this tuple to a user row, and it
+                // is gone. If a row still holds the derived placeholder address, an earlier
+                // binding for this tuple was revoked and its orphan row is still here. Say
+                // so and stop: silently adopting a row found by its address would be
+                // account linking by email, however derived that address is.
+                if (User::where('email', $placeholderEmail)->exists()) {
+                    // The message carries its remedy after a newline; the command prints
+                    // the two parts separately so neither gets wrapped into nonsense.
+                    throw new RuntimeException(
+                        "A user row provisioned for {$issuer} / {$subject} exists, but its identity binding was removed.\n".
+                        'Delete that user row if it holds nothing worth keeping, or bind it again directly. '.
+                        'Provisioning never adopts a user row it found by address.'
+                    );
+                }
+
                 $user = User::create([
                     'name' => $this->placeholderName($subject),
-                    'email' => $this->placeholderEmail($issuer, $subject),
+                    'email' => $placeholderEmail,
                     'password' => Str::random(64),
                 ]);
                 $changes[] = "created placeholder user #{$user->getKey()} for the identity binding";
@@ -160,8 +177,9 @@ class OwnerBootstrapper
 
         if ($existing !== null && $existing->trashed()) {
             throw new RuntimeException(
-                "Workspace '{$slug}' exists but is deleted. Restore it, or choose a different --workspace slug. ".
-                'Provisioning refuses to reuse a deleted workspace because its envelopes and evidence are still attached to it.'
+                "Workspace '{$slug}' exists but is deleted.\n".
+                'Restore it, or choose a different --workspace slug. A deleted workspace still has its envelopes and evidence attached, '.
+                'so provisioning never reuses one.'
             );
         }
 

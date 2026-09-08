@@ -393,6 +393,32 @@ class BootstrapOwnerCommandTest extends TestCase
             ->assertFailed();
     }
 
+    public function test_it_refuses_when_a_revoked_bindings_user_row_is_still_present(): void
+    {
+        // Revoking login means deleting the identity binding, which leaves the placeholder
+        // user row behind. Re-provisioning the same tuple must not adopt that row by its
+        // address, and must not crash on the unique-email constraint either.
+        $this->artisan('esign:bootstrap-owner', [
+            '--issuer' => self::ISSUER,
+            '--subject' => self::SUBJECT,
+            '--workspace' => 'acme',
+        ])->assertSuccessful();
+
+        IdentityBinding::query()->forIssuerSubject(self::ISSUER, self::SUBJECT)->firstOrFail()->delete();
+
+        $this->artisan('esign:bootstrap-owner', [
+            '--issuer' => self::ISSUER,
+            '--subject' => self::SUBJECT,
+            '--workspace' => 'acme',
+        ])
+            ->expectsOutputToContain('its identity binding was removed')
+            ->expectsOutputToContain('never adopts a user row it found by address')
+            ->assertFailed();
+
+        $this->assertSame(1, User::count());
+        $this->assertSame(0, IdentityBinding::count());
+    }
+
     public function test_it_refuses_to_reuse_a_soft_deleted_workspace(): void
     {
         Workspace::factory()->create(['slug' => 'acme'])->delete();

@@ -109,7 +109,11 @@ class BootstrapOwnerCommand extends Command
                 $outcome = $bootstrapper->bootstrapLocalUser($user, $slug, $name, $actor);
             }
         } catch (RuntimeException $exception) {
-            return $this->refuse($exception->getMessage());
+            // Domain refusals carry their remedy after a newline so each part is printed
+            // on its own and neither is wrapped into nonsense.
+            [$problem, $remedy] = array_pad(explode("\n", $exception->getMessage(), 2), 2, null);
+
+            return $this->refuse((string) $problem, $remedy);
         }
 
         $this->report($outcome);
