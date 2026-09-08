@@ -208,7 +208,7 @@ for `GET /signing-requests/{id}`, so a polling receiver and a subscribing receiv
 told two different stories. The mapping from transition to event to message is
 `docs/delivery/envelope-events.md`. Rows for events no transition produces stay **unknown**.
 
-| Event | Upstream shape (prose) | Status | Fixture | Notes |
+| Event | Upstream shape (prose) | Status | Fixture / test | Notes |
 |---|---|---|---|---|
 | `signing_request.created` | Envelope below, `data.signing_request` | supported | `DeliveryEnvelopeEventSinkTest::test_creating_an_envelope_records_the_created_event_and_tells_nobody` | Recorded when the envelope is built from its snapshot. No mail: a draft has been shown to nobody. |
 | `signing_request.sent` | idem | supported | `DeliveryEnvelopeEventSinkTest::test_sending_records_one_event_and_invites_only_the_released_stage` | Carries every recipient. The invitation mail goes only to the stage `send()` released. |
