@@ -35,12 +35,24 @@ use Illuminate\Database\ConnectionInterface;
  *    date, so age of a prefix is not even available to be misused here.
  *  - **Never a soft-deleted `documents` row.** A document can be soft-deleted by an ordinary
  *    user action, and docs/BLOB_STORAGE.md is explicit that a soft delete is meant to be
- *    reversible — destroying the bytes would make it permanent. Uploaded originals are only
- *    ever removed by the abandoned-draft pass, which hard-deletes the rows in the same
- *    operation.
+ *    reversible — destroying the bytes would make it permanent. This class never reads
+ *    `documents` at all; uploaded originals are only ever removed by the abandoned-draft
+ *    pass, which excludes a soft-deleted row from its plan *and* re-checks the exclusion at
+ *    the moment it deletes, so the rows and the bytes always go together or not at all
+ *    ({@see RetentionSweeper}, and docs/security/review-2026-09.md finding B-3).
  *  - **Never a held envelope.** Re-checked here as well as in the sweep, because the grace
  *    period is long enough for a hold to arrive during it. That is the whole point of the
  *    grace period.
+ *
+ * What eligibility is *not* is a record that retention made the decision. It is inferred
+ * from `deleted_at` alone, and nothing else in the application writes that column today —
+ * `Envelope::$fillable` excludes it and no route or job deletes an envelope. So the safety
+ * property the runbook rests on, that executed agreements are never destroyed until an
+ * operator configures a reviewed window, lives in {@see RetentionSweeper} and not here: a
+ * second writer of `envelopes.deleted_at` would inherit "destroy this agreement's bytes in
+ * thirty days" without one. That is a known residual rather than an oversight
+ * (docs/security/review-2026-09.md finding B-4); fixing it properly means a
+ * `retention_scheduled_at` column, which is a schema change and not a docblock.
  *
  * ## What survives
  *

@@ -13,8 +13,16 @@ use Illuminate\Support\Carbon;
  * One attempt, or one piece of provider feedback, about one message.
  *
  * Append-only in practice: there is a `created_at` and no `updated_at`, and nothing in the
- * application updates a row here. An event is a claim someone made at a point in time, and
- * rewriting it would destroy the only record of what was claimed.
+ * application updates a row here — with one named exception. An event is a claim someone
+ * made at a point in time, and rewriting it would destroy the only record of what was
+ * claimed.
+ *
+ * The exception is `App\Domain\Evidence\Retention\RecipientEraser`, which replaces an erased
+ * recipient's address wherever it appears inside `payload`. Everything that makes the row a
+ * claim — the source, the event name, the Message-ID, and the timestamps — is left
+ * exactly as it was; what changes is a mailbox the person has asked the service to forget,
+ * and an erasure that stopped at the columns would have left it quoted in a provider bounce
+ * body indefinitely.
  *
  * `outbound_mail_id` is null on an orphan — feedback about a Message-ID this deployment has
  * no row for. See the migration for why those are kept rather than dropped.

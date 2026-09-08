@@ -457,6 +457,29 @@ final readonly class RetentionSweeper
         $objectsFailed = 0;
 
         foreach ($plan->unreferencedDocuments as $planned) {
+            // Rule 5, applied to this pass's *other* predicate. The plan excludes a
+            // soft-deleted document, but a plan is printed to a human first and the "delete
+            // document" the exclusion exists for can arrive while they are reading it. Row
+            // and bytes both, so an undo that was available a second ago is not made
+            // permanent by the run the operator then confirmed.
+            $document = $this->db->table('documents')
+                ->where('id', $planned['id'])
+                ->first(['deleted_at']);
+
+            if ($document === null) {
+                continue;
+            }
+
+            if ($document->deleted_at !== null) {
+                $skipped[] = sprintf(
+                    'document %s: it was soft-deleted after the plan was made, and a soft delete is '
+                    .'an undo rather than a destruction',
+                    $planned['public_id'],
+                );
+
+                continue;
+            }
+
             $stillUnreferenced = $this->db->table('document_revisions')
                 ->where('document_id', $planned['id'])
                 ->whereExists(fn ($query) => $query->from('envelopes')

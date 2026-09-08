@@ -107,6 +107,11 @@ and the review revision of an envelope retention has soft-deleted but not yet pu
 both protected. This is `docs/BLOB_STORAGE.md`'s rule, and breaking it would make a
 reversible soft delete permanent.
 
+The exclusion holds twice: a soft-deleted document is left out of the plan, and the plan is
+re-checked against the row as each deletion runs. A dry run is read by a human, and somebody
+can press "delete" in the UI while they are reading it — the run they then confirm must not
+take that undo away.
+
 ### Executed agreements
 
 Only when the policy is set. For each completed envelope whose `completed_at` is older than
@@ -137,6 +142,14 @@ longer than `purge_grace_days`. Nothing else makes an object eligible:
   delete is meant to be reversible.
 - **Never a held envelope**, re-checked at the moment the purge runs. The grace period is
   long enough for a preservation notice to arrive during it, which is the point.
+
+Eligibility is inferred from `envelopes.deleted_at` and not from a record that retention was
+what set it. Nothing else in the application writes that column — the model's `$fillable`
+excludes it and no route or queue job deletes an envelope — so the promise that executed
+agreements are never destroyed without a configured policy is enforced by the *first* pass.
+A second writer of `deleted_at` would inherit this one. That residual is recorded as finding
+B-4 in [`docs/security/review-2026-09.md`](../security/review-2026-09.md); closing it means a
+`retention_scheduled_at` column rather than a check here.
 
 **To undo a retention decision during the grace period**, place a hold (which stops the
 purge immediately) and then clear `deleted_at` on the envelope row. There is no command for
@@ -191,10 +204,29 @@ php artisan esign:privacy:erase-recipient 01J... --reason="Article 17 request 20
 | `envelope_recipients` | `identity_snapshot` | a marker recording that it was erased |
 | `outbound_mails` | `to_email`, `to_name`, `subject` | the same tombstones |
 | `outbound_mails` | `context.recipient_name`, `context.actor_name` | `Erased recipient` |
+| `outbound_mails` | the address anywhere else in `context` | the tombstone address |
+| `outbound_mail_events` | the address anywhere in `payload` | the tombstone address |
 
 The address uses the reserved `.invalid` TLD (RFC 2606), so it is unroutable by
 construction, and it embeds the recipient's own ULID so two erasures on one envelope cannot
 collide. A blank email would be indistinguishable from a bug.
+
+**Every kind of message, not only the invitations.** The outbox records an invitation, a
+reminder, and a one-time code against the recipient row, but a completion, cancellation,
+expiry, decline, or admin-failure notice against the *envelope*. Matching on the recipient
+alone therefore left the address in cleartext on every terminal notice the person received.
+The match is the union of "this message was about this recipient" and "this message went to
+this address, about this agreement", so it reaches every kind while leaving the messages to
+the other parties on the same envelope exactly as they were. A different person who happens
+to share the mailbox keeps every message about *their* agreements, because the address is
+only ever matched inside the one envelope being erased.
+
+The address is scrubbed out of the JSON on those rows too, not only out of the named
+columns: a sender-authored `context.reason` and a provider's bounce body can both quote a
+mailbox. `MailErrorRedactor` already strips addresses from provider payloads on the way in;
+this is the belt to that brace. `outbound_mail_events` is append-only everywhere else, and
+this is its one exception — the source, the event, the Message-ID, and the timestamps are
+untouched, so the claim the row records survives and only the mailbox goes.
 
 The message rows themselves stay, with their states and timestamps. That a message was sent
 is not personal data, and destroying the record of the contact is not what an erasure

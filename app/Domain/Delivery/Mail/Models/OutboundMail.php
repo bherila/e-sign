@@ -155,8 +155,8 @@ class OutboundMail extends Model
      * The outbox renders from a persisted context — that is what makes delivery survive a
      * crash — so a live code has to sit in this column between enqueue and send. What it did
      * *not* have to do is sit there afterwards. `outbound_mails` has no pruner, and
-     * `RecipientEraser` rewrites only the two name fields, so every code ever mailed was
-     * readable in the database and in every backup, indefinitely — while the module's own
+     * `RecipientEraser` rewrites contact data rather than credentials, so every code ever
+     * mailed was readable in the database and in every backup, indefinitely — while the
      * documentation said "for the ten minutes it is worth anything" and "until that row is
      * pruned" (docs/security/review-2026-09.md finding D-4).
      *
