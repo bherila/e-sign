@@ -78,6 +78,7 @@ pnpm run type-check && pnpm run lint && pnpm run test && pnpm run build
 | `docs/HANDOFF.md` | The implementation specification: data model, invariants, native JSON schema, compatibility contract, security policy, deployment profiles, release gates. |
 | `docs/BRIEF.md` | The project brief that motivated the specification. |
 | `docs/adr/` | Architecture decision records. |
+| `docs/api/` | The HTTP surfaces. [`native-v1.md`](docs/api/native-v1.md) documents `/api/v1`: authentication, scopes, idempotency, pagination, errors, and the endpoint table. The OpenAPI 3.1 document is committed at [`resources/api/openapi-v1.json`](resources/api/openapi-v1.json) and served at `GET /api/v1/openapi.json`. |
 | `docs/operations/` | Operator runbooks. [`bootstrap.md`](docs/operations/bootstrap.md) provisions the first workspace owner; there is no default administrator. |
 | `docs/stage0/` | Stage 0 feasibility findings, including what PAdES level the sealing pipeline actually reaches and how that was verified: [docs/stage0/sealing.md](docs/stage0/sealing.md). |
 | `tests/Fixtures/` | Synthetic PDFs, captured API fixtures, and validation vectors. Never real agreements or real people. |
