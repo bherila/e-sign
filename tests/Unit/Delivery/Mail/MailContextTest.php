@@ -124,6 +124,27 @@ class MailContextTest extends TestCase
         $this->assertNull($context->actionUrl);
     }
 
+    public function test_a_stored_row_with_no_recipient_name_still_rehydrates(): void
+    {
+        // The constructor stays strict, so a caller cannot enqueue a nameless message. This
+        // path is only reached by a row that was already accepted, and refusing it would
+        // produce exactly what the outbox exists to prevent: a message that can never be
+        // sent, burns every retry, and lands in `failed` for a reason nobody can act on.
+        $context = MailContext::fromArray([
+            'recipient_name' => '  ',
+            'agreement_title' => 'Mutual Nondisclosure Agreement',
+        ]);
+
+        $this->assertSame(MailContext::UNNAMED_RECIPIENT, $context->recipientName);
+    }
+
+    public function test_a_caller_still_cannot_build_a_nameless_context(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+
+        new MailContext(recipientName: '');
+    }
+
     public function test_an_unparseable_expiry_becomes_no_stated_expiry(): void
     {
         $context = MailContext::fromArray([
