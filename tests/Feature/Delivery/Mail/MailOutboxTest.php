@@ -73,7 +73,12 @@ class MailOutboxTest extends TestCase
         );
 
         // The context round-trips, so a worker renders from exactly what was recorded.
-        $this->assertSame($context->toArray(), $mail->fresh()?->context);
+        //
+        // Compared through MailContext rather than against the raw column, because MySQL's
+        // native JSON type does not preserve object key order (it stores keys sorted) while
+        // SQLite and MariaDB return them as written. The claim under test is that the worker
+        // rehydrates the same context, not that the engine echoed the same byte order.
+        $this->assertSame($context->toArray(), $mail->fresh()?->mailContext()->toArray());
 
         Queue::assertPushed(
             SendOutboundMail::class,
