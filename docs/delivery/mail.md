@@ -139,6 +139,34 @@ request is authorized every time (`docs/BLOB_STORAGE.md`).
 Branding comes from `APP_NAME`. This is self-hosted software and the installation is not
 called the same thing everywhere.
 
+### Markdown, not just HTML, has to be escaped
+
+Blade escapes HTML. It does not escape Markdown, and these are Markdown mailables, so
+Blade's HTML-escaped output is handed to CommonMark afterwards: `[click here](https://evil.test)`
+in any interpolated field becomes a live link in the delivered message.
+
+The fields that reach these templates are not trusted. A decline reason is typed by an
+external signer who holds nothing but a signing link, and the resulting notice goes to the
+*sender* — who has every reason to trust a link in a message from their own agreement
+service. Recipient names, sender names, and agreement titles are no more trustworthy.
+
+So the templates never see a `MailContext`. They see `App\Mail\MailCopy`, which neutralizes
+`\`, `[`, `]`, `` ` ``, `*`, `_`, `~`, and `|` in every text field on the way in. Two
+consequences worth knowing:
+
+- `$actionUrl` is deliberately **not** escaped. It is the one URL the message may carry, its
+  shape is already validated, and it is only used in a Blade attribute
+  (`<x-mail::button :url="…">`) where HTML escaping is the right protection.
+- The subject is built from the raw context, not the copy. A subject is a header, never
+  Markdown, and backslashes added for CommonMark's benefit would be read literally by every
+  mail client.
+
+`<`, `>`, `&`, `"`, and `'` need no rule here: Blade turns them into entities before
+CommonMark sees them, which is what kills raw HTML and `<autolink>` syntax. Bare URLs are not
+links either, because Laravel's mail Markdown environment loads only the CommonMark core and
+table extensions with no autolink extension — asserted in `MailableRenderingTest` rather than
+assumed, so a framework change that adds autolinking fails a test instead of shipping.
+
 ## Reminders
 
 `esign:signing:remind` runs daily from `routes/console.php`. Its conditions are facts about a
@@ -197,10 +225,15 @@ nothing to check, so nothing is accepted.
 | `request` | `accepted` |
 | `delivered` | `delivered` |
 | `hardBounce`, `softBounce`, `blocked`, `invalid_email`, `error` | `bounced` |
-| `spam`, `unsubscribed` | `complained` |
+| `spam` | `complained` |
 | `deferred` | recorded, no change (still in flight) |
+| `unsubscribed` | recorded, no change |
 | anything unrecognized | recorded, no change |
 | `opened`, `click`, and other engagement events | **discarded, not stored** |
+
+`unsubscribed` is recorded and moves nothing. It is not a spam complaint, it is not evidence
+about delivery, and there is no suppression state to put it in — and `complained` would be
+both the wrong claim and the top rank, so nothing could ever correct it afterwards.
 
 Engagement events are dropped entirely. The templates carry no tracking pixel by design, and
 storing an `opened` row would reintroduce exactly that data through the provider's side door.
@@ -252,6 +285,12 @@ only the first hop was validated.
 | `Complaint` | `complained` |
 | `DeliveryDelay` | recorded, no change |
 
+An event is stamped with its own time (`bounce.timestamp`, `complaint.timestamp`, …), not
+`mail.timestamp`, which is when the message was *sent* and is identical on every notification
+about it. That value becomes `state_changed_at`, so the send time would stamp a bounce
+backwards to send and break both the operator timeline and the 24-hour windows the backlog
+probe and `esign:mail:backlog` read.
+
 **To turn SES feedback on:** add `aws/aws-sns-message-validator`, implement
 `SnsMessageVerifier` over `Aws\Sns\MessageValidator::validate()`, and bind it in
 `DeliveryServiceProvider` in place of `RejectingSnsMessageVerifier`. Nothing else changes.
@@ -270,6 +309,12 @@ become `[token]`, and payload keys whose names look like addresses, tokens, sign
 certificate URLs are replaced wholesale. Errors are truncated to 500 characters: this is a
 diagnostic column, not an archive.
 
+Credential scrubbing itself is delegated to the webhook outbox's `TextRedactor` rather than
+reimplemented, so there is one set of rules for JWTs, `Bearer …`, labelled credentials, and
+bare opaque runs. Two redactors solving one problem is how you get two different sets of
+holes. It also means a 26-character ULID survives on purpose: those are the identifiers an
+operator correlates on.
+
 Raw provider bodies are not retained. The redacted copy is enough to explain a state change,
 and this table is read by operators far more often than by an incident.
 
@@ -279,8 +324,11 @@ it does not license putting a secret in one.
 ## Operating it
 
 ```bash
-# What is stuck, what was given up on, and why.
+# What is stuck, what was given up on, and why. Oldest first: the default listing answers
+# "what has been waiting longest".
 php artisan esign:mail:backlog
+
+# Every state, most recent first: "what just happened".
 php artisan esign:mail:backlog --all --limit=50
 
 # Send a message again, as a new message linked to the original.

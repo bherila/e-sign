@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Delivery\Mail;
 
 use App\Domain\Delivery\Mail\MailErrorRedactor;
+use App\Domain\Delivery\Webhooks\TextRedactor;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -63,7 +64,29 @@ class MailErrorRedactorTest extends TestCase
         $redacted = $this->redactor->text('Rejected credential 0123456789abcdef0123456789abcdef');
 
         $this->assertStringNotContainsString('0123456789abcdef0123456789abcdef', $redacted);
-        $this->assertStringContainsString('[token]', $redacted);
+        $this->assertStringContainsString(TextRedactor::PLACEHOLDER, $redacted);
+        $this->assertStringContainsString('Rejected credential', $redacted);
+    }
+
+    public function test_a_ulid_survives_because_it_is_what_an_operator_correlates_on(): void
+    {
+        $redacted = $this->redactor->text('Delivery 01JQZX9K7M4N2P5R8T3V6W1Y0B was refused');
+
+        $this->assertStringContainsString('01JQZX9K7M4N2P5R8T3V6W1Y0B', $redacted);
+    }
+
+    public function test_removes_the_credential_shapes_the_webhook_redactor_knows_about(): void
+    {
+        // The point of delegating to TextRedactor: before it, `passphrase` was not in this
+        // class's key list and a JWT was only caught by length. Two redactors solving one
+        // problem is how you get two different sets of holes.
+        $redacted = $this->redactor->text(
+            'passphrase: hunter2hunter2 and eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2ln and client_secret=abc123'
+        );
+
+        $this->assertStringNotContainsString('hunter2hunter2', $redacted);
+        $this->assertStringNotContainsString('eyJhbGciOiJIUzI1NiJ9', $redacted);
+        $this->assertStringNotContainsString('abc123', $redacted);
     }
 
     public function test_removes_a_labelled_secret_but_keeps_the_sentence_readable(): void

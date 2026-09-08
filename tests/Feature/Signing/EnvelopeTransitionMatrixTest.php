@@ -165,7 +165,15 @@ class EnvelopeTransitionMatrixTest extends TestCase
             'send' => $machine->send($envelope),
             'submit_values' => $machine->submitValues($recipient, []),
             'set_sender_values' => $machine->setSenderValues($envelope, []),
-            'accept' => $machine->accept($recipient, $scenario->acceptanceRequest($envelope, 'session-matrix')),
+            // A session reference that cannot collide with the one `signAs()` used to
+            // arrange the finalizing/completed/failed states. `accept()` runs its replay
+            // lookup before the legality check — it has to, or a retry would always be
+            // refused as stale — so a shared reference would silently take the replay path
+            // and return success where this test expects IllegalTransition.
+            'accept' => $machine->accept(
+                $recipient,
+                $scenario->acceptanceRequest($envelope, 'session-matrix-'.$envelope->getKey()),
+            ),
             'decline' => $machine->decline($recipient, 'No.'),
             'cancel' => $machine->cancel($envelope, 'Withdrawn.'),
             // Expiry is a fact about the clock: `expire()` refuses an envelope that is not

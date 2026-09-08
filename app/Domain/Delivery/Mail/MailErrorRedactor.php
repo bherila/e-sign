@@ -4,21 +4,33 @@ declare(strict_types=1);
 
 namespace App\Domain\Delivery\Mail;
 
+use App\Domain\Delivery\Webhooks\TextRedactor;
+
 /**
  * Strips the parts of a transport error or a provider payload that must not be stored.
  *
- * Every one of these substitutions exists because a real transport puts the thing there.
- * An SMTP rejection quotes the envelope recipient back at you; a Brevo API error echoes the
- * request, URLs and all; a Symfony exception message can carry the DSN it was built from,
- * which contains the API key. `outbound_mails.last_error` and `outbound_mail_events.payload`
- * are read by operators and copied into tickets, so what lands there is a redacted sentence,
- * not a verbatim provider response.
+ * Every rule here exists because a real transport puts the thing there. An SMTP rejection
+ * quotes the envelope recipient back at you; a Brevo API error echoes the request, URLs and
+ * all; a Symfony exception message can carry the DSN it was built from, which contains the
+ * API key. `outbound_mails.last_error` and `outbound_mail_events.payload` are read by
+ * operators and copied into tickets, so what lands there is a redacted sentence, not a
+ * verbatim provider response.
  *
- * The order matters. Addresses go first, because an address is also the tail of a URL-ish
- * string and would otherwise survive inside one. URLs go next as whole units, so the token
- * in a signing link disappears with the link rather than being matched separately. Only
- * then are bare high-entropy runs removed, which is what catches a key pasted into a
- * message with no surrounding syntax.
+ * Credential scrubbing is delegated to the webhook outbox's TextRedactor rather than
+ * reimplemented. Two redactors solving one problem is how you end up with two different
+ * sets of holes — before this delegation, `passphrase: …` survived here while an email
+ * address survived there. TextRedactor also draws the opaque-run threshold at 32 characters
+ * specifically so a 26-character ULID stays readable, which matters because those are the
+ * identifiers an operator correlates on.
+ *
+ * TODO: TextRedactor is shared infrastructure that happens to live under `Webhooks/`. It
+ * belongs in a namespace neither submodule owns; left in place for now so this change does
+ * not rename a class the webhook outbox is still being built around.
+ *
+ * What stays here is what is specific to mail. Addresses go first, because an address is
+ * also the tail of a URL-ish string and would otherwise survive inside one. Whole URLs go
+ * next as single units, so the token in a signing link disappears with the link rather than
+ * being partially matched and leaving the host behind.
  *
  * This is a redactor, not a security boundary. It reduces the blast radius of an error
  * message; it does not license putting a secret in one.
@@ -54,10 +66,10 @@ final class MailErrorRedactor
     /** Guards against a hostile provider body inflating a JSON column. */
     private const MAX_PAYLOAD_DEPTH = 6;
 
+    public function __construct(private readonly TextRedactor $credentials = new TextRedactor) {}
+
     public function text(string $error): string
     {
-        $error = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]+/u', ' ', $error) ?? $error;
-
         // Addresses first: `<someone@example.test>` inside an SMTP reply, and the tail of
         // anything that looks like one.
         $error = preg_replace('/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/', '[address]', $error) ?? $error;
@@ -65,30 +77,12 @@ final class MailErrorRedactor
         // Whole URLs, so a path or query token goes with the link that carried it.
         $error = preg_replace('#\b[a-z][a-z0-9+.\-]*://[^\s"\'<>\)\]]+#i', '[url]', $error) ?? $error;
 
-        // `token=...` and `api-key: ...` with no URL around them. A separator is required
-        // so the words themselves survive in a sentence like "signature verification
-        // failed", which an operator needs to be able to read.
-        $error = preg_replace(
-            '/\b(bearer|token|api[_\-]?key|secret|password|signature)\s*[:=]\s*\S+/i',
-            '$1=[redacted]',
-            $error
-        ) ?? $error;
-
-        // `Authorization: Bearer <value>` style, where the separator sits before the scheme.
-        $error = preg_replace('/\bbearer\s+\S+/i', 'bearer [redacted]', $error) ?? $error;
-
-        // A bare high-entropy run. 24 characters is above anything in ordinary prose or in
-        // a PHP class name segment, and below the length of every credential format in use.
-        $error = preg_replace('/\b[A-Za-z0-9_\-]{24,}={0,2}\b/', '[token]', $error) ?? $error;
-
-        $error = trim(preg_replace('/\s+/u', ' ', $error) ?? $error);
+        // Everything else — JWTs, `Bearer …`, labelled credentials, bare opaque runs,
+        // control characters, whitespace, and the length cap.
+        $error = $this->credentials->redact($error, maxBytes: self::MAX_LENGTH);
 
         if ($error === '') {
             return 'The transport failed without a usable message.';
-        }
-
-        if (mb_strlen($error) > self::MAX_LENGTH) {
-            return mb_substr($error, 0, self::MAX_LENGTH - 1).'…';
         }
 
         return $error;

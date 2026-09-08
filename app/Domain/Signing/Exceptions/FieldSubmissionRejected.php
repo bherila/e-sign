@@ -22,6 +22,7 @@ namespace App\Domain\Signing\Exceptions;
  * | `field_service_supplied` | the service derives this field from evidence it already holds |
  * | `field_requires_recipient` | only the owning recipient may supply this, never the sender |
  * | `field_frozen` | content is frozen and this field is not a signer-specific field of an unsigned recipient |
+ * | `field_owner_signed` | the field's owner has already attested; their own fields are closed |
  * | `invalid_value` | the value is not of the shape the field's type accepts |
  */
 final class FieldSubmissionRejected extends SigningException
@@ -99,6 +100,24 @@ final class FieldSubmissionRejected extends SigningException
             .'signer-specific field of a recipient who has yet to sign.',
             $fieldId,
             'field_frozen',
+        );
+    }
+
+    /**
+     * The field's owner has already attested.
+     *
+     * A signer-specific field is not covered by the material digest — that is what makes it
+     * signer-specific — so its owner's attestation cannot detect a later change to it. Once
+     * they have signed, their own fields are as closed as the agreement's text, or the
+     * printed name and title rendered beside their signature would be ones they never saw.
+     */
+    public static function ownerHasSigned(string $fieldId, string $ownerId): self
+    {
+        return new self(
+            'Field "'.$fieldId.'" belongs to recipient "'.$ownerId.'", who has already attested; '
+            .'their fields cannot change afterwards.',
+            $fieldId,
+            'field_owner_signed',
         );
     }
 
