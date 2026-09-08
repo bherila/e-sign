@@ -7,7 +7,7 @@ minimal one.
 | Route | Purpose | Checks | Audience |
 |---|---|---|---|
 | `GET /up` | Liveness | Only that the PHP process answers HTTP. No database, no dependencies. Laravel's built-in probe (`bootstrap/app.php`, `health: '/up'`). | Load balancers, container orchestrators |
-| `GET /health/ready` | Readiness | Database, queue lag, scheduler heartbeat, storage, mail configuration, webhook backlog, signing material, TSA configuration. | Operators, uptime monitors |
+| `GET /health/ready` | Readiness | Database, queue lag, scheduler heartbeat, storage, mail configuration, mail backlog, webhook backlog, signing material, TSA configuration. | Operators, uptime monitors |
 
 ## `/health/ready`
 
@@ -56,12 +56,15 @@ ESIGN_HEALTH_ALLOW_CIDRS=127.0.0.1/32,::1/128
 | `scheduler` | Heartbeat cache key refreshed within `esign.health.scheduler_warn_seconds` (default 180s) | Heartbeat older than that, within `esign.health.scheduler_fail_seconds` (default 600s) | Heartbeat older than that, or never recorded |
 | `storage` | Write, read-back, and delete of a small probe file on the default disk succeed | — | Any step fails |
 | `mail` | `mail.default` is a delivering transport, or the app is not in production | — | `mail.default` is `log` or `array` while `APP_ENV=production` |
+| `mail_backlog` | No message is stuck in `queued` beyond `esign.mail.backlog_warn_seconds` (default 300s) and fewer than `esign.mail.failed_warn_count` (default 1) reached `failed` in the last 24h | Oldest `queued` message is older than the warn threshold, or the 24h `failed` count has reached `failed_warn_count` | Oldest `queued` message is older than `esign.mail.backlog_fail_seconds` (default 1800s), the 24h `failed` count has reached `esign.mail.failed_fail_count` (default 25), or the outbox table is unreadable |
 | `webhook_backlog` | Always, for now | — | — (placeholder; see below) |
 | `signing_material` | Certificate and private key paths are configured and readable, and the certificate expires more than `esign.health.cert_warn_days` (default 30) days out | Unset outside production, or the certificate expires within the warn window | Unset in production, unreadable, unparseable, or expired |
 | `tsa` | `ESIGN_TSA_URL` unset, or set and parses as `http`/`https` | — | Set but not a valid `http(s)` URL |
 
 The queue, scheduler, and certificate thresholds live in `config/esign.php` under the
-`health` key and are each overridable by an `ESIGN_HEALTH_*` environment variable.
+`health` key and are each overridable by an `ESIGN_HEALTH_*` environment variable. The mail
+backlog thresholds live under the `mail` key, overridable by `ESIGN_MAIL_BACKLOG_*` and
+`ESIGN_MAIL_FAILED_*`.
 
 **Overall status** is the worst of every probe: `ok` only if all probes are `ok`, `degraded`
 if the worst is a `warn`, `fail` if any probe `fail`s.
@@ -74,6 +77,13 @@ if the worst is a `warn`, `fail` if any probe `fail`s.
   well-formed. Actual TSA reachability is checked by the worker at signing time, where an
   unreachable TSA is a signing error, not a silent downgrade to a B-B signature — see
   `docs/HANDOFF.md` §9.
+- **`mail_backlog` is not the same check as `mail`.** `mail` asks whether a delivering
+  transport is configured; `mail_backlog` asks whether messages are actually leaving. The
+  failure it exists to catch is the one where configuration is perfect and nothing is being
+  sent because no queue worker is running on the `mail` queue. It counts `queued` only: a
+  message at `sent_to_provider` is out of the application's hands, and counting it would make
+  a working deployment look broken whenever a provider was slow with feedback. `sent_to_provider`
+  is not delivery — see `docs/delivery/mail.md`.
 - **`webhook_backlog` is a placeholder.** The Delivery module's webhook outbox table does not
   exist yet (tracked in issue #34). Until it lands, this probe always reports `ok` with the
   message "No outbox yet." — replace its implementation, not its shape, once the outbox table

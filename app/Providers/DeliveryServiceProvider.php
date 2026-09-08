@@ -4,12 +4,19 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Domain\Delivery\Mail\Console\MailBacklogCommand;
+use App\Domain\Delivery\Mail\Console\ResendOutboundMailCommand;
 use App\Domain\Delivery\Mail\Feedback\RejectingSnsMessageVerifier;
 use App\Domain\Delivery\Mail\Feedback\SnsMessageVerifier;
 use Illuminate\Support\ServiceProvider;
 
 /**
  * Wires the Delivery module's mail outbox.
+ *
+ * The commands are registered here rather than in `bootstrap/app.php`'s `withCommands()`
+ * because they live under `app/Domain/Delivery/Mail/Console`, which Laravel's
+ * `app/Console/Commands` auto-discovery does not scan, and because a module that owns
+ * console entry points should be the thing that declares them.
  */
 class DeliveryServiceProvider extends ServiceProvider
 {
@@ -26,5 +33,10 @@ class DeliveryServiceProvider extends ServiceProvider
          * involves.
          */
         $this->app->bind(SnsMessageVerifier::class, RejectingSnsMessageVerifier::class);
+
+        $this->commands([
+            ResendOutboundMailCommand::class,
+            MailBacklogCommand::class,
+        ]);
     }
 }
