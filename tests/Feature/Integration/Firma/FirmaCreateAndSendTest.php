@@ -94,6 +94,66 @@ class FirmaCreateAndSendTest extends TestCase
     }
 
     /**
+     * A variable name that is not an identifier survives, and a PATCH resolves it.
+     *
+     * This is the consumer's real case: the recorded fixtures carry `Company/Individual Name`
+     * and `Signing Date`, spaces and slash included, and the native field schema's `alias` is
+     * an identifier that cannot hold either. So the caller's string is kept verbatim in the
+     * schema's `label` and a normalised copy goes in `alias` — and both spellings have to
+     * resolve, or a consumer patching prefills by name breaks on its own field names.
+     */
+    public function test_a_variable_name_with_spaces_round_trips_and_resolves_on_patch(): void
+    {
+        [, $issued] = $this->scenario();
+
+        $created = $this->postJson(self::BASE, [
+            'name' => 'Synthetic agreement with awkward variable names',
+            'document' => base64_encode(PdfFixtures::bytes('single-page-letter')),
+            'recipients' => [['first_name' => 'Dana', 'email' => 'dana@buyer.example.test', 'order' => 1]],
+            'fields' => [
+                [
+                    'type' => 'text',
+                    'page_number' => 1,
+                    'variable_name' => 'Company/Individual Name',
+                    'position' => ['x' => 10.0, 'y' => 20.0, 'width' => 40.0, 'height' => 3.0],
+                ],
+                [
+                    'type' => 'signature',
+                    'page_number' => 1,
+                    'position' => ['x' => 10.0, 'y' => 80.0, 'width' => 25.0, 'height' => 4.0],
+                ],
+            ],
+        ], FirmaFacadeScenario::headers($issued))->assertStatus(201);
+
+        $id = $created->json('id');
+
+        // Verbatim on the way back out, not the normalised copy.
+        $this->assertSame('Company/Individual Name', $created->json('fields.0.variable_name'));
+
+        // The consumer's own spelling resolves on PATCH.
+        $this->patchJson(self::BASE.'/'.$id, [
+            'field' => ['variable_name' => 'Company/Individual Name', 'value' => 'Example Holdings Ltd'],
+        ], FirmaFacadeScenario::headers($issued))
+            ->assertOk()
+            ->assertJsonPath('variable_name', 'Company/Individual Name')
+            ->assertJsonPath('value', 'Example Holdings Ltd');
+
+        // And so does the normalised one, so a client that stored the schema alias is not
+        // locked out of its own field.
+        $this->patchJson(self::BASE.'/'.$id, [
+            'field' => ['variable_name' => 'company_individual_name', 'value' => 'Example Holdings II Ltd'],
+        ], FirmaFacadeScenario::headers($issued))
+            ->assertOk()
+            ->assertJsonPath('value', 'Example Holdings II Ltd');
+
+        $this->assertSame(
+            'Example Holdings II Ltd',
+            $this->getJson(self::BASE.'/'.$id.'/fields', FirmaFacadeScenario::headers($issued))
+                ->assertOk()->json('results.0.final_value'),
+        );
+    }
+
+    /**
      * A percentage outside 0..100 is refused, never reinterpreted as points.
      *
      * This is disagreement D4 in one assertion: the upstream schema says percent, the
