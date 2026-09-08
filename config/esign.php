@@ -305,6 +305,92 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Cron-driven bounded queue worker (Stage 5, issue #39)
+    |--------------------------------------------------------------------------
+    |
+    | Defaults for `esign:queue:work-bounded` (App\Domain\Delivery\Queue\Console\
+    | WorkBoundedCommand), the cPanel/shared-hosting substitute for a persistent
+    | queue daemon: cron invokes it every minute, it takes a database-backed
+    | lease so an overlapping tick never runs a second worker, and it bounds
+    | itself with `queue:work --stop-when-empty --max-time --max-jobs`.
+    |
+    | `lease_ttl` MUST exceed `max_time` plus the longest job's own timeout.
+    | `--max-time` only stops queue:work *between* jobs — a job already running
+    | when the clock expires is not interrupted (docs/HANDOFF.md section 13) —
+    | so a lease that expired at exactly `max_time` would let a second cron
+    | tick declare the still-finishing worker stale and start a second one.
+    | The gap between `max_time` and `lease_ttl` is the safety margin for
+    | "still legitimately working the last job", not slack to be tightened.
+    |
+    */
+
+    'queue' => [
+        'max_time' => (int) env('ESIGN_QUEUE_MAX_TIME', 50),
+        'max_jobs' => (int) env('ESIGN_QUEUE_MAX_JOBS', 100),
+
+        // Seconds. Default 15 minutes: comfortably longer than max_time plus
+        // the longest sealing job's own timeout, so a live worker's lease
+        // never goes stale mid-job.
+        'lease_ttl' => (int) env('ESIGN_QUEUE_LEASE_TTL', 900),
+
+        // Seconds between lease heartbeats while the worker runs. Heartbeats
+        // are taken between jobs (Illuminate\Queue\Events\Looping), so a
+        // single job that runs longer than this never gets an extra
+        // heartbeat mid-flight; that is the same "not a hard per-job
+        // interrupt" limit as max_time.
+        'heartbeat' => (int) env('ESIGN_QUEUE_HEARTBEAT', 10),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | cPanel / shared-hosting profile (Stage 5, issue #39)
+    |--------------------------------------------------------------------------
+    |
+    | Read by `esign:doctor`. `web_php_version` names the PHP version the
+    | account's web vhost actually runs (e.g. from the ea-phpNN handler in
+    | public/.htaccess) so the diagnostic can compare it against the CLI
+    | binary it is running under; the two can and do drift on cPanel when the
+    | account default PHP differs from the version artisan is invoked with
+    | (see htaccess-append.txt). Leave blank to skip that comparison.
+    |
+    | The memory/time minimums are this diagnostic's own proposal, not a
+    | figure stated elsewhere in the repository: nothing in
+    | docs/evidence/finalization.md sets a floor, so 512M / 300s is a
+    | conservative estimate for sealing a large synthetic PDF and is
+    | documented as a proposal in docs/operations/cpanel.md, not a measured
+    | requirement.
+    |
+    */
+
+    'cpanel' => [
+        'web_php_version' => env('ESIGN_CPANEL_WEB_PHP_VERSION', ''),
+        'min_memory_bytes' => (int) env('ESIGN_CPANEL_MIN_MEMORY_BYTES', 512 * 1024 * 1024),
+        'min_execution_seconds' => (int) env('ESIGN_CPANEL_MIN_EXECUTION_SECONDS', 300),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Signing lifecycle timing (Stage 4, issues #34 and #35)
+    |--------------------------------------------------------------------------
+    |
+    | Read by the scheduled commands in App\Domain\Delivery\Events. Both are
+    | measured from a fact on the row rather than from when the scheduler last
+    | ran, so an extra run of `esign:signing:remind` sends nothing extra. See
+    | docs/delivery/envelope-events.md.
+    |
+    | These two keys used to live in a second, separate 'signing' => [...]
+    | array further down this file. PHP array literals silently let a later
+    | key win, so that second array was overwriting this one outright and
+    | reminder_after_hours/reminder_interval_hours could never be set from
+    | the environment in a real deployment (only test suites that call
+    | Config::set() directly happened to bypass the bug). Both groups are
+    | merged into the one 'signing' array below; see the guest-access
+    | doc-comment there for the rest of the keys.
+    |
+    */
+
+    /*
+    |--------------------------------------------------------------------------
     | Authentication mode (Stage 1, issues #12 and #13)
     |--------------------------------------------------------------------------
     |
@@ -421,21 +507,6 @@ return [
     */
 
     'signing' => [
-
-        /*
-        | Signing lifecycle timing (Stage 4, issues #34 and #35). Read by the
-        | scheduled commands in App\Domain\Delivery\Events. Both are measured
-        | from a fact on the row rather than from when the scheduler last ran, so
-        | an extra run of `esign:signing:remind` sends nothing extra. See
-        | docs/delivery/envelope-events.md.
-        |
-        | They live in this array rather than one of their own because PHP keeps
-        | only the last of two duplicate keys in the same literal. They used to
-        | sit in a separate `'signing' => [...]` block above the guest-signing one,
-        | which meant both were discarded before the file was ever read:
-        | ESIGN_SIGNING_REMINDER_* was parsed and thrown away, and
-        | ReminderScheduler silently fell back to its class constants.
-        */
 
         // Hours after an invitation was sent before the first reminder. Measured
         // from `envelope_recipients.invited_at`.

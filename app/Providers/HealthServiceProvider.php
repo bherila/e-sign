@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Domain\Delivery\Health\Console\DoctorCommand;
 use App\Domain\Delivery\Health\Probes\ArtifactIntegrityProbe;
 use App\Domain\Delivery\Health\Probes\DatabaseProbe;
 use App\Domain\Delivery\Health\Probes\MailBacklogProbe;
@@ -35,5 +36,14 @@ class HealthServiceProvider extends ServiceProvider
                 $app->make(ArtifactIntegrityProbe::class),
             ]);
         });
+    }
+
+    public function boot(): void
+    {
+        if ($this->app->runningInConsole()) {
+            $this->commands([
+                DoctorCommand::class,
+            ]);
+        }
     }
 }
