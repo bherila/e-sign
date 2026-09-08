@@ -5,6 +5,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -12,6 +13,10 @@ return Application::configure(basePath: dirname(__DIR__))
         api: __DIR__.'/../routes/api.php',
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
+        // `/up` above is Laravel's minimal liveness probe. `routes/health.php` adds the
+        // detailed `/health/ready` readiness probe (issue #16); it is registered here
+        // rather than merged into web/api so it never picks up session or CSRF middleware.
+        then: fn () => Route::group([], base_path('routes/health.php')),
     )
     // Domain commands live under app/Domain/<Module>/Console, which Laravel's
     // app/Console/Commands auto-discovery does not scan, so they are listed here.
