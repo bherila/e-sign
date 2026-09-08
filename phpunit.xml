@@ -11,6 +11,14 @@
         <testsuite name="Feature">
             <directory>tests/Feature</directory>
         </testsuite>
+        <!--
+            The synthetic-consumer end-to-end suite (issue #36). Separate so it can be run
+            on its own by name, and included here so `composer test`, and therefore the CI
+            `test` job, runs it with everything else. See tests/EndToEnd/README.md.
+        -->
+        <testsuite name="EndToEnd">
+            <directory>tests/EndToEnd</directory>
+        </testsuite>
     </testsuites>
     <source>
         <include>
