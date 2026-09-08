@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Domain\Delivery\Health\Probes\DatabaseProbe;
+use App\Domain\Delivery\Health\Probes\MailBacklogProbe;
 use App\Domain\Delivery\Health\Probes\MailProbe;
 use App\Domain\Delivery\Health\Probes\QueueProbe;
 use App\Domain\Delivery\Health\Probes\SchedulerHeartbeatProbe;
@@ -26,6 +27,7 @@ class HealthServiceProvider extends ServiceProvider
                 $app->make(SchedulerHeartbeatProbe::class),
                 $app->make(StorageProbe::class),
                 $app->make(MailProbe::class),
+                $app->make(MailBacklogProbe::class),
                 $app->make(WebhookBacklogProbe::class),
                 $app->make(SigningMaterialProbe::class),
                 $app->make(TsaProbe::class),

@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Domain\Delivery\Mail\Console\MailBacklogCommand;
+use App\Domain\Delivery\Mail\Console\ResendOutboundMailCommand;
+use App\Domain\Delivery\Mail\Feedback\RejectingSnsMessageVerifier;
+use App\Domain\Delivery\Mail\Feedback\SnsMessageVerifier;
 use App\Domain\Delivery\Outbound\DestinationAllowlist;
 use App\Domain\Delivery\Outbound\DestinationPolicy;
 use App\Domain\Delivery\Outbound\HostResolver;
@@ -22,8 +26,8 @@ use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
 
 /**
- * Wires the Delivery module: the shared outbound destination policy and the
- * webhook outbox.
+ * Wires the Delivery module: the shared outbound destination policy, the
+ * webhook outbox, and the transactional mail outbox.
  *
  * The destination policy is a singleton because its allowlist is deployment
  * configuration; the Evidence module resolves the same instance for the
@@ -61,6 +65,18 @@ final class DeliveryServiceProvider extends ServiceProvider
                 queue: isset($config['queue']) ? (string) $config['queue'] : null,
             );
         });
+
+        /*
+         * The SES mail-feedback endpoint fails closed.
+         *
+         * TODO(#35): bind a verifier backed by `aws/aws-sns-message-validator` — the
+         * package is not a dependency, and `aws-sdk-php`, which is present only
+         * transitively through league/flysystem-aws-s3-v3, does not include the validator.
+         * Until then every SNS message is refused, so no unverified body can mark a
+         * message delivered or bounced. RejectingSnsMessageVerifier documents exactly what
+         * implementing this involves.
+         */
+        $this->app->bind(SnsMessageVerifier::class, RejectingSnsMessageVerifier::class);
     }
 
     public function boot(): void
@@ -74,6 +90,8 @@ final class DeliveryServiceProvider extends ServiceProvider
                 EndpointListCommand::class,
                 ReplayCommand::class,
                 BacklogCommand::class,
+                ResendOutboundMailCommand::class,
+                MailBacklogCommand::class,
             ]);
         }
     }
