@@ -76,6 +76,7 @@ export default defineConfig({
                 'resources/js/navbar.tsx',
                 'resources/js/sign-in.tsx',
                 'resources/js/dashboard.tsx',
+                'resources/js/editor.tsx',
             ],
       refresh: true,
     }),
