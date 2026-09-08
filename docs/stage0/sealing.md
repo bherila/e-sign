@@ -134,22 +134,32 @@ the signature covers the file. It does *not* establish that the artifact satisfi
 clause of ETSI EN 319 142-1 V1.2.1 — for instance which attributes are required, forbidden,
 or must be absent at each baseline level.
 
-So the level claimed in section 2 is supported by a cryptographic and trust check plus the
-library's documented profile implementation, **not** by a profile conformance verdict. That
-gap is open; see section 6.
+That gap is why the `pades-profile` job exists. The level claimed in section 2 rests on a
+cryptographic and trust check from pyHanko **and** a profile verdict from DSS, which is a
+different tool answering a different question; see below and
+[`pades-profile.md`](pades-profile.md).
 
-### DSS is out of scope here
+### DSS: now run, in its own job
 
-Issue #7 also asks for European Commission DSS, which is the tool that would give a
-profile-level verdict. It is deliberately **not** part of this change:
+Issue #7 also asks for European Commission DSS, the tool that gives a profile-level verdict.
+When this document was first written it was deliberately out of scope, on the grounds that the
+artifacts were committed, synthetic and small, so a DSS pass could be added later **against
+exactly these bytes** without resealing anything. That is what happened, literally: the
+`pades-profile` CI job runs `scripts/validate-pades-profile.sh`, which reads the committed
+bytes in `tests/Fixtures/validation/` and never reseals.
 
-- DSS is a Java application. This machine has no container runtime and the repository's
-  runtime rule is PHP-only, so adding a JVM to the `validation` job is a separate decision
-  with its own maintenance cost.
-- The artifacts are committed, synthetic, and small, so a DSS pass can be added later
-  against exactly these bytes without resealing anything.
+**DSS 6.5 reports `PAdES_BASELINE_B` for the B-B artifacts and `PAdES_BASELINE_T` for the B-T
+artifacts.** The level claim in section 2 is now backed by a profile verdict and not only by
+soundness plus the library's documented implementation.
 
-Until that lands, no claim in this document depends on a profile-level check.
+The JVM stays out of the runtime. `tools/` is excluded by `.dockerignore` and is not in the
+release bundle's file list; DSS is fetched from Maven Central by a CI job and discarded with
+the runner. It is a separate job from `validation` so that a JVM or Maven Central problem
+cannot mask a pyHanko regression.
+
+Full findings, every warning DSS raised even on artifacts it passed, the two edits to its
+validation policy and what its stock policy reports instead, and the one artifact on which the
+two validators deliberately disagree: [`pades-profile.md`](pades-profile.md).
 
 ## 4. Fail-closed behaviour, and the test for each
 
@@ -315,10 +325,12 @@ flaky crypto.
 
 ## 6. Open gaps
 
-1. **No profile-level conformance check.** pyHanko establishes soundness and trust, not
-   ETSI EN 319 142-1 conformance. A DSS (Java) pass over the committed artifacts, plus an
-   explicit normative requirement matrix, is still needed before the B-B/B-T claim is
-   backed by a profile verdict. Nothing in this document depends on such a verdict today.
+1. **~~No profile-level conformance check.~~ Closed 2026-09-08.** DSS 6.5 now runs over the
+   committed artifacts in the `pades-profile` CI job and reports `PAdES_BASELINE_B` and
+   `PAdES_BASELINE_T` as claimed; see [`pades-profile.md`](pades-profile.md). What remains open
+   is narrower and is listed there: an explicit normative requirement matrix clause by clause
+   was **not** produced, and a level verdict from a conformant validator is not the same thing
+   as one.
 2. **B-LT and B-LTA are unbuilt.** The library supports them, but they need a CA-issued seal
    certificate with a reachable OCSP responder or CRL distribution point, plus ongoing
    preservation operations (periodic archive timestamps, revocation refresh). They are not
@@ -359,6 +371,9 @@ composer test
 
 # Reseal the artifacts and validate them independently
 scripts/validate-seal.sh --regenerate
+
+# Ask DSS what profile the committed artifacts actually reach (needs a JDK 17+ and Maven)
+scripts/validate-pades-profile.sh
 ```
 
 The `validation` CI job runs the last command on every change under the backend or docker

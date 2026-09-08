@@ -12,8 +12,9 @@ A gate that is upheld by careful code and no assertion is **not proven**, and is
 however good the code is — that distinction is the whole point of the document. Where a gate is
 partly proven, the table says which part.
 
-**State of the union.** Of fifteen gates: **nine proven** (1, 3, 4, 5, 6, 7, 8, 10, 12), **four
-partly proven** (9, 11, 14, 15), **two not yet proven** (2 PAdES profile, 13 migration).
+**State of the union.** Of fifteen gates: **ten proven** (1, 2, 3, 4, 5, 6, 7, 8, 10, 12), **four
+partly proven** (9, 11, 14, 15), **one not yet proven** (13 migration). Gate 2 moved on
+2026-09-08 when the `pades-profile` job landed; see [`docs/stage0/pades-profile.md`](../stage0/pades-profile.md).
 Nothing here should be read as a claim that this product is ready for a first production use; `docs/HANDOFF.md`'s status line and `docs/assurance.md` say what it is.
 
 ---
@@ -31,6 +32,7 @@ gating the rest by touched path:
 | `audit` | dependency manifests changed, **and weekly on a schedule** | `composer audit` + `pnpm audit`, checked against `.audit-allowlist.json` by `scripts/check-audit.php`. Scheduled as well as diff-gated, because an advisory database gains entries after a merge rather than when a lock file changes. |
 | `image` | backend, frontend, or docker changed | Builds the production image and smoke-tests the **web** role (`/up`, then `esign-healthcheck`) and **role dispatch** (`artisan`, `worker --stop-when-empty`), with `APP_ENV=production APP_DEBUG=false`. |
 | `validation` | backend or docker changed | PHP 8.4, installs pyHanko 0.37 + `pyhanko-cli`, runs `scripts/validate-seal.sh --regenerate` over every committed artifact against `tests/Fixtures/validation/manifest.tsv`. Uploads the validator output. |
+| `pades-profile` | backend or docker changed | Temurin JDK 21, runs `scripts/validate-pades-profile.sh`: European Commission **DSS 6.5** over the committed artifact bytes (no resealing, no PHP), matched against `tests/Fixtures/validation/pades-profile-manifest.tsv` on level *and* conclusion. A separate job from `validation` on purpose, so a JVM or Maven Central problem cannot mask a pyHanko regression. Uploads DSS's reports. |
 | `result` | always | Aggregating gate; fails if any of the above failed or was cancelled. |
 
 `deploy.yml` (cPanel rsync, off until `DEPLOY_ENABLED`) runs the suite, deploys, and then
@@ -58,7 +60,7 @@ for frontend changes `pnpm run type-check && pnpm run lint && pnpm run test && p
 | The sealer re-reads its own output and refuses an artifact below the requested level, or signed by other material | `tests/Feature/Evidence/TcLibPdfSealerTest.php` |
 | Unusable material — expired, mismatched key, wrong passphrase, unsupported digest, absent — each a typed exception | `tests/Unit/Evidence/SealMaterialTest.php` |
 
-### 2. PAdES profile — **not yet proven**
+### 2. PAdES profile — **proven**
 
 > Local DSS/profile checks and explicit requirement fixtures establish the claimed output level.
 > A generic "signature valid" result alone is insufficient.
@@ -67,18 +69,37 @@ for frontend changes `pnpm run type-check && pnpm run lint && pnpm run test && p
 |---|---|
 | Cryptographic and trust validation of every artifact | proven — `validation` job |
 | In-process assertion that the produced artifact reaches the requested level | proven — `ArtifactValidator`, and `EnvelopeFinalizer` checks it independently of the sealer |
-| **Profile-level conformance against ETSI EN 319 142-1** | **not proven** |
+| **Profile-level conformance against ETSI EN 319 142-1** | **proven** — `pades-profile` job |
+
+| Proof | Where |
+|---|---|
+| European Commission **DSS 6.5** reports `PAdES_BASELINE_B` for both B-B artifacts and `PAdES_BASELINE_T` for both B-T artifacts, matched **exactly** against a manifest on every run | `pades-profile` CI job, `scripts/validate-pades-profile.sh`, `tests/Fixtures/validation/pades-profile-manifest.tsv` |
+| The level is DSS's structural verdict, not a restatement of "the signature verified": a signature that were a bare PKCS#7 rather than a conformant baseline signature reports `PKCS7_B` or `PDF_NOT_ETSI` instead | `tools/dss/src/main/java/PadesProfileCheck.java`; the reported levels are identical under DSS's stock policy and the pinned one, so no policy edit produces them |
+| DSS's AdES conclusion is matched exactly too, per artifact, so the negatives cannot pass by reporting the right level with the wrong verdict | same manifest, `conclusion` column |
+| Each signature timestamp's own conclusion is matched separately, so "B-T" and "the timestamp is trustworthy" cannot collapse into one answer | same manifest, `timestamps` column |
+| The validation policy is DSS's own default with two edits, each marked inline and diffable against the vendor's original | `tools/dss/validation-policy.xml` |
 
 pyHanko's own documentation states that its ordinary validation is **not a complete structural
-PAdES-profile conformance check**. European Commission **DSS has not been run**: it is a Java
-application and the repository's runtime rule keeps a JVM out of the CI image. The artifacts are
-committed, synthetic, and small, so a DSS pass can be added later against exactly these bytes
-without resealing anything.
+PAdES-profile conformance check**, which is why this second job exists rather than another flag
+on the first. The two validators share no code, run in separate jobs, and are **not** tuned to
+agree: `sealed-b-t-untrusted-tsa.pdf` is required to be INVALID for pyHanko and `TOTAL_PASSED`
+for DSS, and the reason is written down.
 
-**Owner:** [#7](https://github.com/bherila/e-sign/issues/7), which asks for DSS by name and is
-open. Until it lands, the level claim in `docs/assurance.md` §3 is stated as resting on a
-cryptographic and trust check plus the library's documented profile implementation, and not on a
-conformance verdict.
+**Caveats, not gaps in this gate.** Both runs are anchored on a throwaway fixture root, so
+neither says anything about trust in the real world. Revocation is unchecked in both, because a
+self-issued chain publishes nothing to check (gap 7 in
+[`docs/stage0/sealing.md`](../stage0/sealing.md)) — the DSS policy's edit A is the same
+relaxation pyHanko gets from `--no-revocation-check`, and must be reverted with it. A
+`PAdES_BASELINE_B` verdict is a statement about **format conformance**, never about eIDAS
+qualified or advanced status; nothing here claims one.
+
+**Finding, recorded rather than tuned away:** under DSS's *stock* policy,
+`negative-incremental-update.pdf` receives the same AdES conclusion as a clean artifact. DSS
+sees the appended revision and warns about it, but its `UndefinedChanges` constraint ships at
+`WARN`. This service is stricter, so the pinned policy raises it to `FAIL` — the same shape as
+the pyHanko finding already in `sealing.md` §5, now confirmed on a second validator.
+
+**Full findings:** [`docs/stage0/pades-profile.md`](../stage0/pades-profile.md).
 
 ### 3. PDF fidelity — **proven**
 
@@ -342,7 +363,6 @@ Ordered by what a first production use would most want closed.
 | Gap | Gate | Owner |
 |---|---|---|
 | No end-to-end smoke test on either deployment *profile* (the functional flow itself is now covered by `tests/EndToEnd/`) | 11 | [#38](https://github.com/bherila/e-sign/issues/38) |
-| DSS profile-conformance check not run | 2 | [#7](https://github.com/bherila/e-sign/issues/7) |
 | No aggregate decompression budget or xref-entry cap in preflight | 3 | new — [`review-2026-09.md`](review-2026-09.md) U-1, U-2 |
 | The hazard scan fails open past depth 32, and on a null-resolving xref entry | 3 | new — [`review-2026-09.md`](review-2026-09.md) U-3, U-4 |
 | **No static analysis beyond formatting and `tsc`** (the `composer audit` / `pnpm audit` half of [`review-2026-09.md`](review-2026-09.md) X-13 landed as the `audit` job) | all | new — [`review-2026-09.md`](review-2026-09.md) X-13 |

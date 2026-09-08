@@ -15,7 +15,8 @@ run them yourself before pushing.
 | `licenses` | Every production dependency's license is on the allowlist in `scripts/check-licenses.php`; builds the CycloneDX SBOM. | `composer.json`/`.lock`, `package.json`, `pnpm-lock.yaml`, the license script, `THIRD_PARTY_NOTICES.md`, or a workflow file changed |
 | `audit` | No known-vulnerable dependency is locked in, per `composer audit` and `pnpm audit`, unless a committed, time-boxed allowlist entry says otherwise. | Same filter as `licenses`, plus a weekly `schedule` trigger |
 | `image` | The production Docker image builds, serves `/up`, passes its own `HEALTHCHECK`, and dispatches the `artisan`/`worker` roles correctly. | `backend`, `frontend`, or `docker` changed |
-| `validation` | Sealed PDFs validate independently under pyHanko (PAdES B-B/B-T), not just against this codebase's own assertions. | `backend` or `docker` changed |
+| `validation` | Sealed PDFs validate independently under pyHanko (PAdES B-B/B-T), not just against this codebase's own assertions. Reseals first, so it also proves the sealer still produces those artifacts. | `backend` or `docker` changed |
+| `pades-profile` | The committed sealed artifacts satisfy the ETSI baseline profile they claim, per European Commission DSS 6.5, which reports a `SignatureLevel` rather than a pass/fail. Reads the committed bytes and never reseals. Kept out of the `validation` job on purpose: a JVM or Maven Central problem must not be able to mask a pyHanko regression. Needs a JDK (Temurin 21) and Maven; neither ever reaches the runtime — see [`docs/stage0/pades-profile.md`](../stage0/pades-profile.md). | `backend` or `docker` changed |
 | `result` | Fails if any job above failed or was cancelled; is the one required check branch protection needs. | Always runs |
 
 ## The dependency vulnerability audit
