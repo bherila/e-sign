@@ -68,6 +68,17 @@ final class MailCopy
 
     public readonly ?CarbonImmutable $expiresAt;
 
+    /**
+     * The one-time code for a guest signing session.
+     *
+     * Escaped like every other text field even though it cannot need it — the code is six
+     * digits this application generated with `random_int`, so there is nothing in it for
+     * CommonMark to interpret. Routing it through the same escape as the untrusted fields
+     * costs nothing and means a future change to how a code is formed cannot quietly become
+     * the one interpolation that was not neutralized.
+     */
+    public readonly ?string $otpCode;
+
     private function __construct(MailContext $context)
     {
         $this->recipientName = self::escape($context->recipientName) ?? '';
@@ -77,6 +88,7 @@ final class MailCopy
         $this->reason = self::escape($context->reason);
         $this->failureSummary = self::escape($context->failureSummary);
         $this->reference = self::escape($context->reference);
+        $this->otpCode = self::escape($context->otpCode);
 
         // Not escaped: see the class docblock.
         $this->actionUrl = $context->actionUrl;
