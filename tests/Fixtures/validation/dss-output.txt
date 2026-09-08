@@ -1,0 +1,87 @@
+European Commission DSS 6.5 (dss-pades / dss-validation), Java 21.0.12.1
+policy: tools/dss/validation-policy.xml (DSS stock policy with two marked edits; see the file header)
+trust anchor: tests/Fixtures/crypto/root.test.crt — the only one, no OS store and no trusted list
+artifacts: the committed bytes under tests/Fixtures/validation, not resealed
+validated at: 2026-09-08T14:46:51Z
+
+OK       sealed-b-b.pdf — PAdES_BASELINE_B, TOTAL_PASSED, timestamps: none
+         The B-B claim in docs/stage0/sealing.md, now backed by a profile verdict rather than a soundness check.
+
+OK       sealed-b-t.pdf — PAdES_BASELINE_T, TOTAL_PASSED, timestamps: 1:INDETERMINATE/NO_CERTIFICATE_CHAIN_FOUND
+         B-T structurally. The timestamp is from DigiCert and is sound; its chain is untrusted here only because this run is given the fixture root alone.
+
+OK       sealed-b-t-untrusted-tsa.pdf — PAdES_BASELINE_T, TOTAL_PASSED, timestamps: 1:INDETERMINATE/NO_CERTIFICATE_CHAIN_FOUND
+         DIVERGENCE, deliberate: pyHanko judges this artifact INVALID on TSA trust, DSS calls the signature TOTAL_PASSED because an untrusted signature timestamp does not sink a B-T conclusion — it only fails to contribute a trusted POE. Both verdicts are correct about different questions; neither is tuned to agree.
+
+OK       finalized-executed.pdf — PAdES_BASELINE_B, TOTAL_PASSED, timestamps: none
+         The executed agreement from staged finalization, sealed at B-B. Same profile verdict as the bare B-B artifact.
+
+OK       negative-modified-content.pdf — PAdES_BASELINE_B, TOTAL_FAILED/HASH_FAILURE, timestamps: none
+         Page geometry changed inside the signed byte range. The level still reads BASELINE_B because the structure is untouched; the level is a statement about form, never a verdict.
+
+OK       negative-forged-cms.pdf — PAdES_BASELINE_B, TOTAL_FAILED/HASH_FAILURE, timestamps: none
+         The CMS of another sealed document spliced into /Contents.
+
+OK       negative-byte-range-overclaim.pdf — PAdES_BASELINE_B, TOTAL_FAILED/FORMAT_FAILURE, timestamps: none
+         /ByteRange claims past the end of a file that still parses. DSS reports it as a format failure, adding "The /ByteRange dictionary is not consistent!".
+
+OK       negative-incremental-update.pdf — PAdES_BASELINE_B, TOTAL_FAILED/FORMAT_FAILURE, timestamps: none
+         An unexpected revision appended, redefining the page object. This is TOTAL_FAILED only because tools/dss/validation-policy.xml raises DSS's UndefinedChanges constraint from WARN to FAIL; under DSS's stock policy the conclusion is identical to a clean artifact's. Recorded in docs/stage0/pades-profile.md, not hidden.
+
+OK       negative-untrusted-signer.pdf — PAdES_BASELINE_B, INDETERMINATE/NO_CERTIFICATE_CHAIN_FOUND, timestamps: none
+         Cryptographically sound but sealed outside the trusted root. INDETERMINATE, not TOTAL_FAILED: nothing about the signature is broken, there is simply no path to an anchor.
+
+OK       negative-truncated.pdf — -, unreadable, timestamps: -
+         Tail removed with the trailer. DSS never reaches the signature, so this row pins a refusal to parse and says nothing about the byte range; negative-byte-range-overclaim.pdf is what carries the coverage property.
+
+--- messages DSS raised, per artifact (warnings on passing artifacts included) ---
+
+FILE "sealed-b-b.pdf"
+  "errors": []
+  "warnings": ["The authority info access is not present!", "The revocation info access is not present!"]
+  "info": []
+
+FILE "sealed-b-t.pdf"
+  "errors": []
+  "warnings": ["The authority info access is not present!", "The revocation info access is not present!"]
+  "info": []
+
+FILE "sealed-b-t-untrusted-tsa.pdf"
+  "errors": []
+  "warnings": ["The authority info access is not present!", "The revocation info access is not present!"]
+  "info": []
+
+FILE "finalized-executed.pdf"
+  "errors": []
+  "warnings": ["The authority info access is not present!", "The revocation info access is not present!"]
+  "info": []
+
+FILE "negative-modified-content.pdf"
+  "errors": ["The reference data object is not intact!"]
+  "warnings": ["The authority info access is not present!", "The revocation info access is not present!"]
+  "info": []
+
+FILE "negative-forged-cms.pdf"
+  "errors": ["The reference data object is not intact!"]
+  "warnings": ["The authority info access is not present!", "The revocation info access is not present!"]
+  "info": []
+
+FILE "negative-byte-range-overclaim.pdf"
+  "errors": ["The /ByteRange dictionary is not consistent!", "The reference data object is not intact!"]
+  "warnings": ["The authority info access is not present!", "The revocation info access is not present!"]
+  "info": []
+
+FILE "negative-incremental-update.pdf"
+  "errors": ["The document contains undefined object modifications after the signature revision!"]
+  "warnings": ["Visual difference is detected on page(s) [1]", "Document contains changes restricted by /DocMDP dictionary!", "The authority info access is not present!", "The revocation info access is not present!"]
+  "info": []
+
+FILE "negative-untrusted-signer.pdf"
+  "errors": ["The certificate chain for signature is not trusted, it does not contain a trust anchor."]
+  "warnings": []
+  "info": []
+
+FILE "negative-truncated.pdf"
+  "error": "eu.europa.esig.dss.model.DSSException: The document with name [negative-truncated.pdf] is either not accessible or not PDF compatible. Reason : [Missing root object specification in trailer.]"
+
+Checked 10 artifact(s); 0 did not report what the manifest requires.

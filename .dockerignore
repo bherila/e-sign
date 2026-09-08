@@ -21,3 +21,6 @@ storage/framework/views/*
 tests
 tests-ts
 docs
+# CI-only validation tooling (the European Commission DSS profile checker, a Java/Maven
+# project). Nothing Java may enter the production image: the runtime is PHP only.
+tools
