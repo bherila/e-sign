@@ -1,5 +1,7 @@
 <?php
 
+use App\Domain\Delivery\Outbound\DestinationAllowlist;
+
 return [
 
     /*
@@ -178,6 +180,73 @@ return [
         ),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Delivery: outbound destinations and the webhook outbox (Stage 4, issue #34)
+    |--------------------------------------------------------------------------
+    |
+    | Every outbound request to a stored URL — a webhook endpoint, the RFC 3161
+    | timestamp authority — passes App\Domain\Delivery\Outbound\DestinationPolicy
+    | first: HTTPS only, no credentials in the URL, no redirects followed, and no
+    | host that resolves to a loopback, private, link-local, carrier-grade-NAT, or
+    | otherwise reserved address.
+    |
+    | The allowlist below is the ONLY way past the private-address and plaintext
+    | refusals, and it is deployment configuration: a workspace administrator who
+    | can create a webhook endpoint cannot use it to aim delivery at the instance's
+    | own metadata service. Compact form, comma-separated:
+    |
+    |   ESIGN_DELIVERY_ALLOWLIST="consumer.internal.example|private|plaintext,10.8.0.0/24|private"
+    |
+    */
+
+    'delivery' => [
+
+        'destination_allowlist' => DestinationAllowlist::parseEnvironment(
+            env('ESIGN_DELIVERY_ALLOWLIST')
+        ),
+
+        'webhooks' => [
+            // Response deadline for one delivery attempt, in seconds. The
+            // compatibility profile documents 5 s; ours is configurable.
+            'timeout' => (int) env('ESIGN_WEBHOOK_TIMEOUT', 5),
+            'connect_timeout' => (int) env('ESIGN_WEBHOOK_CONNECT_TIMEOUT', 5),
+
+            // Queue the delivery and dispatch jobs run on.
+            'queue' => env('ESIGN_WEBHOOK_QUEUE', 'default'),
+
+            // Backoff between attempts, in seconds, applied after attempt 1, 2, …
+            // in order. An attempt past the end of the list is not made: the
+            // delivery is exhausted. Seven attempts over ~40 h by default.
+            'retry_delays' => array_values(array_filter(array_map(
+                'intval',
+                explode(',', (string) env('ESIGN_WEBHOOK_RETRY_DELAYS', '60,300,1800,7200,43200,86400'))
+            ), fn (int $seconds): bool => $seconds > 0)),
+
+            // Fraction of each delay applied as +/- jitter, so a receiver that
+            // dropped every endpoint at once does not get every retry at once.
+            'retry_jitter' => (float) env('ESIGN_WEBHOOK_RETRY_JITTER', 0.1),
+
+            // Consecutive exhausted or terminally failed events before the
+            // endpoint is auto-disabled with a visible reason. The compatibility
+            // profile documents 50; ours is lower and configurable.
+            'auto_disable_after' => (int) env('ESIGN_WEBHOOK_AUTO_DISABLE_AFTER', 10),
+
+            // How long a rotated-out secret keeps verifying, in hours.
+            'secret_rotation_grace_hours' => (int) env('ESIGN_WEBHOOK_ROTATION_GRACE_HOURS', 168),
+
+            // Bytes of a receiver's response body retained for diagnosis, after
+            // redaction. Never the whole body.
+            'response_excerpt_bytes' => (int) env('ESIGN_WEBHOOK_RESPONSE_EXCERPT_BYTES', 1024),
+
+            'user_agent' => env('ESIGN_WEBHOOK_USER_AGENT', 'BWH-eSign-Webhooks/1'),
+
+            // Age of the oldest overdue delivery, in seconds, at which the
+            // webhook-backlog health probe warns and then fails.
+            'backlog_warn_seconds' => (int) env('ESIGN_WEBHOOK_BACKLOG_WARN_SECONDS', 300),
+            'backlog_fail_seconds' => (int) env('ESIGN_WEBHOOK_BACKLOG_FAIL_SECONDS', 1800),
+        ],
+    ],
     /*
     |--------------------------------------------------------------------------
     | Authentication mode (Stage 1, issues #12 and #13)

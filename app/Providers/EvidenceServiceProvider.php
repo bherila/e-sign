@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Domain\Delivery\Outbound\DestinationPolicy;
 use App\Domain\Evidence\Contracts\ArtifactValidator;
 use App\Domain\Evidence\Contracts\PdfSealer;
 use App\Domain\Evidence\Contracts\TimestampAuthority;
@@ -30,7 +31,10 @@ final class EvidenceServiceProvider extends ServiceProvider
             /** @var array<string, mixed> $config */
             $config = $app->make('config')->get('esign.tsa', []);
 
-            return HttpTimestampAuthority::fromConfig($config);
+            // The same outbound destination policy webhook delivery uses, so an
+            // administrator allowlist entry for an internal host is configured in
+            // exactly one place.
+            return HttpTimestampAuthority::fromConfig($config, $app->make(DestinationPolicy::class));
         });
 
         $this->app->singleton(ArtifactValidator::class, TcLibPdfArtifactValidator::class);
