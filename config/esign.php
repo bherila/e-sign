@@ -203,4 +203,27 @@ return [
 
     'auth_mode' => env('ESIGN_AUTH_MODE', 'auto'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Whether the operator actually set the provider URL
+    |--------------------------------------------------------------------------
+    |
+    | `bherila-auth.oauth_client.base_url` carries a package default
+    | (`https://bherila.net`), so it is never empty and cannot answer "did this
+    | operator configure a provider?". Reading the raw variable through config
+    | rather than calling env() at the call site keeps the answer correct under
+    | `config:cache`, where env() returns null.
+    |
+    | Consumed by esign:bootstrap-owner, which must refuse to bind an SSO owner
+    | to a provider nobody chose.
+    |
+    | `oauth_provider` is here for the same reason: the package defaults that
+    | key to `bherila`, so it too can never read as unset.
+    |
+    */
+
+    'oauth_provider_url' => env('OAUTH_PROVIDER_URL', ''),
+
+    'oauth_provider' => env('OAUTH_PROVIDER', ''),
+
 ];

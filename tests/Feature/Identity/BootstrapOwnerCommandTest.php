@@ -38,6 +38,11 @@ class BootstrapOwnerCommandTest extends TestCase
             'bherila-auth.oauth_client.provider' => self::ISSUER,
             'bherila-auth.oauth_client.base_url' => 'https://identity.example.test',
             'bherila-auth.oauth_client.client_id' => 'client-id-for-tests',
+            // Mirrors of the raw environment. The package keys above carry
+            // defaults, so these are what the command reads to decide whether a
+            // provider was actually configured.
+            'esign.oauth_provider' => self::ISSUER,
+            'esign.oauth_provider_url' => 'https://identity.example.test',
         ]);
     }
 
@@ -179,6 +184,15 @@ class BootstrapOwnerCommandTest extends TestCase
             '--workspace' => 'acme',
         ])->assertSuccessful();
 
+        // The second issuer is reached by repointing the deployment, which is
+        // the only way a second issuer can legitimately arise: --issuer must
+        // name the provider this installation authenticates against, because a
+        // binding under any other issuer can never be matched at sign-in.
+        config([
+            'bherila-auth.oauth_client.provider' => 'other-provider',
+            'esign.oauth_provider' => 'other-provider',
+        ]);
+
         $this->artisan('esign:bootstrap-owner', [
             '--issuer' => 'other-provider',
             '--subject' => self::SUBJECT,
@@ -225,6 +239,8 @@ class BootstrapOwnerCommandTest extends TestCase
         config([
             'bherila-auth.oauth_client.base_url' => '',
             'bherila-auth.oauth_client.client_id' => null,
+            'esign.oauth_provider' => '',
+            'esign.oauth_provider_url' => '',
         ]);
 
         $user = User::factory()->create();
@@ -348,7 +364,7 @@ class BootstrapOwnerCommandTest extends TestCase
 
     public function test_it_refuses_sso_mode_when_the_provider_url_is_unset(): void
     {
-        config(['bherila-auth.oauth_client.base_url' => '']);
+        config(['esign.oauth_provider_url' => '']);
 
         $this->artisan('esign:bootstrap-owner', [
             '--issuer' => self::ISSUER,
@@ -380,7 +396,7 @@ class BootstrapOwnerCommandTest extends TestCase
     public function test_it_lists_every_missing_oauth_setting_at_once(): void
     {
         config([
-            'bherila-auth.oauth_client.base_url' => null,
+            'esign.oauth_provider_url' => null,
             'bherila-auth.oauth_client.client_id' => '  ',
         ]);
 

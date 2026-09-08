@@ -78,9 +78,20 @@ Then reload configuration:
 php artisan config:clear
 ```
 
-`esign:bootstrap-owner` refuses to run in SSO mode until `OAUTH_PROVIDER_URL` and
-`OAUTH_CLIENT_ID` are both set, and it names the ones that are missing. That refusal is the
-check that this step actually happened.
+`esign:bootstrap-owner` refuses to run in SSO mode until `OAUTH_PROVIDER`,
+`OAUTH_PROVIDER_URL`, and `OAUTH_CLIENT_ID` are all set, and it names the ones that are
+missing. That refusal is the check that this step actually happened.
+
+It reads those two provider settings from the environment rather than from the resolved
+package configuration, because the package supplies its own defaults for both — an omitted
+`OAUTH_PROVIDER_URL` would otherwise read as `https://bherila.net` and the refusal could
+never fire, leaving an owner bound to a provider nobody chose.
+
+`--issuer` must be exactly the `OAUTH_PROVIDER` key, not the provider's URL. Sign-in
+resolves a binding on that key, so a binding stored under anything else can never be
+matched: the owner would authenticate and find no membership, and re-running with the
+correct issuer would leave the first placeholder user orphaned. The command refuses a
+mismatch rather than storing a binding no login can reach.
 
 ## Step 2 — grant application access at the identity provider
 
@@ -179,9 +190,19 @@ is written — the whole run is one transaction.
 | `Choose one mode: …` | both modes given | pick one |
 | `SSO mode needs both --issuer and --subject` | half a tuple | supply both; neither half identifies anyone alone |
 | `the OAuth client is not configured: …` | step 1 incomplete | set the named variables, then `php artisan config:clear` |
+| `--issuer must be '…', the configured OAUTH_PROVIDER` | the provider key and `--issuer` disagree, often the URL passed by mistake | pass the `OAUTH_PROVIDER` key |
 | `No local user with email … exists.` | standalone `--user=<email>` with no such row | create the user first; this command never creates an account from an address |
 | `No local user with id … exists.` | wrong id | check the id |
 | `Workspace '…' exists but is deleted.` | slug belongs to a soft-deleted workspace | restore it, or choose another slug |
+
+### Notes it prints without refusing
+
+A note is not a refusal; the run succeeded and the note describes something worth knowing.
+
+| Note | Meaning |
+|---|---|
+| `workspace '…' is named '…'; --name was not applied` | the workspace already existed; bootstrap never renames one |
+| `workspace '…' already has N other owner(s); this run adds another rather than replacing anyone` | the slug matched an existing workspace that already has an owner. Usually a slug typo — `--workspace=acme` when `acme-legal` was meant — which grants full authority over somebody else's workspace. Check the slug; revoke the membership if it was not intended. |
 
 ## Step 4 — complete a browser login
 
