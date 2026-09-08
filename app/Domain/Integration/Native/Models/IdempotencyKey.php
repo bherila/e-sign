@@ -6,6 +6,7 @@ namespace App\Domain\Integration\Native\Models;
 
 use App\Domain\Identity\Credentials\ServiceCredential;
 use Carbon\CarbonImmutable;
+use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -73,5 +74,24 @@ class IdempotencyKey extends Model
     public function isInFlight(): bool
     {
         return $this->response_status === null;
+    }
+
+    /**
+     * The recorded body, or null when this row can no longer be read.
+     *
+     * The column became an `encrypted` cast in the September 2026 review
+     * (docs/security/review-2026-09.md finding A-2), so two things can make a row
+     * undecryptable: a row written before that change, and an `APP_KEY` rotation. Neither is
+     * a reason to answer a caller with a 500. A row whose body cannot be read is a row that
+     * records nothing, and the caller gets a real attempt — which is the same thing that
+     * happens after the 24-hour expiry, and the safe direction either way.
+     */
+    public function recordedBody(): ?string
+    {
+        try {
+            return (string) $this->response_body;
+        } catch (DecryptException) {
+            return null;
+        }
     }
 }

@@ -209,6 +209,17 @@ final class IdempotencyStore
             return null;
         }
 
+        // Nor is a completed row whose body this process cannot decrypt — a row written
+        // before `response_body` became an `encrypted` cast
+        // (docs/security/review-2026-09.md finding A-2), or one written under a previous
+        // `APP_KEY`. Same rule as expiry, and for the same reason: a record that cannot be
+        // read is not a record, and the caller should get a real attempt rather than a 500.
+        if (! $row->isInFlight() && $row->recordedBody() === null) {
+            $row->delete();
+
+            return null;
+        }
+
         return $row;
     }
 
@@ -238,7 +249,8 @@ final class IdempotencyStore
             );
         }
 
-        return new IdempotentResponse((int) $row->response_status, (string) $row->response_body);
+        // Not null here: `existing()` has already discarded a row whose body cannot be read.
+        return new IdempotentResponse((int) $row->response_status, (string) $row->recordedBody());
     }
 
     /**

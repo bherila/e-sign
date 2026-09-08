@@ -140,6 +140,36 @@ class NativeApiHardeningTest extends TestCase
     }
 
     /**
+     * The other half of A-2: making the column an `encrypted` cast means two ordinary
+     * operational events — deploying over rows written before the change, and rotating
+     * `APP_KEY` — leave rows this process cannot read. A record that cannot be read is not a
+     * record, so it is discarded and the caller gets a real attempt, exactly as an expired
+     * key does. Answering a 500 for up to 24 hours would be the wrong direction.
+     */
+    public function test_a_recorded_body_that_cannot_be_decrypted_is_discarded_rather_than_raised(): void
+    {
+        $scenario = NativeApiScenario::create();
+        $issued = $scenario->credential([Scope::WebhooksManage]);
+
+        $body = ['url' => 'https://receiver.example.test/hooks/esign'];
+        $headers = NativeApiScenario::headers($issued, ['Idempotency-Key' => 'legacy-1']);
+
+        $this->postJson('/api/v1/webhooks/endpoints', $body, $headers)->assertCreated();
+
+        // What a row written before the cast looks like: cleartext where ciphertext is expected.
+        DB::table('api_idempotency_keys')
+            ->where('key', 'legacy-1')
+            ->update(['response_body' => '{"id":"stale","secret":"whsec_from_before_the_cast"}']);
+
+        $second = $this->postJson('/api/v1/webhooks/endpoints', $body, $headers);
+
+        $second->assertCreated();
+        $this->assertNull($second->headers->get('Idempotency-Replayed'), 'A real attempt, not a replay.');
+        $this->assertStringNotContainsString('whsec_from_before_the_cast', (string) $second->getContent());
+        $this->assertSame(2, WebhookEndpoint::query()->count());
+    }
+
+    /**
      * Finding A-3. Every Form Request here validates `$request->all()`, which merges the query
      * string — but the idempotency fingerprint covered only method, path, and body. So a
      * zero-grace cutover after a leak, sent with a key already used for a 24-hour rotation,
