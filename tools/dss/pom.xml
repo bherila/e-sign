@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  CI-ONLY tooling. This Maven project is never built into the production image and never
+  shipped in the release bundle; see the "CI-only tooling" section of THIRD_PARTY_NOTICES.md
+  and the PHP-only runtime rule in AGENTS.md. `.dockerignore` excludes `tools/` and
+  `scripts/build-release.sh` copies an explicit allowlist that does not include it.
+
+  It builds one class, PadesProfileCheck, which asks European Commission DSS what PAdES
+  baseline level a PDF's signature actually reaches. Driven by scripts/validate-pades-profile.sh.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>net.herila.esign.ci</groupId>
+  <artifactId>pades-profile-check</artifactId>
+  <version>1.0.0</version>
+  <packaging>jar</packaging>
+  <name>PAdES profile check (CI only)</name>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.release>17</maven.compiler.release>
+    <!-- Pinned exactly. Bumping this is a deliberate change: the reported levels and
+         sub-indications in docs/stage0/pades-profile.md are the output of THIS version. -->
+    <dss.version>6.5</dss.version>
+  </properties>
+
+  <dependencies>
+    <!-- DSS is LGPL-2.1-or-later. Used unmodified, as a separate CI-only process. -->
+    <dependency>
+      <groupId>eu.europa.ec.joinup.sd-dss</groupId>
+      <artifactId>dss-pades-pdfbox</artifactId>
+      <version>${dss.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>eu.europa.ec.joinup.sd-dss</groupId>
+      <artifactId>dss-validation</artifactId>
+      <version>${dss.version}</version>
+    </dependency>
+    <!-- DSSUtils and CRL-parser implementations are chosen at runtime via the service
+         loader; without them DSS fails at class-init with "No implementation found". -->
+    <!-- The CMS implementation is also service-loaded. dss-cms-object holds the whole
+         CMSSignedData in memory (BouncyCastle), which suits artifacts of a few tens of KB;
+         dss-cms-stream is the alternative for large documents. -->
+    <dependency>
+      <groupId>eu.europa.ec.joinup.sd-dss</groupId>
+      <artifactId>dss-cms-object</artifactId>
+      <version>${dss.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>eu.europa.ec.joinup.sd-dss</groupId>
+      <artifactId>dss-utils-apache-commons</artifactId>
+      <version>${dss.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>eu.europa.ec.joinup.sd-dss</groupId>
+      <artifactId>dss-crl-parser-x509crl</artifactId>
+      <version>${dss.version}</version>
+    </dependency>
+    <!-- The default ETSI validation policy (policy/constraint.xml) and its JAXB model ship
+         here. Without it DSS fails at validateDocument() with "Unable to load the policy". -->
+    <dependency>
+      <groupId>eu.europa.ec.joinup.sd-dss</groupId>
+      <artifactId>dss-policy-jaxb</artifactId>
+      <version>${dss.version}</version>
+    </dependency>
+    <!-- DSS logs through SLF4J. Without a binding every run prints a warning to stderr;
+         simple-logger at WARN keeps the JSON on stdout clean. -->
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-simple</artifactId>
+      <version>2.0.17</version>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <finalName>pades-profile-check</finalName>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <version>3.8.1</version>
+        <executions>
+          <execution>
+            <id>copy-dependencies</id>
+            <phase>package</phase>
+            <goals><goal>copy-dependencies</goal></goals>
+            <configuration>
+              <outputDirectory>${project.build.directory}/lib</outputDirectory>
+              <includeScope>runtime</includeScope>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <version>3.4.2</version>
+        <configuration>
+          <archive>
+            <manifest>
+              <mainClass>PadesProfileCheck</mainClass>
+              <addClasspath>true</addClasspath>
+              <classpathPrefix>lib/</classpathPrefix>
+            </manifest>
+          </archive>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
