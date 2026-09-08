@@ -45,10 +45,21 @@ use Tests\TestCase;
  *  - the visual field editor page: tests/Feature/Preparation/FieldEditorPageTest.php. It
  *    covers the workspace, the template, and the version, over the one HTML route in the
  *    application that renders somebody's field placement.
+ *  - the native API under /api/v1: tests/Feature/Integration/Native/NativeApiIsolationTest.php.
+ *    It covers every envelope route (read, patch, send, cancel, recipients, values, events,
+ *    artifacts, and artifact download), templates and template versions, a document
+ *    presented to envelope creation, webhook endpoints, and the envelope event feed. That
+ *    surface has no workspace parameter at all — the credential's workspace is the tenant —
+ *    so the only way to cross a boundary there is a lookup written the wrong way round, and
+ *    every case asserts 404 rather than 403 for exactly the reason this file gives: a 403
+ *    would confirm the identifier exists.
+ *  - artifact downloads, in the same file. They are reachable only through the native API's
+ *    ArtifactLocator seam, so they are asserted where that seam is served rather than in a
+ *    file of their own.
  *
- * The remaining surfaces named in issue #11 — JSON import, artifact downloads, and queue
- * jobs — do not exist yet, and each one adds its cases here as it lands rather than getting
- * an isolation test of its own somewhere else.
+ * The remaining surfaces named in issue #11 — JSON import and queue jobs — do not exist yet,
+ * and each one adds its cases here as it lands rather than getting an isolation test of its
+ * own somewhere else.
  */
 class CrossWorkspaceIsolationTest extends TestCase
 {
