@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Evidence\Retention;
 
+use App\Domain\Delivery\Mail\MailEventSource;
 use App\Domain\Delivery\Mail\MailKind;
 use App\Domain\Delivery\Mail\MailState;
 use App\Domain\Delivery\Mail\Models\OutboundMail;
@@ -15,8 +16,11 @@ use App\Domain\Identity\Audit\AuditActor;
 use App\Domain\Identity\Audit\AuditEvent;
 use App\Domain\Signing\Envelopes\EnvelopeState;
 use App\Domain\Signing\Models\RecipientAttestation;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Tests\Support\FinalizationScenario;
 use Tests\Support\RetentionScenario;
 use Tests\TestCase;
 
@@ -171,6 +175,107 @@ class RecipientErasureTest extends TestCase
         $this->assertSame('Synthetic mutual NDA', $mail->context['agreement_title']);
     }
 
+    /**
+     * Issue #89. `MailOutbox` records an invitation, a reminder, and a one-time code against
+     * the recipient row, but a completion, cancellation, expiry, decline, or admin-failure
+     * notice against the *envelope* — so an erasure matching `related_type = recipient`
+     * alone left the address in cleartext on every terminal notice the person received,
+     * which is most of the mail they ever got.
+     */
+    public function test_every_kind_of_message_to_that_person_is_tombstoned_whatever_it_was_related_to(): void
+    {
+        $scenario = RetentionScenario::finalized();
+        $envelope = $scenario->envelope->refresh();
+        $subject = $scenario->signing->recipient($envelope, 'buyer');
+        $other = $scenario->signing->recipient($envelope, 'seller');
+        $address = $subject->email;
+
+        // The scenario's event sink records rather than sends, so the only outbox rows in
+        // this test are the ones below. Asserted, so the counts cannot drift silently.
+        $this->assertSame(0, DB::table('outbound_mails')->count());
+        $this->assertNotSame($address, $other->email);
+
+        // Recorded against the recipient row.
+        $invitation = $this->outboundMail($scenario, MailKind::Invitation, $address, $subject);
+        $reminder = $this->outboundMail($scenario, MailKind::Reminder, $address, $subject);
+        $otp = $this->outboundMail($scenario, MailKind::Otp, $address, $subject);
+
+        // Recorded against the envelope. Every one of these kept the address before.
+        $completed = $this->outboundMail($scenario, MailKind::Completed, $address, $envelope);
+        $cancelled = $this->outboundMail($scenario, MailKind::Cancelled, $address, $envelope);
+        $expired = $this->outboundMail($scenario, MailKind::Expired, $address, $envelope);
+        $declined = $this->outboundMail($scenario, MailKind::Declined, $address, $envelope, [
+            // Sender-authored prose that quotes the mailbox. Nothing stops an operator or a
+            // signer typing an address into a reason, so the scrub is over the whole blob
+            // rather than over the two name keys.
+            'reason' => 'Wrong address: '.$address.' is not the right contact.',
+        ]);
+        $adminFailure = $this->outboundMail($scenario, MailKind::AdminFailure, $address, $envelope);
+
+        // The same mailbox, written the way a copy-paste or an SMTP round trip can leave it.
+        $mixedCase = $this->outboundMail($scenario, MailKind::Completed, strtoupper($address), $envelope);
+
+        // Provider feedback that quotes the envelope recipient back at us, which is what an
+        // SMTP rejection does.
+        $bounce = $completed->recordEvent(MailEventSource::Ses, 'Bounce', [
+            'smtp_response' => '550 5.1.1 <'.$address.'> user unknown',
+        ]);
+
+        // The other party on the same agreement, and a notice *about* the erased person that
+        // went to them. Neither is this person's contact data.
+        $toTheOtherParty = $this->outboundMail($scenario, MailKind::Completed, $other->email, $envelope);
+
+        $result = app(RecipientEraser::class)->erase($subject, 'Article 17 request', AuditActor::console('test'));
+
+        $erased = [$invitation, $reminder, $otp, $completed, $cancelled, $expired, $declined, $adminFailure, $mixedCase];
+
+        foreach ($erased as $mail) {
+            $mail->refresh();
+
+            $this->assertSame(
+                RecipientEraser::tombstoneEmail($subject->public_id),
+                $mail->to_email,
+                $mail->kind->value.' kept the erased address.',
+            );
+            $this->assertSame(RecipientEraser::NAME_TOMBSTONE, $mail->to_name);
+            $this->assertSame(RecipientEraser::SUBJECT_TOMBSTONE, $mail->subject);
+            $this->assertSame(RecipientEraser::NAME_TOMBSTONE, $mail->context['recipient_name']);
+
+            // The record of the contact survives; only the contact details go.
+            $this->assertSame(MailState::SentToProvider, $mail->state);
+            $this->assertSame('Synthetic mutual NDA', $mail->context['agreement_title']);
+        }
+
+        // Including out of the prose, not just out of the two name keys.
+        $this->assertStringNotContainsString($address, (string) json_encode($declined->refresh()->context));
+
+        // And out of the provider's own words about the message.
+        $bounce->refresh();
+        $this->assertStringNotContainsString($address, (string) json_encode($bounce->payload));
+        $this->assertSame('Bounce', $bounce->event);
+        $this->assertSame(MailEventSource::Ses, $bounce->source);
+
+        // The other party's message is not this person's to erase.
+        $toTheOtherParty->refresh();
+        $this->assertSame($other->email, $toTheOtherParty->to_email);
+        $this->assertNotSame(RecipientEraser::NAME_TOMBSTONE, $toTheOtherParty->to_name);
+        $this->assertNotSame(RecipientEraser::SUBJECT_TOMBSTONE, $toTheOtherParty->subject);
+        $this->assertArrayNotHasKey('contact_erased_at', $toTheOtherParty->context);
+
+        $this->assertSame(count($erased), $result['outbound_mail_rows_erased']);
+        $this->assertSame(1, $result['outbound_mail_event_rows_scrubbed']);
+
+        // The whole point, stated once over both tables: the mailbox is gone from the outbox.
+        $this->assertStringNotContainsString(
+            $address,
+            (string) json_encode(DB::table('outbound_mails')->orderBy('id')->get(), JSON_THROW_ON_ERROR),
+        );
+        $this->assertStringNotContainsString(
+            $address,
+            (string) json_encode(DB::table('outbound_mail_events')->orderBy('id')->get(), JSON_THROW_ON_ERROR),
+        );
+    }
+
     public function test_erasure_needs_a_reason_and_refuses_a_second_run(): void
     {
         $scenario = RetentionScenario::finalized();
@@ -257,5 +362,38 @@ class RecipientErasureTest extends TestCase
     {
         $this->artisan('esign:privacy:erase-recipient', ['recipient' => 'nope', '--reason' => 'x'])
             ->assertFailed();
+    }
+
+    /**
+     * One outbox row, written the way `MailOutbox` writes them.
+     *
+     * `$related` is the argument that matters: it is what `MailOutbox` records a message
+     * against, and it is a recipient for an invitation, a reminder, or a one-time code and
+     * the envelope for every terminal notice.
+     *
+     * @param  array<string, mixed>  $context
+     */
+    private function outboundMail(
+        FinalizationScenario $scenario,
+        MailKind $kind,
+        string $toEmail,
+        Model $related,
+        array $context = [],
+    ): OutboundMail {
+        return OutboundMail::query()->create([
+            'workspace_id' => $scenario->signing->workspace->getKey(),
+            'kind' => $kind,
+            'to_email' => $toEmail,
+            'to_name' => 'Synthetic '.$kind->value.' addressee',
+            'subject' => 'About the synthetic mutual NDA',
+            'context' => $context + [
+                'recipient_name' => 'Synthetic '.$kind->value.' addressee',
+                'agreement_title' => 'Synthetic mutual NDA',
+            ],
+            'state' => MailState::SentToProvider,
+            'state_changed_at' => now(),
+            'related_type' => $related->getMorphClass(),
+            'related_id' => (string) $related->getKey(),
+        ]);
     }
 }

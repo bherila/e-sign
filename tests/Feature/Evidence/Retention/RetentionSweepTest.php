@@ -9,6 +9,7 @@ use App\Domain\Evidence\Retention\RetentionPolicy;
 use App\Domain\Evidence\Retention\RetentionSweeper;
 use App\Domain\Identity\Audit\AuditActor;
 use App\Domain\Identity\Audit\AuditEvent;
+use App\Domain\Preparation\Documents\Models\Document;
 use App\Domain\Signing\Models\Envelope;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -253,6 +254,77 @@ class RetentionSweepTest extends TestCase
 
         $this->assertDatabaseHas('documents', ['id' => $document->getKey()]);
         $this->assertTrue(Storage::disk('documents')->exists($scenario->signing->revision->path));
+    }
+
+    /**
+     * A soft delete is an undo. Hard-deleting the rows and the bytes behind one would make it
+     * permanent, which is the failure docs/BLOB_STORAGE.md names and
+     * docs/operations/retention.md promises against ("a soft-deleted row still counts as a
+     * reference"). Issue #89, and docs/security/review-2026-09.md finding B-3.
+     */
+    public function test_a_soft_deleted_document_is_never_planned_for_deletion(): void
+    {
+        $scenario = SigningScenario::create()->bind();
+        $document = RetentionScenario::orphanDocument($scenario->workspace, 200);
+        $objects = RetentionScenario::objectsOf($document);
+
+        $document->delete();
+
+        $sweeper = app(RetentionSweeper::class);
+        $policy = RetentionPolicy::fromConfig(config());
+        $plan = $sweeper->plan($policy);
+
+        $this->assertSame([], $plan->unreferencedDocuments);
+
+        $outcome = $sweeper->apply($plan, $policy, AuditActor::console('test'));
+
+        $this->assertSame(0, $outcome->unreferencedDocumentsDeleted);
+        $this->assertSame(1, Document::query()->withTrashed()->whereKey($document->getKey())->count());
+        $this->assertSame(2, DB::table('document_revisions')->where('document_id', $document->getKey())->count());
+
+        foreach ($objects as $path) {
+            $this->assertTrue(Storage::disk('documents')->exists($path), $path.' was destroyed by a soft delete.');
+        }
+    }
+
+    /**
+     * The plan is printed to a human before anything is confirmed, so the exclusion has to
+     * hold at the moment the deletion runs and not only at the moment it was planned — rule
+     * 5 of the sweeper's own contract. Somebody pressing "delete" in the UI while an
+     * operator reads a dry run must not have their undo taken away by the run they then
+     * confirm.
+     */
+    public function test_a_document_soft_deleted_after_the_plan_was_made_is_not_hard_deleted(): void
+    {
+        $scenario = SigningScenario::create()->bind();
+        $document = RetentionScenario::orphanDocument($scenario->workspace, 200);
+        $objects = RetentionScenario::objectsOf($document);
+
+        $sweeper = app(RetentionSweeper::class);
+        $policy = RetentionPolicy::fromConfig(config());
+        $plan = $sweeper->plan($policy);
+
+        // Planned, correctly: nothing referenced it when the plan was built.
+        $this->assertSame([$document->getKey()], array_column($plan->unreferencedDocuments, 'id'));
+
+        // And then the row is soft-deleted, in the window the grace period exists for.
+        $document->delete();
+
+        $outcome = $sweeper->apply($plan, $policy, AuditActor::console('test'));
+
+        $this->assertSame(0, $outcome->unreferencedDocumentsDeleted);
+        $this->assertSame(0, $outcome->objectsDeleted);
+        $this->assertSame(1, Document::query()->withTrashed()->whereKey($document->getKey())->count());
+        $this->assertSame(2, DB::table('document_revisions')->where('document_id', $document->getKey())->count());
+
+        foreach ($objects as $path) {
+            $this->assertTrue(Storage::disk('documents')->exists($path), $path.' was destroyed after a soft delete.');
+        }
+
+        // Reported, not silently passed over: an operator has to be able to see why the plan
+        // and the outcome disagree.
+        $this->assertNotEmpty($outcome->skipped);
+        $this->assertStringContainsString('soft-deleted after the plan was made', $outcome->skipped[0]);
     }
 
     // ---------------------------------------------------------------------------------
