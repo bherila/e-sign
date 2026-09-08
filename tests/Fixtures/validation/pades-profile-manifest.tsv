@@ -8,7 +8,15 @@
 # This check reads the committed bytes exactly as they are, which is what
 # docs/stage0/sealing.md promised a later DSS pass would do.
 #
-# Columns: file<TAB>level<TAB>conclusion<TAB>timestamps<TAB>note
+# Columns: file<TAB>trust<TAB>level<TAB>conclusion<TAB>timestamps<TAB>note
+#   trust        which anchor DSS is given, and the only one it is given:
+#                  fixture-only          tests/Fixtures/crypto/root.test.crt
+#                  rotation-target-only  tests/Fixtures/crypto/root-b.test.crt
+#                A file may appear more than once under different trust modes. That is how the
+#                seal-key rotation rows show the two anchors actually discriminate, rather than
+#                a validator that trusts everything. There is no fixture-plus-system mode here:
+#                this check is never given an OS trust store, so it claims nothing about a
+#                public timestamp authority.
 #   level        the SignatureLevel DSS reports, or '-' when there is no single signature to
 #                report one for. This is DSS's structural profile verdict and it is the reason
 #                this check exists: a signature that were merely a valid PKCS#7 rather than a
@@ -20,18 +28,21 @@
 #                timestamps. Reported separately because DSS can call a signature TOTAL_PASSED
 #                at BASELINE_T while the timestamp's own certificate chain is untrusted.
 #
-# Every run trusts exactly one anchor, tests/Fixtures/crypto/root.test.crt, and nothing else:
-# no OS store, no EU trusted list, no online CRL or OCSP. That is why both B-T artifacts report
-# their timestamp as NO_CERTIFICATE_CHAIN_FOUND — DigiCert's root is not an input here. TSA
-# trust is pyHanko's half of the evidence (manifest.tsv, fixture-plus-system mode), not this
-# one's.
-sealed-b-b.pdf	PAdES_BASELINE_B	TOTAL_PASSED	none	The B-B claim in docs/stage0/sealing.md, now backed by a profile verdict rather than a soundness check.
-sealed-b-t.pdf	PAdES_BASELINE_T	TOTAL_PASSED	1:INDETERMINATE/NO_CERTIFICATE_CHAIN_FOUND	B-T structurally. The timestamp is from DigiCert and is sound; its chain is untrusted here only because this run is given the fixture root alone.
-sealed-b-t-untrusted-tsa.pdf	PAdES_BASELINE_T	TOTAL_PASSED	1:INDETERMINATE/NO_CERTIFICATE_CHAIN_FOUND	DIVERGENCE, deliberate: pyHanko judges this artifact INVALID on TSA trust, DSS calls the signature TOTAL_PASSED because an untrusted signature timestamp does not sink a B-T conclusion — it only fails to contribute a trusted POE. Both verdicts are correct about different questions; neither is tuned to agree.
-finalized-executed.pdf	PAdES_BASELINE_B	TOTAL_PASSED	none	The executed agreement from staged finalization, sealed at B-B. Same profile verdict as the bare B-B artifact.
-negative-modified-content.pdf	PAdES_BASELINE_B	TOTAL_FAILED/HASH_FAILURE	none	Page geometry changed inside the signed byte range. The level still reads BASELINE_B because the structure is untouched; the level is a statement about form, never a verdict.
-negative-forged-cms.pdf	PAdES_BASELINE_B	TOTAL_FAILED/HASH_FAILURE	none	The CMS of another sealed document spliced into /Contents.
-negative-byte-range-overclaim.pdf	PAdES_BASELINE_B	TOTAL_FAILED/FORMAT_FAILURE	none	/ByteRange claims past the end of a file that still parses. DSS reports it as a format failure, adding "The /ByteRange dictionary is not consistent!".
-negative-incremental-update.pdf	PAdES_BASELINE_B	TOTAL_FAILED/FORMAT_FAILURE	none	An unexpected revision appended, redefining the page object. This is TOTAL_FAILED only because tools/dss/validation-policy.xml raises DSS's UndefinedChanges constraint from WARN to FAIL; under DSS's stock policy the conclusion is identical to a clean artifact's. Recorded in docs/stage0/pades-profile.md, not hidden.
-negative-untrusted-signer.pdf	PAdES_BASELINE_B	INDETERMINATE/NO_CERTIFICATE_CHAIN_FOUND	none	Cryptographically sound but sealed outside the trusted root. INDETERMINATE, not TOTAL_FAILED: nothing about the signature is broken, there is simply no path to an anchor.
-negative-truncated.pdf	-	unreadable	-	Tail removed with the trailer. DSS never reaches the signature, so this row pins a refusal to parse and says nothing about the byte range; negative-byte-range-overclaim.pdf is what carries the coverage property.
+# No OS store, no EU trusted list, no online CRL or OCSP fetch, ever. That is why both B-T
+# artifacts report their timestamp as NO_CERTIFICATE_CHAIN_FOUND — DigiCert's root is not an
+# input here. TSA trust is pyHanko's half of the evidence (manifest.tsv, fixture-plus-system
+# mode), not this one's.
+sealed-b-b.pdf	fixture-only	PAdES_BASELINE_B	TOTAL_PASSED	none	The B-B claim in docs/stage0/sealing.md, now backed by a profile verdict rather than a soundness check.
+sealed-b-t.pdf	fixture-only	PAdES_BASELINE_T	TOTAL_PASSED	1:INDETERMINATE/NO_CERTIFICATE_CHAIN_FOUND	B-T structurally. The timestamp is from DigiCert and is sound; its chain is untrusted here only because this run is given the fixture root alone.
+sealed-b-t-untrusted-tsa.pdf	fixture-only	PAdES_BASELINE_T	TOTAL_PASSED	1:INDETERMINATE/NO_CERTIFICATE_CHAIN_FOUND	DIVERGENCE, deliberate: pyHanko judges this artifact INVALID on TSA trust, DSS calls the signature TOTAL_PASSED because an untrusted signature timestamp does not sink a B-T conclusion — it only fails to contribute a trusted POE. Both verdicts are correct about different questions; neither is tuned to agree.
+finalized-executed.pdf	fixture-only	PAdES_BASELINE_B	TOTAL_PASSED	none	The executed agreement from staged finalization, sealed at B-B. Same profile verdict as the bare B-B artifact.
+rotation-retired-key.pdf	fixture-only	PAdES_BASELINE_B	TOTAL_PASSED	none	Sealed under the RETIRED key (fixture-seal-2026-a), under the retired certificate's own anchor. A rotation does not change what profile the old key's artifacts satisfy, and it does not invalidate them.
+rotation-active-key.pdf	rotation-target-only	PAdES_BASELINE_B	TOTAL_PASSED	none	Sealed under the ACTIVE key after rotation (fixture-seal-2026-b), under the new certificate's anchor. The new key produces the same baseline profile as the old one.
+rotation-retired-key.pdf	rotation-target-only	PAdES_BASELINE_B	INDETERMINATE/NO_CERTIFICATE_CHAIN_FOUND	none	The retired artifact under the NEW key's anchor. Still structurally BASELINE_B — the profile is a property of the signature, not of who trusts it — but no path to an anchor. The pair of anchors discriminates, so the TOTAL_PASSED rows above are about the right certificate.
+rotation-active-key.pdf	fixture-only	PAdES_BASELINE_B	INDETERMINATE/NO_CERTIFICATE_CHAIN_FOUND	none	The active artifact under the RETIRED key's anchor: the complement of the row above.
+negative-modified-content.pdf	fixture-only	PAdES_BASELINE_B	TOTAL_FAILED/HASH_FAILURE	none	Page geometry changed inside the signed byte range. The level still reads BASELINE_B because the structure is untouched; the level is a statement about form, never a verdict.
+negative-forged-cms.pdf	fixture-only	PAdES_BASELINE_B	TOTAL_FAILED/HASH_FAILURE	none	The CMS of another sealed document spliced into /Contents.
+negative-byte-range-overclaim.pdf	fixture-only	PAdES_BASELINE_B	TOTAL_FAILED/FORMAT_FAILURE	none	/ByteRange claims past the end of a file that still parses. DSS reports it as a format failure, adding "The /ByteRange dictionary is not consistent!".
+negative-incremental-update.pdf	fixture-only	PAdES_BASELINE_B	TOTAL_FAILED/FORMAT_FAILURE	none	An unexpected revision appended, redefining the page object. This is TOTAL_FAILED only because tools/dss/validation-policy.xml raises DSS's UndefinedChanges constraint from WARN to FAIL; under DSS's stock policy the conclusion is identical to a clean artifact's. Recorded in docs/stage0/pades-profile.md, not hidden.
+negative-untrusted-signer.pdf	fixture-only	PAdES_BASELINE_B	INDETERMINATE/NO_CERTIFICATE_CHAIN_FOUND	none	Cryptographically sound but sealed outside the trusted root. INDETERMINATE, not TOTAL_FAILED: nothing about the signature is broken, there is simply no path to an anchor.
+negative-truncated.pdf	fixture-only	-	unreadable	-	Tail removed with the trailer. DSS never reaches the signature, so this row pins a refusal to parse and says nothing about the byte range; negative-byte-range-overclaim.pdf is what carries the coverage property.

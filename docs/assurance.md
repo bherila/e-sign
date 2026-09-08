@@ -234,7 +234,7 @@ identity proof** and nothing in the pipeline treats them as any.
 | Tool | What it is run against | What it establishes |
 |---|---|---|
 | **pyHanko 0.37.0** (+ `pyhanko-cli` 0.5.0), in the `validation` CI job via `scripts/validate-seal.sh` | every committed synthetic artifact in `tests/Fixtures/validation/`, **resealed first** | the CMS verifies over the byte-ranged content, the signer's certificate chains to a configured anchor, and the signature covers the whole file |
-| **European Commission DSS 6.5**, in the `pades-profile` CI job via `scripts/validate-pades-profile.sh` | the same artifacts, **committed bytes, not resealed**, against `tests/Fixtures/validation/pades-profile-manifest.tsv` | which ETSI EN 319 142-1 baseline profile each signature actually satisfies — reported as a `SignatureLevel` — plus DSS's own AdES conclusion and a separate conclusion per timestamp token |
+| **European Commission DSS 6.5**, in the `pades-profile` CI job via `scripts/validate-pades-profile.sh` | the same artifacts, **committed bytes, not resealed**, against `tests/Fixtures/validation/pades-profile-manifest.tsv`; the two seal-key rotation artifacts under **both** anchors | which ETSI EN 319 142-1 baseline profile each signature actually satisfies — reported as a `SignatureLevel` — plus DSS's own AdES conclusion and a separate conclusion per timestamp token |
 | **`ArtifactValidator`** (in-process, tc-lib-pdf) | the sealer's own output, before it is returned | the produced artifact reaches the level that was requested; below it, `SealFailedException` |
 
 The two external validators share no code, run in separate CI jobs so that neither's

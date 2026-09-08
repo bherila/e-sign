@@ -19,9 +19,11 @@
 #   * It never reseals. It reads the committed bytes under tests/Fixtures/validation/ exactly
 #     as they are, which is what docs/stage0/sealing.md promised a later DSS pass would do.
 #     Regeneration stays with the pyHanko job, which owns the sealer's freshness.
-#   * It trusts exactly one anchor, the fixture root, and nothing else — no OS store, no EU
-#     trusted list, no online CRL or OCSP fetch. The run is fully offline after the Maven
-#     dependencies are resolved, so its verdicts do not depend on the runner's egress.
+#   * It trusts only the anchor the manifest names for that row, and nothing else — no OS
+#     store, no EU trusted list, no online CRL or OCSP fetch. The run is fully offline after
+#     the Maven dependencies are resolved, so its verdicts do not depend on the runner's
+#     egress. An artifact may appear under more than one trust mode; that is how the seal-key
+#     rotation rows show the two anchors actually discriminate.
 #   * It says nothing about timestamp-authority trust; that is pyHanko's half of the evidence.
 #
 # Nothing here is part of the application. The repository's runtime is PHP only; this Java tool
@@ -45,7 +47,6 @@ cd "$repo_root"
 
 validation_dir='tests/Fixtures/validation'
 manifest="$validation_dir/pades-profile-manifest.tsv"
-trust_root='tests/Fixtures/crypto/root.test.crt'
 tool_dir='tools/dss'
 policy="$tool_dir/validation-policy.xml"
 jar="$tool_dir/target/pades-profile-check.jar"
@@ -58,7 +59,21 @@ if [ "${1:-}" = '--rebuild' ]; then
     rebuild=1
 fi
 
-for required in "$manifest" "$trust_root" "$policy" "$tool_dir/pom.xml"; do
+# Trust modes, named per row in the manifest so nothing is inferred from a filename. The names
+# match scripts/validate-seal.sh's, minus fixture-plus-system: this check is never given an OS
+# trust store, so it makes no claim about a public timestamp authority.
+trust_fixture_only='tests/Fixtures/crypto/root.test.crt'
+trust_rotation_target_only='tests/Fixtures/crypto/root-b.test.crt'
+
+trust_anchor_for() {
+    case "$1" in
+        fixture-only) printf '%s' "$trust_fixture_only" ;;
+        rotation-target-only) printf '%s' "$trust_rotation_target_only" ;;
+        *) return 1 ;;
+    esac
+}
+
+for required in "$manifest" "$trust_fixture_only" "$trust_rotation_target_only" "$policy" "$tool_dir/pom.xml"; do
     if [ ! -f "$required" ]; then
         echo "error: $required is missing." >&2
         exit 1
@@ -97,14 +112,19 @@ mkdir -p "$report_dir"
 
 # The artifact list comes from the manifest, not from a glob, so a fixture that exists on disk
 # but is not accounted for cannot ride along unchecked, and one that is listed but absent is a
-# hard failure rather than a silently shorter run.
-artifacts=()
-while IFS=$'\t' read -r file level conclusion timestamps note; do
+# hard failure rather than a silently shorter run. Rows are bucketed by trust mode, because DSS
+# takes one trust configuration per run and an artifact may be listed under two of them.
+modes=()
+while IFS=$'\t' read -r file trust level conclusion timestamps note; do
     case "$file" in
         ''|'#'*) continue ;;
     esac
-    if [ -z "$level" ] || [ -z "$conclusion" ] || [ -z "$timestamps" ]; then
-        echo "error: malformed manifest row for '$file' (expected 5 tab-separated columns)." >&2
+    if [ -z "$trust" ] || [ -z "$level" ] || [ -z "$conclusion" ] || [ -z "$timestamps" ]; then
+        echo "error: malformed manifest row for '$file' (expected 6 tab-separated columns)." >&2
+        exit 1
+    fi
+    if ! trust_anchor_for "$trust" >/dev/null; then
+        echo "error: unknown trust mode '$trust' for '$file' in $manifest." >&2
         exit 1
     fi
     if [ ! -f "$validation_dir/$file" ]; then
@@ -112,23 +132,59 @@ while IFS=$'\t' read -r file level conclusion timestamps note; do
         echo '       Regenerate the fixtures with the pyHanko job, or fix the manifest.' >&2
         exit 1
     fi
-    artifacts+=("$validation_dir/$file")
+    case " ${modes[*]-} " in
+        *" $trust "*) ;;
+        *) modes+=("$trust") ;;
+    esac
 done < "$manifest"
 
-if [ "${#artifacts[@]}" -eq 0 ]; then
+if [ "${#modes[@]}" -eq 0 ]; then
     echo "error: $manifest lists no artifacts." >&2
     exit 1
 fi
 
-summary_file="$(mktemp)"
-trap 'rm -f "$summary_file"' EXIT
+summary_dir="$(mktemp -d)"
+trap 'rm -rf "$summary_dir"' EXIT
 
-java -jar "$jar" \
-    --trust "$trust_root" \
-    --policy "$policy" \
-    --json "$json_output" \
-    --report-dir "$report_dir" \
-    "${artifacts[@]}" > "$summary_file"
+# One DSS run per trust mode. Reports go to a per-mode subdirectory because the same artifact
+# is validated twice under different anchors and the two XML reports must not overwrite
+# each other.
+for mode in "${modes[@]}"; do
+    mode_artifacts=()
+    while IFS=$'\t' read -r file trust level conclusion timestamps note; do
+        case "$file" in
+            ''|'#'*) continue ;;
+        esac
+        [ "$trust" = "$mode" ] || continue
+        case " ${mode_artifacts[*]-} " in
+            *" $validation_dir/$file "*) ;;
+            *) mode_artifacts+=("$validation_dir/$file") ;;
+        esac
+    done < "$manifest"
+
+    mkdir -p "$report_dir/$mode"
+    java -jar "$jar" \
+        --trust "$(trust_anchor_for "$mode")" \
+        --policy "$policy" \
+        --json "$report_dir/$mode.json" \
+        --report-dir "$report_dir/$mode" \
+        "${mode_artifacts[@]}" > "$summary_dir/$mode.tsv"
+done
+
+# One committed JSON report covering every run, so a reader does not have to reassemble it
+# from the CI artifact.
+{
+    printf '{\n  "runs": [\n'
+    first=1
+    for mode in "${modes[@]}"; do
+        [ "$first" -eq 1 ] || printf ',\n'
+        first=0
+        printf '  { "trustMode": "%s", "report":\n' "$mode"
+        cat "$report_dir/$mode.json"
+        printf '  }'
+    done
+    printf '\n  ]\n}\n'
+} > "$json_output"
 
 # --- compare against the manifest -------------------------------------------
 : > "$output_file"
@@ -142,7 +198,9 @@ java_version="$(sed -n 's/.*"java": "\([^"]*\)".*/\1/p' "$json_output" | head -1
 
 log "European Commission DSS $dss_version (dss-pades / dss-validation), Java $java_version"
 log "policy: $policy (DSS stock policy with two marked edits; see the file header)"
-log "trust anchor: $trust_root — the only one, no OS store and no trusted list"
+for mode in "${modes[@]}"; do
+    log "trust mode $mode: $(trust_anchor_for "$mode") — the only anchor, no OS store and no trusted list"
+done
 log "artifacts: the committed bytes under $validation_dir, not resealed"
 log "validated at: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 log ''
@@ -150,14 +208,14 @@ log ''
 failures=0
 checked=0
 
-while IFS=$'\t' read -r file want_level want_conclusion want_timestamps note; do
+while IFS=$'\t' read -r file trust want_level want_conclusion want_timestamps note; do
     case "$file" in
         ''|'#'*) continue ;;
     esac
 
-    line="$(awk -F'\t' -v f="$file" '$1 == f { print; exit }' "$summary_file")"
+    line="$(awk -F'\t' -v f="$file" '$1 == f { print; exit }' "$summary_dir/$trust.tsv")"
     if [ -z "$line" ]; then
-        log "FAIL     $file — DSS produced no result line for this artifact"
+        log "FAIL     $file ($trust) — DSS produced no result line for this artifact"
         failures=$((failures + 1))
         continue
     fi
@@ -173,9 +231,9 @@ while IFS=$'\t' read -r file want_level want_conclusion want_timestamps note; do
     [ "$got_timestamps" = "$want_timestamps" ] || mismatch="$mismatch timestamps(want $want_timestamps, got $got_timestamps)"
 
     if [ -z "$mismatch" ]; then
-        log "OK       $file — $got_level, $got_conclusion, timestamps: $got_timestamps"
+        log "OK       $file ($trust) — $got_level, $got_conclusion, timestamps: $got_timestamps"
     else
-        log "FAIL     $file —$mismatch"
+        log "FAIL     $file ($trust) —$mismatch"
         failures=$((failures + 1))
     fi
     log "         $note"
@@ -189,13 +247,14 @@ done < "$manifest"
 # the JSON report beside this file.
 log '--- messages DSS raised, per artifact (warnings on passing artifacts included) ---'
 awk '
-    /^      "file": / { sub(/,$/, ""); sub(/^ +"file": /, ""); print ""; print "FILE " $0; next }
-    /^          "(errors|warnings|info)": / { sub(/,$/, ""); sub(/^ +/, "  "); print; next }
-    /^      "error": / { sub(/,$/, ""); sub(/^ +/, "  "); print; next }
+    /^  \{ "trustMode": / { sub(/, "report":$/, ""); sub(/^ +\{ "trustMode": /, ""); print ""; print "TRUST MODE " $0; next }
+    /^      "file": / { sub(/,$/, ""); sub(/^ +"file": /, ""); print ""; print "  FILE " $0; next }
+    /^          "(errors|warnings|info)": / { sub(/,$/, ""); sub(/^ +/, "    "); print; next }
+    /^      "error": / { sub(/,$/, ""); sub(/^ +/, "    "); print; next }
 ' "$json_output" | tee -a "$output_file"
 log ''
 
-log "Checked $checked artifact(s); $failures did not report what the manifest requires."
+log "Checked $checked manifest row(s) across ${#modes[@]} trust mode(s); $failures did not report what the manifest requires."
 
 if [ "$failures" -ne 0 ]; then
     echo "PAdES profile check failed. Full output in $output_file, JSON in $json_output," >&2
@@ -203,4 +262,4 @@ if [ "$failures" -ne 0 ]; then
     exit 1
 fi
 
-echo "PAdES profile check passed ($checked artifacts). Output in $output_file, JSON in $json_output."
+echo "PAdES profile check passed ($checked rows, ${#modes[@]} trust modes). Output in $output_file, JSON in $json_output."

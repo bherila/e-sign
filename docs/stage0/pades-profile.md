@@ -60,8 +60,10 @@ something:
    `tests/Fixtures/validation/` exactly as they are. `sealing.md` said a DSS pass could be
    added later "against exactly these bytes"; this is that, literally. Regeneration stays with
    the pyHanko job, which owns the sealer's freshness.
-2. **It trusts one anchor and nothing else.** `tests/Fixtures/crypto/root.test.crt`. No OS trust
-   store, no EU trusted list.
+2. **It trusts one anchor per row and nothing else.** The manifest names the trust mode for
+   each row — `fixture-only` (`root.test.crt`) or `rotation-target-only` (`root-b.test.crt`) —
+   and DSS is given that anchor alone. No OS trust store, no EU trusted list. An artifact may
+   be listed under both modes; §3.1 is why.
 3. **It performs no network I/O during validation.** No CRL source, no OCSP source, and
    `AIASource` explicitly set to `null`. That last one was not free: before it was set, DSS
    dereferenced the Authority Information Access URL in the DigiCert timestamp chain mid-
@@ -69,21 +71,26 @@ something:
 
 ## 3. The levels DSS reports, per artifact
 
-Ten committed artifacts, every one of them checked. The `level` column is the profile verdict;
-the `conclusion` column is DSS's AdES status under the policy in §5.
+Twelve committed artifacts, fourteen manifest rows across two trust modes, every one of them
+checked. The `level` column is the profile verdict; the `conclusion` column is DSS's AdES status
+under the policy in §5.
 
-| Artifact | Level | Conclusion | Signature timestamp |
-|---|---|---|---|
-| `sealed-b-b.pdf` | **`PAdES_BASELINE_B`** | `TOTAL_PASSED` | none |
-| `sealed-b-t.pdf` | **`PAdES_BASELINE_T`** | `TOTAL_PASSED` | 1, `INDETERMINATE/NO_CERTIFICATE_CHAIN_FOUND` |
-| `sealed-b-t-untrusted-tsa.pdf` | **`PAdES_BASELINE_T`** | `TOTAL_PASSED` | 1, `INDETERMINATE/NO_CERTIFICATE_CHAIN_FOUND` |
-| `finalized-executed.pdf` | **`PAdES_BASELINE_B`** | `TOTAL_PASSED` | none |
-| `negative-modified-content.pdf` | `PAdES_BASELINE_B` | `TOTAL_FAILED/HASH_FAILURE` | none |
-| `negative-forged-cms.pdf` | `PAdES_BASELINE_B` | `TOTAL_FAILED/HASH_FAILURE` | none |
-| `negative-byte-range-overclaim.pdf` | `PAdES_BASELINE_B` | `TOTAL_FAILED/FORMAT_FAILURE` | none |
-| `negative-incremental-update.pdf` | `PAdES_BASELINE_B` | `TOTAL_FAILED/FORMAT_FAILURE` | none |
-| `negative-untrusted-signer.pdf` | `PAdES_BASELINE_B` | `INDETERMINATE/NO_CERTIFICATE_CHAIN_FOUND` | none |
-| `negative-truncated.pdf` | — | *unreadable* — DSS refuses the file | — |
+| Artifact | Trust | Level | Conclusion | Signature timestamp |
+|---|---|---|---|---|
+| `sealed-b-b.pdf` | fixture-only | **`PAdES_BASELINE_B`** | `TOTAL_PASSED` | none |
+| `sealed-b-t.pdf` | fixture-only | **`PAdES_BASELINE_T`** | `TOTAL_PASSED` | 1, `INDETERMINATE/NO_CERTIFICATE_CHAIN_FOUND` |
+| `sealed-b-t-untrusted-tsa.pdf` | fixture-only | **`PAdES_BASELINE_T`** | `TOTAL_PASSED` | 1, `INDETERMINATE/NO_CERTIFICATE_CHAIN_FOUND` |
+| `finalized-executed.pdf` | fixture-only | **`PAdES_BASELINE_B`** | `TOTAL_PASSED` | none |
+| `rotation-retired-key.pdf` | fixture-only | **`PAdES_BASELINE_B`** | `TOTAL_PASSED` | none |
+| `rotation-active-key.pdf` | rotation-target-only | **`PAdES_BASELINE_B`** | `TOTAL_PASSED` | none |
+| `rotation-retired-key.pdf` | rotation-target-only | `PAdES_BASELINE_B` | `INDETERMINATE/NO_CERTIFICATE_CHAIN_FOUND` | none |
+| `rotation-active-key.pdf` | fixture-only | `PAdES_BASELINE_B` | `INDETERMINATE/NO_CERTIFICATE_CHAIN_FOUND` | none |
+| `negative-modified-content.pdf` | fixture-only | `PAdES_BASELINE_B` | `TOTAL_FAILED/HASH_FAILURE` | none |
+| `negative-forged-cms.pdf` | fixture-only | `PAdES_BASELINE_B` | `TOTAL_FAILED/HASH_FAILURE` | none |
+| `negative-byte-range-overclaim.pdf` | fixture-only | `PAdES_BASELINE_B` | `TOTAL_FAILED/FORMAT_FAILURE` | none |
+| `negative-incremental-update.pdf` | fixture-only | `PAdES_BASELINE_B` | `TOTAL_FAILED/FORMAT_FAILURE` | none |
+| `negative-untrusted-signer.pdf` | fixture-only | `PAdES_BASELINE_B` | `INDETERMINATE/NO_CERTIFICATE_CHAIN_FOUND` | none |
+| `negative-truncated.pdf` | fixture-only | — | *unreadable* — DSS refuses the file | — |
 
 **The level is a statement about form, never a verdict.** Every negative artifact except the
 truncated one still reports `PAdES_BASELINE_B`, because breaking a document's integrity does
@@ -91,6 +98,29 @@ not stop its signature from being structurally a baseline signature. Reading the
 as "this artifact is fine" would be exactly the mistake this gate exists to prevent; the two
 columns answer different questions and both are matched against the manifest, exactly, on
 every run.
+
+### 3.1 The seal-key rotation artifacts
+
+Issue [#29](https://github.com/bherila/e-sign/issues/29) added `rotation-retired-key.pdf` and
+`rotation-active-key.pdf`, sealed under two different keys with two different roots. Each is
+checked twice here, once under each anchor, and DSS reports the diagonal:
+
+|  | under `root.test.crt` (retired) | under `root-b.test.crt` (active) |
+|---|---|---|
+| `rotation-retired-key.pdf` | `TOTAL_PASSED` | `INDETERMINATE/NO_CERTIFICATE_CHAIN_FOUND` |
+| `rotation-active-key.pdf` | `INDETERMINATE/NO_CERTIFICATE_CHAIN_FOUND` | `TOTAL_PASSED` |
+
+Two separate facts fall out, and only the first is also established by pyHanko:
+
+1. **The anchors discriminate.** A `TOTAL_PASSED` on the diagonal would mean nothing if the
+   off-diagonal also passed — that would be a validator that trusts everything, not one that
+   trusts the right certificate. DSS reports the same shape as pyHanko does in `manifest.tsv`,
+   independently.
+2. **Both keys produce the same baseline profile, and the off-diagonal cells still read
+   `PAdES_BASELINE_B`.** A rotation changes who will vouch for an artifact; it does not change
+   what profile the artifact satisfies. The level is a property of the signature, not of the
+   reader's trust store, and this is the clearest place in the fixture set where those two come
+   apart.
 
 ### The structural facts underneath the level
 
@@ -114,7 +144,8 @@ This is the part pyHanko does not report in this form, and it is what makes the
 Nothing here is suppressed, and `scripts/validate-pades-profile.sh` copies all of it into the
 recorded output on every run so this table can be checked rather than believed.
 
-**On all four positive artifacts, which DSS nonetheless concludes `TOTAL_PASSED`:**
+**On all six `TOTAL_PASSED` artifacts** — the four originals plus each rotation artifact under
+its own anchor:
 
 | Warning | What it means | Why it is expected here |
 |---|---|---|
@@ -125,6 +156,10 @@ Both warnings are the same underlying fact — **the Stage 0 seal certificate is
 seen from two angles. They are not defects in the sealing path and they will not go away by
 changing anything in this repository; they go away when an operator installs a CA-issued seal
 certificate, which is open gap 4 in [`sealing.md`](sealing.md).
+
+**On the two off-diagonal rotation rows and `negative-untrusted-signer.pdf`,** the single error
+*"The certificate chain for signature is not trusted, it does not contain a trust anchor."* and
+no warnings at all — DSS stops before it gets as far as noticing the missing AIA.
 
 **On `negative-incremental-update.pdf`,** alongside its error, DSS additionally warns:
 *"Visual difference is detected on page(s) [1]"* and *"Document contains changes restricted by
@@ -251,6 +286,10 @@ check's, and this check does not claim it.
 6. **Only the committed synthetic artifacts are covered.** A regression in the sealer that
    produced a *different* artifact shape would be caught by the pyHanko job, which reseals —
    this job pins the profile of the bytes that are checked in.
+7. **Nothing about rotation as an operation.** §3.1 shows that two artifacts sealed under two
+   keys each verify under their own anchor and not the other's. It says nothing about the
+   rotation command, key custody, or whether an operator would carry a rotation out correctly;
+   that is gate 14 and `docs/operations/seal-key-management.md`.
 
 ## 9. Reproducing this
 
@@ -273,6 +312,7 @@ unzip -p ~/.m2/repository/eu/europa/ec/joinup/sd-dss/dss-policy-jaxb/6.5/dss-pol
 diff /tmp/dss-stock-policy.xml tools/dss/validation-policy.xml
 ```
 
-DSS's own XML simple, detailed and diagnostic reports for each artifact are written to
-`tools/dss/reports/` (gitignored) and uploaded by the `pades-profile` CI job as the
-`dss-pades-profile` artifact.
+DSS's own XML simple, detailed and diagnostic reports are written to
+`tools/dss/reports/<trust-mode>/` (gitignored, one subdirectory per trust mode so the two
+validations of the same artifact do not overwrite each other) and uploaded by the
+`pades-profile` CI job as the `dss-pades-profile` artifact.
