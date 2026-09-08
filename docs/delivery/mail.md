@@ -1,7 +1,7 @@
 # Outbound mail
 
 Every transactional message BWH eSign sends — invitation, reminder, decline, cancellation,
-completion, operator failure notice — goes through the outbox in
+completion, guest sign-in code, operator failure notice — goes through the outbox in
 `app/Domain/Delivery/Mail`. Nothing calls `Mail::send()` directly.
 
 The reason is a single question that has to be answerable months later: *was this person
@@ -115,11 +115,20 @@ from the same source and the two cannot drift.
 | `declined` | the sender | no |
 | `cancelled` | every recipient, including those who already signed | no |
 | `completed` | every party | a download URL, optional |
+| `otp` | a guest starting a signing session | **never** — see below |
 | `admin_failure` | operators | no |
 
 No images, no remote stylesheets, no third-party assets, no tracking pixels. A message that
 fetches nothing renders identically in a client with remote content blocked, and cannot
 report when it was read.
+
+`otp` is the only template that carries a credential in its *text*, and the only one that
+must never carry a link at all: a code and a one-click URL in the same message would let one
+forwarded mail satisfy both halves of the check the code exists to separate. It follows that
+the code is stored — the outbox renders from a persisted context, which is what makes delivery
+survive a crash — so a live code sits in `outbound_mails.context` for the ten minutes it is
+worth anything. `docs/signing/guest-access.md` states that limit rather than implying the code
+is a secret from the operator.
 
 The completion mail does **not** attach the executed PDF. That is a decision, not an
 unfinished feature: mail is not a place to put an executed instrument that has to stay

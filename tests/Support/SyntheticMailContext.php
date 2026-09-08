@@ -61,6 +61,16 @@ final class SyntheticMailContext
                 actionUrl: self::DOWNLOAD_URL,
             ),
 
+            MailKind::Otp => new MailContext(
+                recipientName: 'Avery Counterparty',
+                senderName: 'Example Holdings',
+                agreementTitle: 'Mutual Nondisclosure Agreement',
+                expiresAt: CarbonImmutable::parse('2026-10-01T12:10:00Z'),
+                // Synthetic and fixed, so the rendering assertions are deterministic. A real
+                // code is six digits from random_int and never appears in a fixture.
+                otpCode: '135790',
+            ),
+
             MailKind::AdminFailure => new MailContext(
                 recipientName: 'Operations',
                 failureSummary: 'Finalization could not produce a validated sealed PDF.',
