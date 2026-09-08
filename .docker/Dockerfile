@@ -58,9 +58,13 @@ FROM --platform=$BUILDPLATFORM composer:2 AS vendor
 WORKDIR /app
 ENV COMPOSER_ALLOW_SUPERUSER=1 COMPOSER_NO_INTERACTION=1
 COPY composer.json composer.lock ./
+# Optional BuildKit secret `composer_auth` (a COMPOSER_AUTH JSON document) lets CI fetch dists
+# with an authenticated GitHub token; local builds work without it.
 RUN --mount=type=cache,target=/tmp/cache \
-    composer install --no-dev --no-scripts --no-autoloader --prefer-dist --ignore-platform-reqs \
-    || (sleep 15 && composer install --no-dev --no-scripts --no-autoloader --prefer-dist --ignore-platform-reqs)
+    --mount=type=secret,id=composer_auth,required=false \
+    export COMPOSER_AUTH="$(cat /run/secrets/composer_auth 2>/dev/null || echo '{}')" \
+    && (composer install --no-dev --no-scripts --no-autoloader --prefer-dist --ignore-platform-reqs \
+        || (sleep 15 && composer install --no-dev --no-scripts --no-autoloader --prefer-dist --ignore-platform-reqs))
 
 # ---------- assets: compile the frontend bundle ----------
 FROM --platform=$BUILDPLATFORM node:24-bookworm-slim AS assets
