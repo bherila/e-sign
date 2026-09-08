@@ -6,6 +6,7 @@ namespace Tests\Feature\Signing;
 
 use App\Domain\Evidence\Sealing\AssuranceLevel;
 use App\Domain\Signing\Assurance\ConfiguredSealAssurancePolicyCheck;
+use App\Domain\Signing\Assurance\SealMaterialAssurancePolicyCheck;
 use App\Domain\Signing\Contracts\AssurancePolicyCheck;
 use Tests\TestCase;
 
@@ -13,15 +14,19 @@ use Tests\TestCase;
  * The default answer to "can this deployment seal at the level the envelope asked for?".
  *
  * Shallow by design: it reads paths, never key contents, and never contacts a timestamp
- * authority. Proving the material is cryptographically sound is the sealer's job at seal
- * time and the health probe's on a schedule; doing it here would make inviting a signer
- * depend on a network round trip.
+ * authority. It is the first half of the bound check, and the half that produces the precise
+ * message an operator wants for an unfinished install.
+ *
+ * The second half is {@see SealMaterialAssurancePolicyCheck}, which is what the container
+ * binds: it runs this check first and then the sealer's own preflight, so an expired
+ * certificate or a key that does not match its certificate is refused before signers are
+ * invited too (docs/HANDOFF.md section 9). Neither half ever contacts a timestamp authority.
  */
 class ConfiguredSealAssurancePolicyCheckTest extends TestCase
 {
-    public function test_it_is_the_default_binding(): void
+    public function test_the_configuration_check_is_the_first_half_of_the_default_binding(): void
     {
-        $this->assertInstanceOf(ConfiguredSealAssurancePolicyCheck::class, app(AssurancePolicyCheck::class));
+        $this->assertInstanceOf(SealMaterialAssurancePolicyCheck::class, app(AssurancePolicyCheck::class));
     }
 
     public function test_an_unconfigured_deployment_cannot_send(): void
