@@ -28,6 +28,7 @@ return Application::configure(basePath: dirname(__DIR__))
         then: function (): void {
             Route::group([], base_path('routes/health.php'));
             Route::group([], base_path('routes/documents.php'));
+            Route::group([], base_path('routes/templates.php'));
         },
     )
     // Domain commands live under app/Domain/<Module>/Console, which Laravel's

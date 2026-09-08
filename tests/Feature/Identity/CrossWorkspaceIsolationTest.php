@@ -36,10 +36,16 @@ use Tests\TestCase;
  *
  *  - documents, uploads and revision downloads:
  *    tests/Feature/Preparation/DocumentHttpTest.php
+ *  - templates, template versions, the canonical schema export, and imported-provider
+ *    aliases: tests/Feature/Preparation/TemplateHttpTest.php. It covers the workspace, the
+ *    template, the version (by number and by ULID), and a document from another workspace
+ *    presented to the version endpoint; alias uniqueness being per workspace rather than
+ *    global is in tests/Feature/Preparation/TemplateLifecycleTest.php, because two tenants
+ *    migrating from the same provider legitimately present the same provider template id.
  *
- * The remaining surfaces named in issue #11 — imported-provider aliases, JSON import,
- * artifact downloads, and queue jobs — do not exist yet, and each one adds its cases here as
- * it lands rather than getting an isolation test of its own somewhere else.
+ * The remaining surfaces named in issue #11 — JSON import, artifact downloads, and queue
+ * jobs — do not exist yet, and each one adds its cases here as it lands rather than getting
+ * an isolation test of its own somewhere else.
  */
 class CrossWorkspaceIsolationTest extends TestCase
 {

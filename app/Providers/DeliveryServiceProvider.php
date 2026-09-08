@@ -8,35 +8,91 @@ use App\Domain\Delivery\Mail\Console\MailBacklogCommand;
 use App\Domain\Delivery\Mail\Console\ResendOutboundMailCommand;
 use App\Domain\Delivery\Mail\Feedback\RejectingSnsMessageVerifier;
 use App\Domain\Delivery\Mail\Feedback\SnsMessageVerifier;
+use App\Domain\Delivery\Outbound\DestinationAllowlist;
+use App\Domain\Delivery\Outbound\DestinationPolicy;
+use App\Domain\Delivery\Outbound\HostResolver;
+use App\Domain\Delivery\Outbound\SystemHostResolver;
+use App\Domain\Delivery\Webhooks\Console\BacklogCommand;
+use App\Domain\Delivery\Webhooks\Console\EndpointCreateCommand;
+use App\Domain\Delivery\Webhooks\Console\EndpointDisableCommand;
+use App\Domain\Delivery\Webhooks\Console\EndpointEnableCommand;
+use App\Domain\Delivery\Webhooks\Console\EndpointListCommand;
+use App\Domain\Delivery\Webhooks\Console\EndpointRotateSecretCommand;
+use App\Domain\Delivery\Webhooks\Console\ReplayCommand;
+use App\Domain\Delivery\Webhooks\RetrySchedule;
+use App\Domain\Delivery\Webhooks\WebhookDispatcher;
+use App\Domain\Identity\Audit\AuditRecorder;
+use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
 
 /**
- * Wires the Delivery module's mail outbox.
+ * Wires the Delivery module: the shared outbound destination policy, the
+ * webhook outbox, and the transactional mail outbox.
  *
- * The commands are registered here rather than in `bootstrap/app.php`'s `withCommands()`
- * because they live under `app/Domain/Delivery/Mail/Console`, which Laravel's
- * `app/Console/Commands` auto-discovery does not scan, and because a module that owns
- * console entry points should be the thing that declares them.
+ * The destination policy is a singleton because its allowlist is deployment
+ * configuration; the Evidence module resolves the same instance for the
+ * timestamp authority, so an operator configures an internal destination in one
+ * place and both transports honour it.
+ *
+ * The console commands are registered here rather than in bootstrap/app.php
+ * because Laravel's command auto-discovery only scans app/Console/Commands and
+ * never looks inside a domain module.
  */
-class DeliveryServiceProvider extends ServiceProvider
+final class DeliveryServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
+        $this->app->singleton(HostResolver::class, SystemHostResolver::class);
+
+        $this->app->singleton(DestinationPolicy::class, function (Application $app): DestinationPolicy {
+            /** @var iterable<mixed> $allowlist */
+            $allowlist = $app->make('config')->get('esign.delivery.destination_allowlist', []);
+
+            return new DestinationPolicy(
+                resolver: $app->make(HostResolver::class),
+                allowlist: DestinationAllowlist::fromConfig($allowlist),
+            );
+        });
+
+        $this->app->singleton(WebhookDispatcher::class, function (Application $app): WebhookDispatcher {
+            /** @var array<string, mixed> $config */
+            $config = $app->make('config')->get('esign.delivery.webhooks', []);
+
+            return new WebhookDispatcher(
+                schedule: RetrySchedule::fromConfig($config),
+                audit: $app->make(AuditRecorder::class),
+                autoDisableAfter: max(1, (int) ($config['auto_disable_after'] ?? 10)),
+                queue: isset($config['queue']) ? (string) $config['queue'] : null,
+            );
+        });
+
         /*
-         * The SES feedback endpoint fails closed.
+         * The SES mail-feedback endpoint fails closed.
          *
          * TODO(#35): bind a verifier backed by `aws/aws-sns-message-validator` — the
-         * package is not a dependency and `aws-sdk-php`, which is present only transitively
-         * through league/flysystem-aws-s3-v3, does not include the validator. Until then
-         * every SNS message is refused, so no unverified body can mark a message delivered
-         * or bounced. RejectingSnsMessageVerifier documents exactly what implementing this
-         * involves.
+         * package is not a dependency, and `aws-sdk-php`, which is present only
+         * transitively through league/flysystem-aws-s3-v3, does not include the validator.
+         * Until then every SNS message is refused, so no unverified body can mark a
+         * message delivered or bounced. RejectingSnsMessageVerifier documents exactly what
+         * implementing this involves.
          */
         $this->app->bind(SnsMessageVerifier::class, RejectingSnsMessageVerifier::class);
+    }
 
-        $this->commands([
-            ResendOutboundMailCommand::class,
-            MailBacklogCommand::class,
-        ]);
+    public function boot(): void
+    {
+        if ($this->app->runningInConsole()) {
+            $this->commands([
+                EndpointCreateCommand::class,
+                EndpointRotateSecretCommand::class,
+                EndpointDisableCommand::class,
+                EndpointEnableCommand::class,
+                EndpointListCommand::class,
+                ReplayCommand::class,
+                BacklogCommand::class,
+                ResendOutboundMailCommand::class,
+                MailBacklogCommand::class,
+            ]);
+        }
     }
 }

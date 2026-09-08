@@ -14,7 +14,6 @@ use App\Models\User;
 use Closure;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use RuntimeException;
 
 /**
  * Provisions the first owner of a workspace.
@@ -63,7 +62,7 @@ class OwnerBootstrapper
                     $user = $binding->user;
 
                     if (! $user instanceof User) {
-                        throw new RuntimeException('The identity binding references a user row that no longer exists.');
+                        throw new BootstrapRefused('The identity binding references a user row that no longer exists.');
                     }
 
                     return [$user, $binding];
@@ -79,7 +78,7 @@ class OwnerBootstrapper
                 if (User::where('email', $placeholderEmail)->exists()) {
                     // The message carries its remedy after a newline; the command prints
                     // the two parts separately so neither gets wrapped into nonsense.
-                    throw new RuntimeException(
+                    throw new BootstrapRefused(
                         "A user row provisioned for {$issuer} / {$subject} exists, but its identity binding was removed.\n".
                         'Delete that user row if it holds nothing worth keeping, or bind it again directly. '.
                         'Provisioning never adopts a user row it found by address.'
@@ -146,7 +145,7 @@ class OwnerBootstrapper
 
             [$user, $binding] = $resolveUser($changes);
 
-            $membership = $this->resolveOwnerMembership($workspace, $user, $changes);
+            $membership = $this->resolveOwnerMembership($workspace, $user, $changes, $notes);
 
             $outcome = new BootstrapOutcome($workspace, $user, $binding, $membership, $changes, $notes);
 
@@ -176,7 +175,7 @@ class OwnerBootstrapper
         $existing = Workspace::withTrashed()->where('slug', $slug)->first();
 
         if ($existing !== null && $existing->trashed()) {
-            throw new RuntimeException(
+            throw new BootstrapRefused(
                 "Workspace '{$slug}' exists but is deleted.\n".
                 'Restore it, or choose a different --workspace slug. A deleted workspace still has its envelopes and evidence attached, '.
                 'so provisioning never reuses one.'
@@ -202,9 +201,33 @@ class OwnerBootstrapper
 
     /**
      * @param  list<string>  $changes
+     * @param  list<string>  $notes
      */
-    private function resolveOwnerMembership(Workspace $workspace, User $user, array &$changes): WorkspaceMembership
-    {
+    private function resolveOwnerMembership(
+        Workspace $workspace,
+        User $user,
+        array &$changes,
+        array &$notes,
+    ): WorkspaceMembership {
+        // A slug typo -- --workspace=acme when acme-legal was meant -- joins an
+        // existing tenant's workspace and grants full authority there, and the
+        // run reports it exactly like an idempotent rerun. The grant itself is
+        // deliberate (bootstrap has to be able to add an owner), so this says
+        // plainly what happened rather than refusing; an operator who did not
+        // mean it can then revoke the membership.
+        $incumbents = $workspace->exists
+            ? $workspace->memberships()
+                ->where('role', WorkspaceRole::Owner->value)
+                ->where('user_id', '!=', $user->getKey())
+                ->count()
+            : 0;
+
+        if ($incumbents > 0) {
+            $notes[] = "workspace '{$workspace->slug}' already has {$incumbents} other owner"
+                .($incumbents === 1 ? '' : 's')
+                .'; this run adds another rather than replacing anyone';
+        }
+
         $membership = $workspace->membershipFor($user);
 
         if ($membership === null) {
