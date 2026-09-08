@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Signing;
 
+use App\Domain\Delivery\Events\CompositeEnvelopeEventSink;
+use App\Domain\Delivery\Events\DeliveryEnvelopeEventSink;
 use App\Domain\Delivery\Webhooks\WebhookEventName;
 use App\Domain\Identity\Audit\AuditEvent;
 use App\Domain\Signing\Contracts\EnvelopeEventSink;
@@ -31,9 +33,18 @@ class EnvelopeEventSinkTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_the_default_binding_is_the_audit_sink(): void
+    public function test_the_default_binding_records_locally_and_publishes_to_the_outbox(): void
     {
-        $this->assertInstanceOf(AuditEnvelopeEventSink::class, app(EnvelopeEventSink::class));
+        $sink = app(EnvelopeEventSink::class);
+
+        // The audit store is not replaced by the webhook outbox: an event that exists only
+        // as a delivery leaves no local history the moment an endpoint is disabled.
+        $this->assertInstanceOf(CompositeEnvelopeEventSink::class, $sink);
+
+        $this->assertSame(
+            [AuditEnvelopeEventSink::class, DeliveryEnvelopeEventSink::class],
+            array_map(static fn (EnvelopeEventSink $member): string => $member::class, $sink->sinks()),
+        );
     }
 
     public function test_a_full_lifecycle_publishes_the_documented_event_names(): void
@@ -131,7 +142,10 @@ class EnvelopeEventSinkTest extends TestCase
     {
         $scenario = SigningScenario::create();
         $envelope = $scenario->preparedDraft(['field_schema' => SigningFixtures::singleSigner()]);
-        $machine = new EnvelopeStateMachine(app(EnvelopeEventSink::class), $scenario->assurance);
+        // The audit sink on its own. The container's default composes it with the webhook
+        // outbox, which schedules mail and belongs to the Delivery suite; this test is about
+        // what one row in the audit store says.
+        $machine = new EnvelopeStateMachine(app(AuditEnvelopeEventSink::class), $scenario->assurance);
 
         $machine->send($envelope);
 
