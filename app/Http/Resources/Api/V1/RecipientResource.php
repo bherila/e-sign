@@ -44,6 +44,12 @@ class RecipientResource extends JsonResource
             'signed_at' => $recipient->signed_at?->toIso8601String(),
             'declined_at' => $recipient->declined_at?->toIso8601String(),
             'decline_reason' => $recipient->decline_reason,
+
+            // Delivery facts, not signing state. They answer "has the invitation actually
+            // gone out, and when were they last nudged" — which an integration otherwise has
+            // no way to see, and which nothing in the state machine reads or writes.
+            'invited_at' => $recipient->invited_at?->toIso8601String(),
+            'last_reminded_at' => $recipient->last_reminded_at?->toIso8601String(),
         ];
     }
 }

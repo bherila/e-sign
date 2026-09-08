@@ -2426,6 +2426,22 @@
               "string",
               "null"
             ]
+          },
+          "invited_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the invitation was actually written to this party. A delivery fact, not signing state: nothing in the state machine reads it, and a recipient's eligibility never depends on whether their mail was sent."
+          },
+          "last_reminded_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When they were last nudged. Null means never reminded, which is a different fact from reminded long ago."
           }
         }
       },

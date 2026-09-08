@@ -21,19 +21,28 @@ use Illuminate\Database\Eloquent\Builder;
  * `outbox_events` has a workspace and an event name and no subject column: it is a generic
  * transactional outbox, and adding a nullable `envelope_id` to it would make one event
  * family privileged over every other. The envelope is identified inside the event's own
- * payload, and the payload keys differ by producer — the Signing module's audit sink writes
- * `envelope`, and the profile's webhook bodies name the same thing `signing_request_id` or
- * `id` (docs/compatibility/firma-capability-matrix.md). All three are matched, so an event
- * is found whichever producer wrote it, and a producer added later only has to use one of
- * them.
+ * payload instead.
+ *
+ * The canonical location is `signing_request.id`, which is where
+ * App\Domain\Delivery\Events\SigningRequestPayload puts it and what every delivered body
+ * carries (docs/delivery/envelope-events.md). Two flatter spellings are matched as well:
+ * `envelope`, which the Signing module's audit sink writes, and `signing_request_id`, which
+ * the compatibility profile uses for the same fact. Matching all three means an event is
+ * found whichever producer recorded it, and a producer added later only has to use one of
+ * them rather than being coupled to this file.
  *
  * The workspace predicate comes first and is not negotiable: it is an indexed column, and it
  * means a JSON comparison never runs against another tenant's rows.
  */
 final readonly class EnvelopeEventFeed
 {
-    /** The payload keys that may carry an envelope's public id. */
-    public const ENVELOPE_KEYS = ['envelope', 'signing_request_id', 'id'];
+    /**
+     * The JSON paths inside a payload that may carry an envelope's public id, canonical
+     * first.
+     *
+     * @var list<string>
+     */
+    public const ENVELOPE_PATHS = ['signing_request->id', 'envelope', 'signing_request_id'];
 
     /**
      * @return Page<OutboxEvent>
@@ -45,8 +54,8 @@ final readonly class EnvelopeEventFeed
         $query = OutboxEvent::query()
             ->where('workspace_id', $workspace->getKey())
             ->where(function (Builder $inner) use ($envelope): void {
-                foreach (self::ENVELOPE_KEYS as $key) {
-                    $inner->orWhere('payload->'.$key, $envelope->public_id);
+                foreach (self::ENVELOPE_PATHS as $path) {
+                    $inner->orWhere('payload->'.$path, $envelope->public_id);
                 }
             });
 

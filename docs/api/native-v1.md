@@ -306,7 +306,10 @@ recorded at finalization, so you can verify the transfer without a second reques
 
 The same rows webhook deliveries are built from, oldest first, with a cursor you can persist.
 If you cannot accept inbound HTTP, or your receiver was down for an hour, read them here in the
-same order. `id` is the event id a receiver deduplicates on.
+same order. `id` is the event id a receiver deduplicates on, and `payload` is the recorded body
+verbatim — never rebuilt from current state, because a payload rebuilt on read would describe
+the present rather than the event. The bodies are documented in
+[docs/delivery/envelope-events.md](../delivery/envelope-events.md).
 
 ### Webhook endpoints
 

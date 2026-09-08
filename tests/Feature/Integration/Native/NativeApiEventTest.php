@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Integration\Native;
 
+use App\Domain\Delivery\Events\SigningRequestPayload;
 use App\Domain\Delivery\Webhooks\OutboxWriter;
 use App\Domain\Identity\Models\Workspace;
 use App\Domain\Signing\Models\Envelope;
@@ -43,6 +44,27 @@ class NativeApiEventTest extends TestCase
             ->assertJsonPath('data.1.event', 'signing_request.sent')
             ->assertJsonPath('data.0.payload.envelope', $envelope->public_id)
             ->assertJsonPath('meta.next_cursor', null);
+    }
+
+    public function test_the_canonical_delivery_payload_is_found(): void
+    {
+        Queue::fake();
+
+        $scenario = NativeApiScenario::create();
+        $issued = $scenario->credential();
+        $envelope = $scenario->signing->sent();
+
+        // The exact body the Delivery module records and every webhook delivery carries
+        // (docs/delivery/envelope-events.md). The envelope id lives at `signing_request.id`
+        // there, not at the top level, which is what EnvelopeEventFeed::ENVELOPE_PATHS leads
+        // with — this test is what stops that path being changed by accident.
+        $this->record($scenario->workspace, 'signing_request.sent', SigningRequestPayload::for($envelope));
+
+        $this->getJson('/api/v1/envelopes/'.$envelope->public_id.'/events', NativeApiScenario::headers($issued))
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.event', 'signing_request.sent')
+            ->assertJsonPath('data.0.payload.signing_request.id', $envelope->public_id);
     }
 
     public function test_another_envelopes_events_are_not_included(): void
