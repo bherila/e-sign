@@ -298,6 +298,36 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Visual field editor (Stage 2, issue #22)
+    |--------------------------------------------------------------------------
+    |
+    | Prefill variable names the sending context can resolve, offered as
+    | suggestions in the editor and checked against a field's
+    | `prefill.variable`.
+    |
+    | Empty by default, and deliberately so. A *template* has no sending
+    | context, which is why TemplateService does not run the resolvability
+    | check when it stores a version either (docs/preparation/field-schema.md,
+    | "Checks that need context"). With the list empty the editor skips the
+    | check and says on screen that it skipped it — an omitted check is never
+    | reported as a passed one. Validating against an empty list instead would
+    | reject every prefill in the document.
+    |
+    | A deployment whose sending context does have a fixed variable set names
+    | it here as a comma-separated list and gets the check back at draft time
+    | rather than at send time.
+    |
+    */
+
+    'preparation' => [
+        'prefill_variables' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('ESIGN_PREFILL_VARIABLES', ''))
+        ))),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Whether the operator actually set the provider URL
     |--------------------------------------------------------------------------
     |
