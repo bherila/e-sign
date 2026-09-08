@@ -208,17 +208,18 @@ return [
     | Whether the operator actually set the provider URL
     |--------------------------------------------------------------------------
     |
-    | `bherila-auth.oauth_client.base_url` carries a package default
-    | (`https://bherila.net`), so it is never empty and cannot answer "did this
-    | operator configure a provider?". Reading the raw variable through config
-    | rather than calling env() at the call site keeps the answer correct under
-    | `config:cache`, where env() returns null.
+    | `bherila-auth.oauth_client.provider` carries a package default
+    | (`bherila`), so it is never empty and cannot answer "did this operator
+    | configure a provider?" on its own. `oauth_provider` mirrors the raw
+    | variable so esign:bootstrap-owner can tell "unset" from "set to the
+    | default's own value". `oauth_provider_url` has no such package default
+    | to work around — `bherila-auth.oauth_client.base_url` reads the same
+    | `OAUTH_PROVIDER_URL` variable with no fallback — but it is still read
+    | through config rather than by calling env() at the call site, which
+    | keeps the answer correct under `config:cache`, where env() returns null.
     |
     | Consumed by esign:bootstrap-owner, which must refuse to bind an SSO owner
     | to a provider nobody chose.
-    |
-    | `oauth_provider` is here for the same reason: the package defaults that
-    | key to `bherila`, so it too can never read as unset.
     |
     */
 

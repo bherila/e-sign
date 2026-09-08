@@ -181,13 +181,17 @@ class BootstrapOwnerCommand extends Command
     /**
      * Settings SSO mode needs that this deployment has not set.
      *
-     * OAUTH_PROVIDER_URL is read from `esign.oauth_provider_url`, not from
-     * `bherila-auth.oauth_client.base_url`: the package defaults that key to
-     * `https://bherila.net`, so it is never empty and this guard could never
-     * fire on it. An operator who set the client credentials and forgot the URL
-     * therefore passed the check and provisioned an owner bound to somebody
-     * else's provider — and the runbook advertises this refusal as the check
-     * that the registration step actually happened.
+     * OAUTH_PROVIDER is read from `esign.oauth_provider`, not from
+     * `bherila-auth.oauth_client.provider`: the package still defaults that
+     * key to `bherila`, so it is never empty and this guard could never fire
+     * on it. An operator who set the client credentials and forgot the
+     * provider key therefore passed the check and provisioned an owner bound
+     * to somebody else's provider — and the runbook advertises this refusal
+     * as the check that the registration step actually happened.
+     * OAUTH_PROVIDER_URL is read from the same `esign.*` mirror for a
+     * different reason: `bherila-auth.oauth_client.base_url` carries no
+     * package default, but calling env() directly at this call site would
+     * still read as null under `config:cache`.
      *
      * @return list<string>
      */
@@ -195,10 +199,11 @@ class BootstrapOwnerCommand extends Command
     {
         $missing = [];
 
-        // Both provider settings are read from `esign.*`, which mirrors the raw
-        // environment, rather than from the package keys, which default to
-        // `https://bherila.net` and `bherila` respectively and so can never
-        // read as unset.
+        // OAUTH_PROVIDER is read from `esign.*` rather than the package key
+        // because the package key defaults to `bherila` and so can never
+        // read as unset. OAUTH_PROVIDER_URL is read from the same mirror to
+        // stay correct under `config:cache`, where calling env() directly at
+        // this call site would return null.
         $settings = [
             'OAUTH_PROVIDER' => config('esign.oauth_provider'),
             'OAUTH_PROVIDER_URL' => config('esign.oauth_provider_url'),

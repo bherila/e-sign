@@ -83,9 +83,11 @@ php artisan config:clear
 missing. That refusal is the check that this step actually happened.
 
 It reads those two provider settings from the environment rather than from the resolved
-package configuration, because the package supplies its own defaults for both — an omitted
-`OAUTH_PROVIDER_URL` would otherwise read as `https://bherila.net` and the refusal could
-never fire, leaving an owner bound to a provider nobody chose.
+package configuration. `bherila-auth.oauth_client.provider` still carries a package default
+(`bherila`), so an omitted `OAUTH_PROVIDER` would otherwise read as that default and the
+refusal could never fire, leaving an owner bound to a provider nobody chose.
+`bherila-auth.oauth_client.base_url` carries no such default for `OAUTH_PROVIDER_URL`, but
+both are read the same way for consistency and to stay correct under `config:cache`.
 
 `--issuer` must be exactly the `OAUTH_PROVIDER` key, not the provider's URL. Sign-in
 resolves a binding on that key, so a binding stored under anything else can never be
