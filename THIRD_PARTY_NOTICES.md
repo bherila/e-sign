@@ -12,7 +12,7 @@ must be regenerated whenever `composer.lock` or `pnpm-lock.yaml` changes.
 
 | Package | License | Notes |
 |---|---|---|
-| `tecnickcom/tc-lib-pdf` and its `tc-lib-*` companions (candidate PDF engine, not yet a dependency) | LGPL-3.0-or-later | If adopted: ship notices and the library source or a link to it, keep the library replaceable (Composer dependency, no vendored modifications), and license any modifications to the library itself under the LGPL. Do not describe it as MIT. |
+| `tecnickcom/tc-lib-pdf` and its `tc-lib-*` companions (candidate PDF engine under Stage 0 evaluation) | LGPL-3.0-or-later | If adopted: ship notices and the library source or a link to it, keep the library replaceable (Composer dependency, no vendored modifications), and license any modifications to the library itself under the LGPL. Do not describe it as MIT. |
 | `bherila/auth-laravel` | see package | Shared BWH authentication package. |
 | `laravel/framework` and the Laravel ecosystem | MIT | |
 | `pdfjs-dist` (planned, locally served) | Apache-2.0 | Must be served from this application, never a third-party CDN, on signing pages. |

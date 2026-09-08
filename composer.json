@@ -14,7 +14,8 @@
         "league/flysystem-aws-s3-v3": "^3.0",
         "spatie/laravel-csp": "^3.23",
         "symfony/brevo-mailer": "^8.0",
-        "symfony/http-client": "^8.0"
+        "symfony/http-client": "^8.0",
+        "tecnickcom/tc-lib-pdf": "^8.73"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",
