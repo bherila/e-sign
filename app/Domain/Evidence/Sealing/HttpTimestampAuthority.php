@@ -17,12 +17,18 @@ use App\Domain\Evidence\Sealing\Exceptions\TimestampAuthorityUnreachableExceptio
  *
  * The policy exists because the TSA endpoint is operator configuration that
  * the signing pipeline dereferences: without it, a URL in the environment is
- * an SSRF primitive reachable from a queue worker. It lives in
- * App\Domain\Delivery\Outbound because webhook delivery needs exactly the
- * same rules; see that class for what it refuses. This transport pins the
- * connection to the addresses the policy validated so a second DNS answer
- * cannot move the target, and never follows a redirect, since only the first
- * hop is checked.
+ * an SSRF primitive reachable from a queue worker. It refuses anything but
+ * HTTP(S), refuses plaintext HTTP unless the operator opted in, refuses
+ * credentials in the URL, refuses a host that resolves to a loopback,
+ * private, link-local, carrier-grade-NAT, IPv6-transition, or otherwise
+ * reserved address, and pins the connection to the addresses it validated so
+ * neither a second DNS answer nor an unresolved record can move the target.
+ * Redirects are never followed, since only the first hop is checked.
+ *
+ * Those rules live in App\Domain\Delivery\Outbound\DestinationPolicy, because
+ * webhook delivery needs exactly the same ones against a URL a tenant supplies.
+ * This class is the RFC 3161 transport and the TSA-specific wording of the
+ * refusals; the policy is what decides them.
  */
 final class HttpTimestampAuthority implements TimestampAuthority
 {

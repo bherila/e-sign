@@ -1,0 +1,99 @@
+# Example production overlay for a consumer's deploy pipeline. This repository never runs this
+# file: it publishes the image (see .github/workflows/publish-image.yml) and stops. A consumer
+# copies this into its own deploy tooling, fills in the digest and paths, and runs it there.
+#
+# Contract:
+#   - Pin ESIGN_IMAGE to a manifest digest, never a tag (`:main`/`:latest` move; a digest does
+#     not). Get the digest from the "Report" step of a publish-image.yml run, or:
+#       docker buildx imagetools inspect ghcr.io/bherila/e-sign:<tag> --format '{{.Manifest.Digest}}'
+#   - /etc/esign/esign.env is the full env file contract; see docs/operations/deploy-docker.md.
+#   - /etc/esign/keys is mounted read-only into esign-worker ONLY. Nothing else in this stack
+#     (including esign and esign-scheduler) ever sees signing key material; that is the whole
+#     point of running worker as a separate container. ESIGN_SEAL_CERTIFICATE_PATH,
+#     ESIGN_SEAL_PRIVATE_KEY_PATH, and ESIGN_SEAL_CHAIN_PATH in the env file must point under
+#     /keys (e.g. /keys/seal.crt), not somewhere else in the container.
+#   - Release steps (pull, migrate, restart, health-check) are documented in
+#     docs/operations/deploy-docker.md, run by the consumer's own pipeline, not by this file.
+#
+# Reverse proxy: this stack does not run nginx/traefik. Point the host's existing reverse proxy
+# at 127.0.0.1:8080 (the only port this file publishes); see the nginx snippet in DOCKER.md.
+name: esign
+
+x-esign-image: &esign-image
+  # Replace with the digest from a publish-image.yml run, e.g.:
+  #   ghcr.io/bherila/e-sign@sha256:1234...
+  image: ${ESIGN_IMAGE}
+  env_file:
+    - /etc/esign/esign.env
+  # Root filesystem is read-only; the app only ever needs to write ephemeral cache/session/log
+  # state (never storage/app -- documents live on the S3-compatible disk, see DOCKER.md) and
+  # /tmp (nginx temp dirs, php-fpm/scheduler sockets and pid files). Everything else, including
+  # vendor/ and public/build, is baked into the image and must never be written at runtime.
+  read_only: true
+  tmpfs:
+    - /tmp
+    - /var/www/html/bootstrap/cache
+    - /var/www/html/storage/framework/cache
+    - /var/www/html/storage/framework/sessions
+    - /var/www/html/storage/framework/views
+    - /var/www/html/storage/logs
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  restart: unless-stopped
+  # healthcheck: intentionally omitted -- inherits the image's own role-aware HEALTHCHECK
+  # (.docker/scripts/healthcheck.sh). Do not redefine it here.
+  # deploy:
+  #   resources:
+  #     limits:
+  #       cpus: "1.0"
+  #       memory: 512M
+
+services:
+  esign:
+    <<: *esign-image
+    container_name: esign
+    command: ["web"]
+    # Only the web role is reachable, and only from the loopback interface: the host's existing
+    # reverse proxy terminates TLS and proxies to 127.0.0.1:8080. Never publish 0.0.0.0:8080.
+    ports:
+      - "127.0.0.1:8080:8080"
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: "2.0"
+    #       memory: 1G
+
+  esign-worker:
+    <<: *esign-image
+    container_name: esign-worker
+    command: ["worker"]
+    # The only service that mounts signing key material, and only read-only. See
+    # docs/operations/deploy-docker.md for file names/permissions inside /etc/esign/keys.
+    volumes:
+      - /etc/esign/keys:/keys:ro
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: "1.0"
+    #       memory: 1G
+
+  esign-scheduler:
+    <<: *esign-image
+    container_name: esign-scheduler
+    command: ["scheduler"]
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: "0.25"
+    #       memory: 256M
+
+  # One-shot release step. Not started by `docker compose up`; the deploying pipeline runs it
+  # explicitly before (re)starting esign/esign-worker/esign-scheduler on a new digest:
+  #   docker compose -f docker-compose.prod.example.yml --profile release run --rm esign-migrate
+  esign-migrate:
+    <<: *esign-image
+    container_name: esign-migrate
+    profiles: [release]
+    command: ["artisan", "migrate", "--force"]
+    restart: "no"

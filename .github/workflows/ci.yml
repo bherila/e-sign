@@ -147,6 +147,109 @@ jobs:
           ./vendor/bin/pint --parallel --test
           composer test
 
+  database:
+    name: Migrations and feature suite (${{ matrix.engine }})
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [mysql, mariadb]
+        include:
+          - engine: mysql
+            image: mysql:8.4
+            health_cmd: mysqladmin ping --silent
+          - engine: mariadb
+            image: mariadb:11.4
+            health_cmd: healthcheck.sh --connect --innodb_initialized
+    services:
+      database:
+        image: ${{ matrix.image }}
+        env:
+          # The mariadb image accepts the MYSQL_* names as legacy aliases for MARIADB_*, so one
+          # set of env vars covers both engines. This is a throwaway container torn down with the
+          # job; the root password has no value outside this run.
+          MYSQL_DATABASE: esign_ci_test
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="${{ matrix.health_cmd }}"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      DB_CONNECTION: ${{ matrix.engine }}
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_DATABASE: esign_ci_test
+      DB_USERNAME: root
+      DB_PASSWORD: root
+      ESIGN_TEST_DB_ENGINE: ${{ matrix.engine }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: dom, curl, libxml, mbstring, zip, pdo, pdo_mysql, bcmath, intl, gd, exif, iconv
+          coverage: none
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v6
+        with:
+          path: vendor
+          key: composer-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-
+
+      - name: Install PHP dependencies
+        timeout-minutes: 4
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Prepare Laravel environment
+        run: cp .env.example .env && php artisan key:generate --no-interaction --force
+
+      - name: Run migrations against ${{ matrix.engine }}
+        run: |
+          # CI-only, and only here: this runs migrations against a disposable service container
+          # created for this job and destroyed with it, never a persistent or shared database.
+          # AGENTS.md's "never run migrate" rule protects real data on developer machines and
+          # servers; it does not apply to this throwaway CI container. See
+          # docs/adr/0002-supported-databases.md.
+          php artisan migrate --force
+
+      - name: Generate a CI-only phpunit configuration for ${{ matrix.engine }}
+        run: |
+          # phpunit.xml hardcodes DB_CONNECTION=sqlite and DB_DATABASE=:memory: so that a
+          # developer running `composer test` can never point tests at a real database by
+          # accident (see tests/SafeTestCase.php). Those two <env> values win over the shell
+          # environment, so this job overrides them in a generated copy instead of weakening the
+          # committed defaults.
+          sed \
+            -e 's#<env name="DB_CONNECTION" value="sqlite"/>#<env name="DB_CONNECTION" value="${{ matrix.engine }}"/>#' \
+            -e 's#<env name="DB_DATABASE" value=":memory:"/>#<env name="DB_DATABASE" value="esign_ci_test"/>#' \
+            phpunit.xml > phpunit.ci-db.xml
+
+      - name: Feature suite on ${{ matrix.engine }}
+        timeout-minutes: 10
+        run: |
+          # Laravel's ParallelTesting creates one esign_ci_test_test_{token} database per
+          # paratest process (root can CREATE DATABASE), so --parallel is safe with a persistent
+          # engine, not just SQLite in-memory. Tests\Support\TestDatabaseGuard is what lets
+          # SafeTestCase accept this connection at all.
+          #
+          # --parallel must come before --configuration: Collision's artisan test command
+          # doesn't declare --configuration in its own option definition and relies on Symfony
+          # Console silently ignoring the unrecognized flag, but that ignoring aborts option
+          # parsing at the point it's hit — anything after it on the command line is dropped.
+          # Put --parallel first so it is bound before parsing reaches --configuration.
+          php artisan test --parallel --configuration=phpunit.ci-db.xml
+
   licenses:
     name: License inventory and SBOM
     needs: changes
@@ -235,12 +338,39 @@ jobs:
             -e APP_URL=http://localhost:8080 -e DB_CONNECTION=sqlite -e DB_DATABASE=/tmp/esign.sqlite \
             -e SESSION_DRIVER=file -e CACHE_STORE=file -e QUEUE_CONNECTION=sync -e LOG_CHANNEL=stderr \
             bwh-esign:ci
+          up=""
           for i in $(seq 1 30); do
-            if curl -fsS http://localhost:8080/up >/dev/null; then echo "up after ${i}s"; exit 0; fi
+            if curl -fsS http://localhost:8080/up >/dev/null; then up="1"; echo "up after ${i}s"; break; fi
             sleep 1
           done
-          docker logs esign-smoke
-          exit 1
+          if [ -z "$up" ]; then
+            docker logs esign-smoke
+            exit 1
+          fi
+          # Prove the image's own HEALTHCHECK script reports the web role healthy, the same way
+          # Docker's health state machine would (see .docker/scripts/healthcheck.sh).
+          docker exec esign-smoke esign-healthcheck
+          docker rm -f esign-smoke >/dev/null
+
+      - name: Smoke test role dispatch (artisan, worker)
+        run: |
+          set -eu
+          # The one-shot `artisan` role is the cheap proof that the entrypoint's role dispatch
+          # (.docker/scripts/entrypoint.sh) reaches `exec php artisan "$@"` correctly.
+          docker run --rm \
+            -e APP_KEY="base64:$(openssl rand -base64 32)" -e APP_ENV=production -e APP_DEBUG=false \
+            -e DB_CONNECTION=sqlite -e DB_DATABASE=/tmp/esign.sqlite -e SESSION_DRIVER=file \
+            -e CACHE_STORE=file -e QUEUE_CONNECTION=sync -e LOG_CHANNEL=stderr \
+            bwh-esign:ci artisan --version
+          # The `worker` role, bounded with --stop-when-empty so it exits as soon as it finds no
+          # queued jobs instead of running forever: proof that the worker role starts, that extra
+          # arguments after the role name reach `queue:work`, and that the healthcheck script's
+          # `pgrep -f queue:work` process check has something real to find while it runs.
+          timeout 30 docker run --rm \
+            -e APP_KEY="base64:$(openssl rand -base64 32)" -e APP_ENV=production -e APP_DEBUG=false \
+            -e DB_CONNECTION=sqlite -e DB_DATABASE=/tmp/esign.sqlite -e SESSION_DRIVER=file \
+            -e CACHE_STORE=file -e QUEUE_CONNECTION=sync -e LOG_CHANNEL=stderr \
+            bwh-esign:ci worker --stop-when-empty
 
   validation:
     name: Independent seal validation (pyHanko)
@@ -300,7 +430,7 @@ jobs:
 
   result:
     name: CI result
-    needs: [changes, test, licenses, image, validation]
+    needs: [changes, test, database, licenses, image, validation]
     if: always()
     runs-on: ubuntu-24.04-arm
     steps:
@@ -310,6 +440,9 @@ jobs:
             exit 1
           fi
           if [[ "${{ needs.test.result }}" == "failure" || "${{ needs.test.result }}" == "cancelled" ]]; then
+            exit 1
+          fi
+          if [[ "${{ needs.database.result }}" == "failure" || "${{ needs.database.result }}" == "cancelled" ]]; then
             exit 1
           fi
           if [[ "${{ needs.licenses.result }}" == "failure" || "${{ needs.licenses.result }}" == "cancelled" ]]; then

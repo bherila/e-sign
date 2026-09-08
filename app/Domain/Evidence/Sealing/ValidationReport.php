@@ -23,6 +23,7 @@ final readonly class ValidationReport
      * @param  bool  $hasSignatureTimestamp  An id-aa-signatureTimeStampToken attribute is present.
      * @param  int  $revisions  Number of `%%EOF` revisions in the file.
      * @param  string  $signerSubject  Subject of the certificate the CMS verified against.
+     * @param  string  $signerFingerprint  Lowercase hex SHA-256 over that certificate's DER.
      * @param  list<string>  $failures  One message per check that did not hold.
      */
     public function __construct(
@@ -34,6 +35,7 @@ final readonly class ValidationReport
         public bool $hasSignatureTimestamp,
         public int $revisions,
         public string $signerSubject,
+        public string $signerFingerprint,
         public array $failures,
     ) {}
 
@@ -53,6 +55,7 @@ final readonly class ValidationReport
             hasSignatureTimestamp: false,
             revisions: 0,
             signerSubject: '',
+            signerFingerprint: '',
             failures: $failures,
         );
     }

@@ -60,10 +60,67 @@ final class DestinationPolicyTest extends TestCase
             'ipv6 unique local' => ['https://[fc00::1]/inbox', '/non-public address/'],
             'carrier-grade nat' => ['https://100.64.1.2/inbox', '/non-public address/'],
             'ipv4-mapped loopback' => ['https://[::ffff:127.0.0.1]/inbox', '/non-public address/'],
+            // IPv6 transition mechanisms carry an embedded IPv4 address, so a
+            // v6 literal can name a v4 destination the v4 checks refuse.
+            'nat64-mapped loopback' => ['https://[64:ff9b::7f00:1]/inbox', '/non-public address/'],
+            'nat64-mapped rfc 1918' => ['https://[64:ff9b::a00:1]/inbox', '/non-public address/'],
+            'nat64 local-use prefix' => ['https://[64:ff9b:1::1]/inbox', '/non-public address/'],
+            '6to4 encapsulating loopback' => ['https://[2002:7f00:1::1]/inbox', '/non-public address/'],
+            '6to4 relay anycast' => ['https://192.88.99.1/inbox', '/non-public address/'],
+            'teredo' => ['https://[2001:0:1:2:3:4:5:6]/inbox', '/non-public address/'],
+            'discard-only' => ['https://[100::1]/inbox', '/non-public address/'],
+            'ietf protocol assignments' => ['https://192.0.0.170/inbox', '/non-public address/'],
+            'benchmarking space' => ['https://198.19.1.1/inbox', '/non-public address/'],
             'credentials in the url' => ['https://user:pass@203.0.113.10/inbox', '/must not carry credentials/'],
             'a non-http scheme' => ['gopher://203.0.113.10/inbox', '/must use http or https/'],
             'a file url' => ['file:///etc/passwd', '/could not be parsed|must use http or https/'],
         ];
+    }
+
+    /**
+     * The extra-range list must not over-reach.
+     *
+     * Each address here sits immediately outside a refused prefix, or inside a
+     * /32 that merely shares a first hextet with Teredo. A policy that refused
+     * any of them would break ordinary public receivers.
+     */
+    #[DataProvider('allowedLiterals')]
+    public function test_it_allows_a_public_destination(string $url): void
+    {
+        $this->policy()->validate($url);
+
+        $this->expectNotToPerformAssertions();
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function allowedLiterals(): array
+    {
+        return [
+            'documentation ipv4' => ['https://203.0.113.10/inbox'],
+            'documentation ipv6' => ['https://[2001:db8::1]/inbox'],
+            'a global-scope ipv6 address' => ['https://[2606:4700::1]/inbox'],
+            'one below carrier-grade nat' => ['https://100.63.255.255/inbox'],
+            'one above carrier-grade nat' => ['https://100.128.0.0/inbox'],
+            'one above the ietf protocol block' => ['https://192.0.1.0/inbox'],
+            'one above benchmarking space' => ['https://198.20.0.0/inbox'],
+            'one above the 6to4 relay block' => ['https://192.88.100.0/inbox'],
+        ];
+    }
+
+    public function test_an_allowlist_entry_can_admit_an_otherwise_refused_prefix(): void
+    {
+        // The transition prefixes are refused whole rather than decoded, so the
+        // only way to a destination inside one is an administrator naming it.
+        $policy = new DestinationPolicy(
+            resolver: new FakeHostResolver(['nat64.internal.test' => ['64:ff9b::cb00:7110']]),
+            allowlist: new DestinationAllowlist([
+                new AllowlistEntry('nat64.internal.test', allowPrivate: true),
+            ]),
+        );
+
+        $this->assertSame(['64:ff9b::cb00:7110'], $policy->validate('https://nat64.internal.test/inbox')->addresses);
     }
 
     public function test_it_refuses_a_host_whose_dns_answer_is_private(): void

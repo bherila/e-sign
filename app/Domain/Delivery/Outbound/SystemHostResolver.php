@@ -9,6 +9,13 @@ namespace App\Domain\Delivery\Outbound;
  *
  * Both families are collected because the policy judges every answer, not the
  * one a connection would happen to pick first.
+ *
+ * An AAAA lookup that fails rather than returning nothing — SERVFAIL, a
+ * timeout, a resolver that refuses the query type — is indistinguishable from
+ * "no AAAA record" here, and is reported as the latter: refusing on it would
+ * break delivery on any network whose resolver filters AAAA. What makes that
+ * safe is that the caller pins the connection to the addresses the policy
+ * checked, so a record nobody validated cannot be reached even if one existed.
  */
 final class SystemHostResolver implements HostResolver
 {

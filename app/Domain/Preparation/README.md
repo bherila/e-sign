@@ -7,7 +7,9 @@ See docs/ARCHITECTURE.md for what this module owns. Keep cross-module calls behi
 | Directory | Contents |
 |---|---|
 | `Contracts/` | The module's ports: `PdfPreflight`, `PdfAssembler`, `PdfTextLocator`. |
+| `Documents/` | Upload intake, original retention, immutable revisions, and the private document blob store. |
 | `Geometry/` | The native coordinate space and the transform to and from PDF user space. |
+| `Schema/` | The versioned native field definition schema: value objects, importer, validator. |
 | `Preflight/` | Classification result types: findings, codes, limits, metrics. |
 | `Assembly/` | Overlay and output value types for document assembly. |
 | `Text/` | Positioned text runs, anchor semantics and the library-independent resolver. |
@@ -16,12 +18,27 @@ See docs/ARCHITECTURE.md for what this module owns. Keep cross-module calls behi
 Only `TcPdf/` depends on `tecnickcom/tc-lib-pdf`. Everything else is plain PHP so the
 engine can be replaced without touching the coordinate space or the anchor rules.
 
+## Documents
+
+Intake, the key layout, what normalization may do, and why a rejected upload is still
+retained are documented in
+[docs/preparation/documents.md](../../../docs/preparation/documents.md). `Documents/` is
+plain PHP too: it depends on the `PdfPreflight` and `PdfAssembler` ports, never on the
+engine behind them. The ports are wired in `App\Providers\PreparationServiceProvider`.
+
 ## Coordinate space
 
 One space, defined in [docs/preparation/coordinate-space.md](../../../docs/preparation/coordinate-space.md):
 `pt`, origin top-left, CropBox, rotation as displayed, 1-based pages. Compatibility
 profiles declare their convention; conversions are never inferred from a number's
 magnitude.
+
+## Field definitions
+
+The versioned native field schema is documented in
+[docs/preparation/field-schema.md](../../../docs/preparation/field-schema.md); the contract itself
+is `resources/schema/field-schema-1.0.json`, shared with the editor and the native API. `Schema/`
+stores rectangles as plain numbers in the space above and leaves every conversion to `Geometry/`.
 
 ## Stage 0 status
 

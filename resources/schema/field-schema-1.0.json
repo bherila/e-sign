@@ -1,0 +1,272 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/bherila/e-sign/resources/schema/field-schema-1.0.json",
+  "title": "BWH eSign native field definition document, version 1.0",
+  "description": "The one versioned field schema shared by the visual editor and the native API (docs/HANDOFF.md section 7, docs/preparation/field-schema.md). Rectangles are stored in the native coordinate space as plain numbers; converting them to PDF user space is the job of App\\Domain\\Preparation\\Geometry, never of this document. This file is the contract: the PHP importer, the TypeScript editor types, and the fixtures are all validated against it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "document_id",
+    "coordinate_space",
+    "recipients",
+    "signing_order",
+    "fields"
+  ],
+  "properties": {
+    "schema_version": {
+      "description": "Exact version of this contract. An importer refuses an unknown major version outright and refuses a minor version it does not implement; it never guesses.",
+      "const": "1.0"
+    },
+    "document_id": {
+      "description": "Stable identifier of the prepared document this field set belongs to.",
+      "$ref": "#/$defs/identifier"
+    },
+    "coordinate_space": {
+      "$ref": "#/$defs/coordinate_space"
+    },
+    "recipients": {
+      "description": "Every recipient referenced by a field or by the signing order. Order is not significant; signing_order carries the sequence.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/recipient"
+      }
+    },
+    "signing_order": {
+      "description": "Sequential stages of parallel recipients. [[\"a\"],[\"b\"]] signs a then b; [[\"a\",\"b\"]] signs both in parallel. Every recipient appears exactly once, in exactly one stage.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "$ref": "#/$defs/identifier"
+        }
+      }
+    },
+    "fields": {
+      "description": "The field definitions. May be empty while a document is still being prepared; the send-time gate, not this schema, requires at least one field.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/field"
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "description": "A stable, caller-chosen identifier. Preserved byte-for-byte across import and export so field ids and template aliases survive a round trip.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "coordinate_space": {
+      "description": "The declared coordinate space. Version 1.0 implements exactly one, and every value is a const: a document that declares anything else is rejected rather than reinterpreted. Never infer points versus percent from a number's magnitude.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unit", "origin", "page_box", "rotation", "page_index_base"],
+      "properties": {
+        "unit": {
+          "description": "PostScript points, 1/72 inch.",
+          "const": "pt"
+        },
+        "origin": {
+          "description": "Origin at the top-left of the displayed page box, y growing downwards.",
+          "const": "top-left"
+        },
+        "page_box": {
+          "description": "Coordinates are relative to the CropBox clipped to the MediaBox, which is what a viewer displays.",
+          "const": "crop"
+        },
+        "rotation": {
+          "description": "Coordinates are in the displayed (post-/Rotate) orientation.",
+          "const": "displayed"
+        },
+        "page_index_base": {
+          "description": "Page numbers are 1-based.",
+          "const": 1
+        }
+      }
+    },
+    "recipient": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "email"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 3,
+          "maxLength": 320,
+          "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"
+        },
+        "role": {
+          "description": "Optional display label for the party (\"Buyer\", \"Witness\"). Carries no authority: it is not an application role and grants nothing.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      }
+    },
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "recipient_id", "type", "page", "rect"],
+      "properties": {
+        "id": {
+          "description": "Stable field id, unique within the document.",
+          "$ref": "#/$defs/identifier"
+        },
+        "recipient_id": {
+          "description": "Must match the id of a recipient in this document.",
+          "$ref": "#/$defs/identifier"
+        },
+        "type": {
+          "$ref": "#/$defs/field_type"
+        },
+        "page": {
+          "description": "1-based page number in the prepared document.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "rect": {
+          "$ref": "#/$defs/rect"
+        },
+        "required": {
+          "description": "Whether the recipient must complete the field. Omitted means true: an unstated requirement fails closed.",
+          "type": "boolean",
+          "default": true
+        },
+        "read_only": {
+          "description": "Whether the recipient may edit the value. Omitted means false.",
+          "type": "boolean",
+          "default": false
+        },
+        "label": {
+          "description": "Optional human-readable label shown in the editor and to the signer.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "alias": {
+          "description": "Optional stable template alias for the field, unique within the document. Templates address fields by alias so a re-prepared document keeps its mapping.",
+          "$ref": "#/$defs/identifier"
+        },
+        "prefill": {
+          "$ref": "#/$defs/prefill"
+        },
+        "anchor": {
+          "$ref": "#/$defs/anchor"
+        }
+      }
+    },
+    "field_type": {
+      "description": "The field types version 1.0 implements. Any further control is a declared capability in a later version, never a silently ignored member of this list.",
+      "type": "string",
+      "enum": [
+        "signature",
+        "initials",
+        "text",
+        "name",
+        "company",
+        "title",
+        "agreement_date",
+        "signing_date",
+        "checkbox"
+      ]
+    },
+    "rect": {
+      "description": "An axis-aligned rectangle in the declared coordinate space, anchored at its top-left corner. Values are finite, carry at most three decimal places (0.001 pt), and are written without a trailing fractional zero when integral.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": 0
+        },
+        "y": {
+          "type": "number",
+          "minimum": 0
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "prefill": {
+      "description": "Binds the field's initial value to a named variable resolved at send time. An unresolved variable is an error before send, never a blank field.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["variable"],
+      "properties": {
+        "variable": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
+        }
+      }
+    },
+    "anchor": {
+      "description": "An anchor placement request: find this text, then place the field's rect relative to it. Version 1.0 stores the request only; resolution is deterministic positioned-text extraction that writes the resolved rect back into this document before send, and a missing or ambiguous required anchor is an error. Matching semantics belong to the resolver (App\\Domain\\Preparation\\Text), not to this schema.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "occurrence"],
+      "properties": {
+        "text": {
+          "description": "Exact text to locate. Matched case-sensitively against decoded text runs; never a regular expression over PDF bytes and never a fuzzy match.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "occurrence": {
+          "description": "Which match to place against: \"sole\" means the text must occur exactly once in scope, an integer is a 1-based index in document order. Required, with no default: an anchor that matches twice without saying which one it means is under-specified, and silently taking the first would move a signature box the moment the contract text changes. The resolver's \"all\" mode places one box per match, which a single field cannot represent, so it is not a value here.",
+          "oneOf": [
+            {
+              "const": "sole"
+            },
+            {
+              "type": "integer",
+              "minimum": 1
+            }
+          ]
+        },
+        "origin": {
+          "description": "Corner of the matched text box the offset is measured from. Omitted means top-left; nothing is inferred from the sign of the offset.",
+          "type": "string",
+          "enum": ["top_left", "top_right", "bottom_left", "bottom_right"],
+          "default": "top_left"
+        },
+        "offset": {
+          "description": "Offset from the origin corner, in the same unit and orientation as the coordinate space, so dy grows downwards. May be negative.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["dx", "dy"],
+          "properties": {
+            "dx": {
+              "type": "number"
+            },
+            "dy": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    }
+  }
+}

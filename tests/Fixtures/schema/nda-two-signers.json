@@ -1,0 +1,202 @@
+{
+  "schema_version": "1.0",
+  "document_id": "doc_synthetic_nda",
+  "coordinate_space": {
+    "unit": "pt",
+    "origin": "top-left",
+    "page_box": "crop",
+    "rotation": "displayed",
+    "page_index_base": 1
+  },
+  "recipients": [
+    {
+      "id": "buyer",
+      "name": "Example Buyer",
+      "email": "buyer@example.test",
+      "role": "Buyer"
+    },
+    {
+      "id": "counterparty",
+      "name": "Example Counterparty",
+      "email": "counterparty@example.test",
+      "role": "Counterparty"
+    }
+  ],
+  "signing_order": [["buyer"], ["counterparty"]],
+  "fields": [
+    {
+      "id": "buyer_signature",
+      "recipient_id": "buyer",
+      "type": "signature",
+      "page": 2,
+      "rect": {
+        "x": 60,
+        "y": 650,
+        "width": 170,
+        "height": 36
+      },
+      "required": true,
+      "read_only": false,
+      "label": "Buyer signature",
+      "alias": "buyer_signature_block"
+    },
+    {
+      "id": "buyer_initials",
+      "recipient_id": "buyer",
+      "type": "initials",
+      "page": 1,
+      "rect": {
+        "x": 505.25,
+        "y": 735.5,
+        "width": 48,
+        "height": 24
+      },
+      "required": true,
+      "read_only": false
+    },
+    {
+      "id": "buyer_printed_name",
+      "recipient_id": "buyer",
+      "type": "name",
+      "page": 2,
+      "rect": {
+        "x": 60,
+        "y": 694.125,
+        "width": 170,
+        "height": 18
+      },
+      "required": true,
+      "read_only": true,
+      "label": "Buyer printed name",
+      "prefill": {
+        "variable": "recipient.name"
+      }
+    },
+    {
+      "id": "buyer_company",
+      "recipient_id": "buyer",
+      "type": "company",
+      "page": 2,
+      "rect": {
+        "x": 60,
+        "y": 716.5,
+        "width": 170,
+        "height": 18
+      },
+      "required": false,
+      "read_only": false,
+      "prefill": {
+        "variable": "recipient.company"
+      }
+    },
+    {
+      "id": "buyer_confidentiality_ack",
+      "recipient_id": "buyer",
+      "type": "checkbox",
+      "page": 1,
+      "rect": {
+        "x": 60,
+        "y": 612.75,
+        "width": 12,
+        "height": 12
+      },
+      "required": true,
+      "read_only": false,
+      "label": "Buyer acknowledges the confidentiality term"
+    },
+    {
+      "id": "counterparty_signature",
+      "recipient_id": "counterparty",
+      "type": "signature",
+      "page": 2,
+      "rect": {
+        "x": 330,
+        "y": 650,
+        "width": 170,
+        "height": 36
+      },
+      "required": true,
+      "read_only": false,
+      "label": "Counterparty signature",
+      "alias": "counterparty_signature_block",
+      "anchor": {
+        "text": "Counterparty signature:",
+        "occurrence": "sole",
+        "origin": "bottom_left",
+        "offset": {
+          "dx": 0,
+          "dy": 12.5
+        }
+      }
+    },
+    {
+      "id": "counterparty_title",
+      "recipient_id": "counterparty",
+      "type": "title",
+      "page": 2,
+      "rect": {
+        "x": 330,
+        "y": 716.5,
+        "width": 170,
+        "height": 18
+      },
+      "required": false,
+      "read_only": false,
+      "prefill": {
+        "variable": "recipient.title"
+      }
+    },
+    {
+      "id": "agreement_effective_date",
+      "recipient_id": "counterparty",
+      "type": "agreement_date",
+      "page": 1,
+      "rect": {
+        "x": 400,
+        "y": 96,
+        "width": 140,
+        "height": 18
+      },
+      "required": true,
+      "read_only": true,
+      "label": "Effective date",
+      "prefill": {
+        "variable": "envelope.agreement_date"
+      }
+    },
+    {
+      "id": "counterparty_signed_at",
+      "recipient_id": "counterparty",
+      "type": "signing_date",
+      "page": 2,
+      "rect": {
+        "x": 330,
+        "y": 694.125,
+        "width": 170,
+        "height": 18
+      },
+      "required": true,
+      "read_only": true,
+      "label": "Date signed"
+    },
+    {
+      "id": "counterparty_notes",
+      "recipient_id": "counterparty",
+      "type": "text",
+      "page": 2,
+      "rect": {
+        "x": 60,
+        "y": 748.875,
+        "width": 440,
+        "height": 32
+      },
+      "required": false,
+      "read_only": false,
+      "label": "Notes",
+      "anchor": {
+        "text": "Notes:",
+        "occurrence": 2
+      }
+    }
+  ]
+}

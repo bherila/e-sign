@@ -176,9 +176,22 @@ Refused:
 - plaintext HTTP;
 - a host that resolves to a loopback, private (RFC 1918), link-local (including
   `169.254.169.254` and every other metadata address), IPv6 unique-local, carrier-grade-NAT
-  (RFC 6598), IETF-assigned or benchmarking address — and a host that resolves to *both* a
-  public and an internal address is refused outright rather than left to connection ordering;
+  (RFC 6598), IETF-assigned (RFC 6890) or benchmarking (RFC 2544) address;
+- a host that resolves inside an IPv6 transition prefix — NAT64 (RFC 6052, RFC 8215), 6to4
+  (RFC 3056) and its relay anycast block (RFC 7526), Teredo (RFC 4380), or discard-only
+  (RFC 6666). These carry an embedded IPv4 address, so a v6 literal can otherwise name a v4
+  destination the v4 checks refuse. Each prefix is refused whole rather than decoded and
+  re-checked; a receiver is never inside one, and an administrator allowlist entry is the
+  only way to a destination there;
+- a host that resolves to *both* a public and an internal address — refused outright rather
+  than left to connection ordering;
 - a host that does not resolve.
+
+An AAAA lookup that fails rather than returning nothing (SERVFAIL, a timeout, a resolver that
+refuses the query type) is indistinguishable from "no AAAA record" and is treated as the
+latter, because refusing on it would break delivery on any network whose resolver filters
+AAAA. Address pinning is what makes that safe: a record nobody validated cannot be reached
+even if one existed.
 
 Enforced on the connection:
 

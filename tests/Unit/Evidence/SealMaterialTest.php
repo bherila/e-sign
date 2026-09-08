@@ -7,7 +7,11 @@ namespace Tests\Unit\Evidence;
 use App\Domain\Evidence\Sealing\Exceptions\SealMaterialInvalidException;
 use App\Domain\Evidence\Sealing\Exceptions\SealMaterialUnavailableException;
 use App\Domain\Evidence\Sealing\SealMaterial;
+use Exception;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\VarDumper\Cloner\VarCloner;
+use Symfony\Component\VarDumper\Dumper\CliDumper;
 use Tests\Support\SealingFixtures;
 
 /**
@@ -134,5 +138,67 @@ final class SealMaterialTest extends TestCase
 
         $this->assertStringNotContainsString('PRIVATE KEY', $dumped);
         $this->assertStringContainsString('***', $dumped);
+    }
+
+    /**
+     * `__debugInfo()` covers print_r() and var_dump() and nothing else.
+     *
+     * Symfony's VarDumper — which is what dd(), dump(), and an exception page's
+     * stack-frame locals use — merges `__debugInfo()` with the reflected
+     * property set instead of replacing it, and var_export() ignores the method
+     * outright. Before the key was wrapped, dd(), serialize(), and var_export()
+     * each wrote the unencrypted PEM out. Each vector is pinned separately so a
+     * future refactor that unwraps the key fails here rather than in a log.
+     */
+    #[DataProvider('leakVectors')]
+    public function test_the_private_key_does_not_escape_through(string $_label, callable $render): void
+    {
+        $material = SealingFixtures::material();
+
+        $this->assertStringNotContainsString('PRIVATE KEY', $render($material));
+    }
+
+    /**
+     * @return array<string, array{string, callable(SealMaterial): string}>
+     */
+    public static function leakVectors(): array
+    {
+        return [
+            'print_r' => ['print_r', static fn (SealMaterial $m): string => print_r($m, true)],
+            'var_export' => ['var_export', static fn (SealMaterial $m): string => var_export($m, true)],
+            'var_dump' => ['var_dump', static function (SealMaterial $m): string {
+                ob_start();
+                var_dump($m);
+
+                return (string) ob_get_clean();
+            }],
+            'json_encode' => ['json_encode', static fn (SealMaterial $m): string => (string) json_encode($m)],
+            'VarDumper (dd/dump)' => ['VarDumper', static function (SealMaterial $m): string {
+                $handle = fopen('php://memory', 'r+');
+                (new CliDumper)->dump((new VarCloner)->cloneVar($m), $handle);
+                rewind($handle);
+
+                return (string) stream_get_contents($handle);
+            }],
+        ];
+    }
+
+    public function test_it_refuses_to_serialize_at_all(): void
+    {
+        // Not a redaction: SensitiveParameterValue throws rather than emit the
+        // key, so an accidental queue payload or cache write fails loudly
+        // instead of persisting the material.
+        $this->expectException(Exception::class);
+
+        serialize(SealingFixtures::material());
+    }
+
+    public function test_it_records_the_certificate_fingerprint_a_validator_reports(): void
+    {
+        $material = SealingFixtures::material();
+        $expected = hash('sha256', SealMaterial::pemToDer(SealingFixtures::pem('seal.test.crt')));
+
+        $this->assertSame($expected, $material->certificateFingerprint);
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{64}$/', $material->certificateFingerprint);
     }
 }

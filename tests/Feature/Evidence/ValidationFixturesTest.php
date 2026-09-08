@@ -32,6 +32,12 @@ final class ValidationFixturesTest extends TestCase
     /** Only the fixture root is trusted; the OS trust store is replaced. */
     private const TRUST_FIXTURE_ONLY = 'fixture-only';
 
+    /** pyHanko must open the file and judge the signature invalid. */
+    private const EXPECT_INVALID = 'invalid';
+
+    /** pyHanko must refuse the file before it reaches the signature. */
+    private const EXPECT_UNREADABLE = 'unreadable';
+
     /** The fixture root is added to the OS trust store, which anchors a public TSA. */
     private const TRUST_FIXTURE_PLUS_SYSTEM = 'fixture-plus-system';
 
@@ -70,25 +76,39 @@ final class ValidationFixturesTest extends TestCase
         $negatives = [
             'negative-modified-content.pdf' => [
                 SealingFixtures::modifyCoveredContent($sealed->pdf),
+                self::EXPECT_INVALID,
                 'Page geometry changed inside the signed byte range, same file length.',
+            ],
+            'negative-byte-range-overclaim.pdf' => [
+                SealingFixtures::overclaimByteRange($sealed->pdf),
+                self::EXPECT_INVALID,
+                'The /ByteRange claims past the end of a file that still parses, so the coverage rule '.
+                'is what refuses it.',
             ],
             'negative-truncated.pdf' => [
                 SealingFixtures::truncate($sealed->pdf),
-                'Tail removed, so the /ByteRange over-claims the file.',
+                // Deliberately "unreadable", not "invalid": the trailer went
+                // with the tail, so a validator never reaches the signature.
+                // Labelling it "invalid" would let a parse error stand in for a
+                // signature verdict and prove less than it appears to.
+                self::EXPECT_UNREADABLE,
+                'Tail removed with the trailer, so the file cannot be opened at all.',
             ],
             'negative-incremental-update.pdf' => [
                 SealingFixtures::appendIncrementalUpdate($sealed->pdf),
+                self::EXPECT_INVALID,
                 'An unexpected revision appended, redefining the page object.',
             ],
             'negative-forged-cms.pdf' => [
                 SealingFixtures::forgeContents($sealed->pdf, $donor->pdf),
+                self::EXPECT_INVALID,
                 'The CMS of another sealed document spliced into /Contents.',
             ],
         ];
 
-        foreach ($negatives as $name => [$bytes, $note]) {
+        foreach ($negatives as $name => [$bytes, $expectation, $note]) {
             $this->write($name, $bytes);
-            $manifest[] = [$name, 'invalid', self::TRUST_FIXTURE_ONLY, $note];
+            $manifest[] = [$name, $expectation, self::TRUST_FIXTURE_ONLY, $note];
         }
 
         $untrusted = SealingFixtures::seal(
@@ -101,7 +121,7 @@ final class ValidationFixturesTest extends TestCase
         $this->write('negative-untrusted-signer.pdf', $untrusted->pdf);
         $manifest[] = [
             'negative-untrusted-signer.pdf',
-            'invalid',
+            self::EXPECT_INVALID,
             self::TRUST_FIXTURE_ONLY,
             'Cryptographically sound but sealed with a key outside the trusted root.',
         ];
@@ -148,14 +168,21 @@ final class ValidationFixturesTest extends TestCase
         foreach ($targets as $name => [$endpoint, $expectation, $trust, $note]) {
             $artifact = $this->sealWithTimestamp($endpoint);
 
+            // The row is written either way. An artifact that is simply absent
+            // from the manifest drops out of the validator's tally silently,
+            // which is how a run with no B-T evidence would come to look like a
+            // B-T pass. Listed-and-skipped is visible; unlisted is not.
+            $manifest[] = [$name, $expectation, $trust, $note];
+
             if (! $artifact instanceof SealedArtifact) {
+                // "<file>: reason" — validate-seal.sh matches on the "<file>:"
+                // prefix to tell a skipped artifact from a forgotten one.
                 $notes[] = $name.': skipped, '.$endpoint.' did not produce a timestamp on this run.';
 
                 continue;
             }
 
             $this->write($name, $artifact->pdf);
-            $manifest[] = [$name, $expectation, $trust, $note];
         }
 
         // Recorded rather than silently omitted: a missing B-T artifact has to be
@@ -206,7 +233,9 @@ final class ValidationFixturesTest extends TestCase
             '# Artifacts for scripts/validate-seal.sh. Regenerate with',
             '#   ESIGN_WRITE_VALIDATION_FIXTURES=1 php artisan test --filter=ValidationFixturesTest',
             '# Columns: file<TAB>expectation<TAB>trust-mode<TAB>note',
-            '#   expectation: valid | invalid  (pyHanko exit status 0 | non-zero)',
+            '#   expectation: valid       pyHanko opens the file and judges the signature VALID',
+            '#                invalid     pyHanko opens the file and judges the signature INVALID',
+            '#                unreadable  pyHanko refuses the file before reaching the signature',
             '#   trust-mode:  fixture-only          --trust-replace --trust root.test.crt',
             '#                fixture-plus-system   --trust root.test.crt, OS trust kept',
         ];
