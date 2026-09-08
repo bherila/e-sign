@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Domain\Evidence\Finalization\EvidenceExporter;
 use App\Domain\Integration\Native\ApiException;
 use App\Domain\Integration\Native\ArtifactLocator;
 use App\Domain\Integration\Native\ErrorCode;
@@ -13,6 +14,7 @@ use App\Domain\Signing\Models\Envelope;
 use App\Http\Requests\Api\V1\EnvelopeRequest;
 use App\Http\Resources\Api\V1\ArtifactResource;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Str;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\HeaderUtils;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -43,7 +45,10 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 class EnvelopeArtifactController extends ApiController
 {
-    public function __construct(private readonly ArtifactLocator $artifacts) {}
+    public function __construct(
+        private readonly ArtifactLocator $artifacts,
+        private readonly EvidenceExporter $exporter,
+    ) {}
 
     public function index(EnvelopeRequest $request): JsonResponse
     {
@@ -103,6 +108,76 @@ class EnvelopeArtifactController extends ApiController
                 // The digest recorded at finalization, so a caller can verify the transfer
                 // without a second request.
                 'X-Artifact-Sha256' => $artifact->sha256,
+            ],
+        );
+    }
+
+    /**
+     * The whole evidence export as one zip.
+     *
+     * `docs/HANDOFF.md` section 8 requires an export carrying the original, the reviewed
+     * revision, the executed PDF, the machine evidence, the completion report, the
+     * certificate chain, the validation report, and a statement of what each digest covers.
+     * {@see EvidenceExporter} builds exactly that, and the reason it is one route rather
+     * than eight is the manifest: a caller that fetched the eight files separately would
+     * have to be trusted to assemble the same inventory, and an inventory assembled by the
+     * reader is not evidence of anything.
+     *
+     * The archive is written to a temporary file rather than held in memory — it is the one
+     * response whose size is the sum of every artifact plus the original upload — and it is
+     * removed on every path out, including the ones a `finally` does not cover. PHP terminates
+     * the script at the first write after the peer has gone, and that termination does not
+     * unwind the stack, so a client that disconnects mid-transfer would otherwise leave the
+     * file behind; the same is true if the response is built and never sent. A shutdown
+     * function is what actually holds, so the `finally` is the fast path and the shutdown
+     * function is the guarantee.
+     */
+    public function bundle(EnvelopeRequest $request): StreamedResponse
+    {
+        $envelope = $request->envelope();
+        $this->available($envelope);
+
+        $path = $this->exporter->bundle($envelope);
+        $bytes = filesize($path);
+
+        if ($bytes === false) {
+            @unlink($path);
+
+            throw new RuntimeException('The evidence export for envelope '.$envelope->public_id.' is not readable.');
+        }
+
+        $filename = sprintf(
+            '%s-evidence-%s.zip',
+            Str::slug(Str::limit((string) $envelope->title, 80, '')) ?: 'agreement',
+            $envelope->public_id,
+        );
+
+        // Registered before the response is returned, so it holds even if the callback never
+        // runs or is cut short. Idempotent: whichever path gets there first wins.
+        register_shutdown_function(static function () use ($path): void {
+            @unlink($path);
+        });
+
+        return new StreamedResponse(
+            static function () use ($path): void {
+                try {
+                    readfile($path);
+                } finally {
+                    @unlink($path);
+                }
+            },
+            200,
+            [
+                'Content-Type' => 'application/zip',
+                'Content-Length' => (string) $bytes,
+                'Content-Disposition' => HeaderUtils::makeDisposition(
+                    HeaderUtils::DISPOSITION_ATTACHMENT,
+                    $filename,
+                    $filename,
+                ),
+                'X-Content-Type-Options' => 'nosniff',
+                'Cache-Control' => 'private, no-store',
+                'Referrer-Policy' => 'no-referrer',
             ],
         );
     }

@@ -70,7 +70,56 @@ final readonly class DocumentIntake
         $staged = $this->stage($file);
 
         try {
-            return $this->record($workspace, $uploader, $file, $staged, $this->title($title, $file));
+            return $this->record(
+                $workspace,
+                $uploader,
+                AuditActor::user($uploader),
+                $file->getMimeType() ?? 'application/octet-stream',
+                $staged,
+                $this->title($title, $file),
+            );
+        } finally {
+            @unlink($staged->path);
+        }
+    }
+
+    /**
+     * The same intake, for bytes that never arrived as a multipart upload.
+     *
+     * An API caller sends a document base64-encoded in a JSON body, and the caller is a
+     * service credential rather than a person — so there is no `UploadedFile` to stage and no
+     * `User` to attribute the upload to. Everything that matters is unchanged: the same
+     * preflight, the same review normalization, the same write-then-read-back, the same one
+     * transaction, and the same rule that a rejected document is kept with its report.
+     *
+     * `uploaded_by` and `created_by` are null, which they are already nullable for, and the
+     * audit trail names the actor instead. A fabricated user id would be worse than an honest
+     * absence: it would make an integration's upload indistinguishable from a person's.
+     *
+     * The MIME type is fixed by the caller rather than sniffed, because there is no uploaded
+     * file to sniff — and it is not taken from the request either. Whether the bytes really
+     * are a PDF is decided by the preflight parser, which is the only judge that matters.
+     *
+     * @throws DocumentStorageException When the bytes cannot be stored and read back.
+     */
+    public function intakeBytes(
+        Workspace $workspace,
+        string $bytes,
+        string $title,
+        AuditActor $actor,
+        string $mimeType = 'application/pdf',
+    ): Document {
+        $staged = $this->stageBytes($bytes);
+
+        try {
+            return $this->record(
+                $workspace,
+                null,
+                $actor,
+                $mimeType,
+                $staged,
+                $this->titleOrDefault($title),
+            );
         } finally {
             @unlink($staged->path);
         }
@@ -78,8 +127,9 @@ final readonly class DocumentIntake
 
     private function record(
         Workspace $workspace,
-        User $uploader,
-        UploadedFile $file,
+        ?User $uploader,
+        AuditActor $actor,
+        string $mimeType,
         StagedUpload $staged,
         string $title,
     ): Document {
@@ -104,18 +154,19 @@ final readonly class DocumentIntake
         }
 
         return DB::transaction(function () use (
-            $workspace, $uploader, $file, $staged, $title, $report, $publicId, $originalKey, $review, $reviewKey,
+            $workspace, $uploader, $actor, $mimeType, $staged, $title, $report, $publicId, $originalKey, $review, $reviewKey,
         ): Document {
             $document = new Document([
                 'workspace_id' => $workspace->getKey(),
                 'title' => $title,
-                'uploaded_by' => $uploader->getKey(),
+                'uploaded_by' => $uploader?->getKey(),
                 'original_disk' => $this->disk,
                 'original_path' => $originalKey->value,
                 'original_sha256' => $staged->sha256,
                 'original_bytes' => $staged->bytes,
-                // The sniffed type, never the Content-Type the client claimed.
-                'original_mime' => $file->getMimeType() ?? 'application/octet-stream',
+                // The sniffed type for an upload and a fixed one for an API body, never the
+                // Content-Type the client claimed either way.
+                'original_mime' => $mimeType,
                 'page_count' => $report->isAccepted() ? $report->metrics->pageCount : null,
                 'preflight_report' => $report->toArray(),
                 'status' => DocumentStatus::Uploaded,
@@ -136,7 +187,7 @@ final readonly class DocumentIntake
                     'summary' => 'None. This is the upload exactly as received.',
                     'disclosures' => [],
                 ],
-                'created_by' => $uploader->getKey(),
+                'created_by' => $uploader?->getKey(),
             ]);
 
             if ($review !== null && $reviewKey !== null) {
@@ -148,7 +199,7 @@ final readonly class DocumentIntake
                     'bytes' => strlen($review->bytes),
                     'page_count' => $review->pageCount,
                     'normalization' => $review->record,
-                    'created_by' => $uploader->getKey(),
+                    'created_by' => $uploader?->getKey(),
                 ]);
             }
 
@@ -156,7 +207,7 @@ final readonly class DocumentIntake
             $document->save();
 
             $this->audit->record(
-                AuditActor::user($uploader),
+                $actor,
                 $review === null ? 'preparation.document_rejected' : 'preparation.document_uploaded',
                 $document,
                 [
@@ -171,6 +222,27 @@ final readonly class DocumentIntake
 
             return $document->fresh(['revisions']) ?? $document;
         });
+    }
+
+    /**
+     * Stage bytes already in memory, hashing them once on the way to the temp path.
+     *
+     * The same {@see StagedUpload} the multipart path produces, so everything downstream is
+     * identical. Bytes that arrived in a JSON body are already held in memory by the
+     * framework; writing them out is what lets the storage write stream rather than hold a
+     * second copy.
+     */
+    private function stageBytes(string $bytes): StagedUpload
+    {
+        $path = (string) tempnam(sys_get_temp_dir(), 'esign-intake-');
+
+        if (file_put_contents($path, $bytes) === false) {
+            @unlink($path);
+
+            throw new DocumentStorageException('A temporary file for the document could not be created.');
+        }
+
+        return new StagedUpload($path, hash('sha256', $bytes), strlen($bytes));
     }
 
     /**
@@ -233,8 +305,13 @@ final readonly class DocumentIntake
      */
     private function title(?string $title, UploadedFile $file): string
     {
-        $candidate = trim((string) ($title ?? pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME)));
-        $candidate = trim(preg_replace('/[\p{C}]+/u', '', $candidate) ?? '');
+        return $this->titleOrDefault($title ?? pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME));
+    }
+
+    /** Strip control characters and bound the length. Display only, never a key or a header. */
+    private function titleOrDefault(?string $title): string
+    {
+        $candidate = trim(preg_replace('/[\p{C}]+/u', '', trim((string) $title)) ?? '');
 
         return Str::limit($candidate === '' ? 'Untitled document' : $candidate, 200, '');
     }

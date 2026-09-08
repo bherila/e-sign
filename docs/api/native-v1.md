@@ -13,7 +13,7 @@ Implements issue #32.
 | Routes | `routes/api.php` |
 | HTTP | `app/Http/Controllers/Api/V1`, `app/Http/Requests/Api/V1`, `app/Http/Resources/Api/V1`, `app/Http/Middleware/Api` |
 | Services | `app/Domain/Integration/Native` |
-| Tables | `api_idempotency_keys` |
+| Tables | `api_idempotency_keys`; reads `artifacts` |
 | Tests | `tests/Feature/Integration/Native` |
 
 ---
@@ -204,6 +204,7 @@ returned whole and still carry `meta.next_cursor: null`, so one paging loop work
 | `GET` | `/envelopes/{envelope}/events` | `envelopes:read` | Paginated; the pull half of the webhook feed. |
 | `GET` | `/envelopes/{envelope}/artifacts` | `envelopes:read` | 409 until the envelope completes. |
 | `GET` | `/envelopes/{envelope}/artifacts/{artifact}/download` | `envelopes:read` | Streams the bytes. |
+| `GET` | `/envelopes/{envelope}/evidence-bundle` | `envelopes:read` | The whole evidence export as one zip. |
 | `GET` | `/webhooks/endpoints` | `webhooks:manage` | Paginated. |
 | `POST` | `/webhooks/endpoints` | `webhooks:manage` | Returns the secret **once**. |
 | `PATCH` | `/webhooks/endpoints/{endpoint}` | `webhooks:manage` | Only the keys you send are applied. |
@@ -290,17 +291,45 @@ Two refusals, and they mean different things:
 
 - **`409 not_completed`** — a statement about the envelope. Nobody has finished signing, or
   finalization failed and is visibly failed rather than quietly complete.
-- **`501 unsupported`** — a statement about this build. The envelope *has* completed, and
-  finalization is not implemented yet, so the bytes this API promises do not exist anywhere.
+- **`501 unsupported`** — a statement about this build. The envelope *has* completed, and no
+  artifact was published for it, so the bytes this API promises do not exist anywhere.
 
 Neither is ever a `200` with an empty list, which would tell you a completed agreement has no
-PDF. The seam is `App\Domain\Integration\Native\ArtifactLocator`; the API ships with
-`NoArtifactsYetLocator`, and binding a real one makes these routes work with no controller
-change.
+PDF. The seam is `App\Domain\Integration\Native\ArtifactLocator`; it is bound to
+`FinalizedArtifactLocator`, which reads the `artifacts` table, and only rows with
+`published_at` are eligible. A row without it names bytes that were written and that no
+completion has been asserted over, so it is invisible here rather than filtered later.
+
+A completed envelope publishes three artifacts: `executed_pdf`, `completion_report` and
+`evidence_json`. `sha256` on each is the digest finalization computed and then re-read through
+the storage adapter before writing the row — a recorded fact, never a fresh measurement of
+whatever is on the disk today, which is what makes it worth comparing against the completion
+event.
 
 Bytes stream through the application. There is no presigned URL on this API, on any storage
 driver ([docs/BLOB_STORAGE.md](../BLOB_STORAGE.md)). `X-Artifact-Sha256` carries the digest
 recorded at finalization, so you can verify the transfer without a second request.
+
+### The evidence bundle
+
+`GET /envelopes/{envelope}/evidence-bundle` returns everything
+[docs/HANDOFF.md](../HANDOFF.md) §8 requires in an export, as one zip: the original upload,
+the reviewed revision, the executed PDF, the machine-readable evidence document, the
+human-readable completion report, the seal certificate chain, the validation report, and
+`manifest.json`.
+
+The manifest is why this is a route rather than eight downloads. It lists every member with
+its SHA-256 and **a sentence saying what that digest covers**; a zip of seven files with no
+statement of which digest belongs to which object is a pile of bytes, and an inventory the
+reader assembled themselves is not evidence of anything.
+
+It is deliberately **not signed**. Signing it with the same seal key would add no independent
+assurance — a party who does not trust this application's copy of the evidence has no reason
+to trust its signature over its own list of that evidence. The seal that matters is inside
+the executed PDF, and the manifest says so.
+
+Same scope as any other read of the agreement, and the same two refusals: `409 not_completed`
+before the envelope completes, `501` if it completed and nothing was published.
 
 ### Events
 

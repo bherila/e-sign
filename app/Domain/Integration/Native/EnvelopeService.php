@@ -68,6 +68,15 @@ final readonly class EnvelopeService
         return DB::transaction(function () use ($workspace, $snapshot, $input, $credential): Envelope {
             $envelope = $this->factory->fromSnapshot($workspace, $snapshot);
 
+            // Not a snapshot column, and deliberately so: the account of *how* somebody was
+            // let in is recorded on their attestation, so tightening or relaxing this before
+            // anyone has signed changes what will happen and not what did
+            // (database/migrations/..._add_require_otp_to_workspaces_and_envelopes.php).
+            if ($input->requireOtp !== null) {
+                $envelope->require_otp = $input->requireOtp;
+                $envelope->save();
+            }
+
             if ($input->values !== []) {
                 $this->machine->setSenderValues($envelope, $input->values);
             }
@@ -80,6 +89,7 @@ final readonly class EnvelopeService
                     'envelope' => $envelope->public_id,
                     'source' => $input->fromTemplate() ? 'template_version' : 'document',
                     'source_template_version_id' => $envelope->source_template_version_id,
+                    'require_otp' => $input->requireOtp,
                     'prefilled_fields' => array_keys($input->values),
                 ],
             );
