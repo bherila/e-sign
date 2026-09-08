@@ -54,6 +54,13 @@ final class SyntheticMailContext
                 reason: 'Superseded by a revised draft.',
             ),
 
+            MailKind::Expired => new MailContext(
+                recipientName: 'Avery Counterparty',
+                senderName: 'Example Holdings',
+                agreementTitle: 'Mutual Nondisclosure Agreement',
+                expiresAt: CarbonImmutable::parse('2026-10-01T12:00:00Z'),
+            ),
+
             MailKind::Completed => new MailContext(
                 recipientName: 'Avery Counterparty',
                 senderName: 'Example Holdings',
