@@ -290,6 +290,10 @@ scripts/validate-seal.sh
 
 - [`docs/operations/seal-key-management.md`](../operations/seal-key-management.md) — rotation,
   expiry, compromise.
+- [`docs/operations/retention.md`](../operations/retention.md) — legal hold, the three deletion
+  policies, and `esign:artifacts:verify`, which re-reads everything this pipeline published.
+- [`docs/operations/backups.md`](../operations/backups.md) — what to back up, and the restore
+  drill that re-verifies every artifact against its recorded digest.
 - [`docs/stage0/sealing.md`](../stage0/sealing.md) — what the sealing path was measured to do,
   and its open gaps.
 - [`docs/signing/state-machine.md`](../signing/state-machine.md) — the transitions this module

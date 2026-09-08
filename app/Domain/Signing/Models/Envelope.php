@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Signing\Models;
 
+use App\Domain\Evidence\Retention\LegalHold;
 use App\Domain\Evidence\Sealing\AssuranceLevel;
 use App\Domain\Identity\Models\Workspace;
 use App\Domain\Preparation\Documents\Models\DocumentRevision;
@@ -16,6 +17,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Str;
 use RuntimeException;
 
@@ -67,10 +69,28 @@ use RuntimeException;
  * @property CarbonImmutable|null $content_frozen_at
  * @property string|null $artifact_ref
  * @property string|null $finalization_failure_reason
+ * @property CarbonImmutable|null $legal_hold_at
+ * @property string|null $legal_hold_reason
+ * @property string|null $legal_hold_by
+ * @property CarbonImmutable|null $deleted_at
  * @property int|null $created_by
  */
 class Envelope extends Model
 {
+    /**
+     * Retention soft-deletes an executed envelope; it never hard-deletes one.
+     *
+     * The trait is here rather than in the Evidence module because the global scope has to
+     * apply to every query in the application: once retention has removed an agreement, no
+     * listing, no API surface, and no download may keep serving it. The `artifacts` rows it
+     * points at stay, and stay immutable, so the digests and the seal identity of what was
+     * removed survive as the record that it existed.
+     *
+     * `App\Domain\Evidence\Retention\RetentionSweeper` is the only writer of `deleted_at`,
+     * and `esign:retention:purge-blobs` is the only thing that acts on it afterwards.
+     */
+    use SoftDeletes;
+
     /**
      * Columns copied from the source and never changed again.
      *
@@ -132,6 +152,8 @@ class Envelope extends Model
             'expired_at' => 'immutable_datetime',
             'expires_at' => 'immutable_datetime',
             'content_frozen_at' => 'immutable_datetime',
+            'legal_hold_at' => 'immutable_datetime',
+            'deleted_at' => 'immutable_datetime',
             'created_at' => 'immutable_datetime',
             'updated_at' => 'immutable_datetime',
         ];
@@ -214,5 +236,17 @@ class Envelope extends Model
     public function isContentFrozen(): bool
     {
         return $this->content_frozen_at !== null;
+    }
+
+    /**
+     * True while the application's own deletion restriction is in place.
+     *
+     * Not WORM and not a bucket-enforced hold — see
+     * {@see LegalHold} for what this does and does not buy.
+     * Every deletion path in the Evidence module consults it; nothing else may clear it.
+     */
+    public function isUnderLegalHold(): bool
+    {
+        return $this->legal_hold_at !== null;
     }
 }

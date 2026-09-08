@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Domain\Delivery\Health\Console\DoctorCommand;
+use App\Domain\Delivery\Health\Probes\ArtifactIntegrityProbe;
 use App\Domain\Delivery\Health\Probes\DatabaseProbe;
 use App\Domain\Delivery\Health\Probes\MailBacklogProbe;
 use App\Domain\Delivery\Health\Probes\MailProbe;
@@ -32,6 +33,7 @@ class HealthServiceProvider extends ServiceProvider
                 $app->make(WebhookBacklogProbe::class),
                 $app->make(SigningMaterialProbe::class),
                 $app->make(TsaProbe::class),
+                $app->make(ArtifactIntegrityProbe::class),
             ]);
         });
     }

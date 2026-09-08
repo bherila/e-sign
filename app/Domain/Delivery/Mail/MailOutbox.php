@@ -6,6 +6,8 @@ namespace App\Domain\Delivery\Mail;
 
 use App\Domain\Delivery\Mail\Jobs\SendOutboundMail;
 use App\Domain\Delivery\Mail\Models\OutboundMail;
+use App\Domain\Evidence\Retention\Exceptions\RestoreDrillActive;
+use App\Domain\Evidence\Retention\RestoreDrill;
 use App\Domain\Identity\Models\Workspace;
 use Illuminate\Contracts\Config\Repository;
 use Illuminate\Database\Eloquent\Model;
@@ -31,6 +33,7 @@ final class MailOutbox
 {
     public function __construct(
         private readonly ProductionMailerGuard $guard,
+        private readonly RestoreDrill $restoreDrill,
         private readonly Repository $config,
     ) {}
 
@@ -41,6 +44,7 @@ final class MailOutbox
      *
      * @throws NonDeliveringMailerException When production is configured with a mailer that
      *                                      cannot deliver.
+     * @throws RestoreDrillActive When this instance is a restored copy.
      * @throws \InvalidArgumentException When the context cannot render this kind.
      */
     public function enqueue(
@@ -53,6 +57,11 @@ final class MailOutbox
         // Refuse before writing anything. A queued row in a deployment that cannot deliver
         // is worse than an exception: it looks like progress.
         $this->guard->assertDeliverable();
+
+        // And refuse outright if this process is a restored copy. The rows it inherited hold
+        // real addresses, and a drill that re-invites last year's signers is a drill that did
+        // damage. App\Domain\Evidence\Retention\RestoreDrill has the reasoning.
+        $this->restoreDrill->assertNotDrilling('to queue outbound mail');
 
         // Built here, not just in the worker, for two reasons: the subject stored on the row
         // is then the subject that goes out, and a context that cannot render this kind
@@ -104,6 +113,7 @@ final class MailOutbox
     public function resend(OutboundMail $original): OutboundMail
     {
         $this->guard->assertDeliverable();
+        $this->restoreDrill->assertNotDrilling('to resend outbound mail');
 
         return DB::transaction(function () use ($original): OutboundMail {
             $mail = new OutboundMail([

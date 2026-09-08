@@ -589,4 +589,127 @@ return [
         ))),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Retention, legal hold, and deletion (Stage 5, issue #40)
+    |--------------------------------------------------------------------------
+    |
+    | Three policies, deliberately separate, because they protect different
+    | things and an operator has to be able to set them independently
+    | (docs/HANDOFF.md section 12). One combined "retention days" would mean
+    | choosing between keeping authentication logs too long and deleting
+    | executed agreements too soon. The runbook is docs/operations/retention.md.
+    |
+    | `esign:retention:run` reads all three. Nothing here deletes anything on
+    | its own; a policy is only applied when that command runs, and a legal
+    | hold overrides every one of them.
+    |
+    */
+
+    'retention' => [
+
+        /*
+        | Authentication audit rows (`auth_audit_log`, owned by auth-laravel).
+        |
+        | 400 days rather than 365 so a year-on-year comparison and an annual
+        | review still have the previous cycle to look at. These rows are
+        | operational security history, not evidence about an agreement: no
+        | attestation, digest, or artifact depends on one, which is why this is
+        | the only policy with a finite default.
+        */
+        'auth_logs_days' => (int) env('ESIGN_RETENTION_AUTH_LOGS_DAYS', 400),
+
+        /*
+        | Drafts that were never sent, and uploaded documents that no envelope
+        | and no template version references.
+        |
+        | Nobody signed anything, so there is nothing to retain and nothing to
+        | prove; what is left is an uploaded PDF sitting on a private disk for
+        | no reason. Ninety days is long enough that a sender who started a
+        | draft before a quarter-end break still finds it.
+        |
+        | "Never sent" is `state = draft` with a null `sent_at`, not "no
+        | recipient has signed". A cancelled or expired envelope went out to
+        | somebody and is history rather than an abandoned draft.
+        */
+        'abandoned_drafts_days' => (int) env('ESIGN_RETENTION_ABANDONED_DRAFTS_DAYS', 90),
+
+        /*
+        | Executed agreements. Null means never delete automatically, and that
+        | is the shipped default.
+        |
+        | docs/HANDOFF.md section 12: "Default to no automatic deletion of
+        | executed documents until an operator has configured a reviewed
+        | policy." A number here is a decision about how long this deployment
+        | is required to be able to produce a signed agreement, and only the
+        | operator knows what that requirement is — it comes from the
+        | jurisdictions the agreements were signed under and from whatever
+        | contractual retention the counterparties agreed to, neither of which
+        | a default can guess. An unset value is therefore not an oversight to
+        | be filled in with something plausible; it is the safe answer.
+        |
+        | Set ESIGN_RETENTION_EXECUTED_DOCUMENTS_DAYS to a positive integer to
+        | turn the policy on. An empty string, `null`, `0`, or a negative value
+        | all mean "not configured", so a half-finished .env edit cannot switch
+        | deletion on by accident.
+        */
+        'executed_documents_days' => env('ESIGN_RETENTION_EXECUTED_DOCUMENTS_DAYS'),
+
+        /*
+        | How long a soft-deleted envelope keeps its bytes.
+        |
+        | `esign:retention:run` soft-deletes the envelope and records every
+        | artifact digest it is scheduled to destroy;
+        | `esign:retention:purge-blobs` removes the objects, and only for rows
+        | that have been soft-deleted for longer than this. The gap is the
+        | window in which a retention decision made in error is still one
+        | UPDATE away from being undone, which is the difference between a
+        | policy and an accident.
+        */
+        'purge_grace_days' => (int) env('ESIGN_RETENTION_PURGE_GRACE_DAYS', 30),
+
+        /*
+        | Age, in days, at which the `artifact_integrity` readiness probe stops
+        | trusting the last `esign:artifacts:verify` run. Eight, because
+        | routes/console.php runs the verification weekly: seven would warn on
+        | every ordinary schedule drift, and anything much larger would let a
+        | verification that stopped running go unnoticed for a fortnight.
+        */
+        'verification_warn_days' => (int) env('ESIGN_RETENTION_VERIFICATION_WARN_DAYS', 8),
+
+        /*
+        | Where `esign:backup:manifest` writes when `--path` is not given, and
+        | where `esign:restore:verify` looks when `--manifest` is not given.
+        | Relative paths resolve against the application base path.
+        */
+        'manifest_path' => env('ESIGN_BACKUP_MANIFEST_PATH', 'storage/app/backups/manifest.json'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Restore drill (Stage 5, issue #40)
+    |--------------------------------------------------------------------------
+    |
+    | Set ESIGN_RESTORE_DRILL=1 in the throwaway environment a backup is
+    | restored into. It does two things, and both matter:
+    |
+    |  - `esign:restore:verify` refuses to run without it, so the drill cannot
+    |    be pointed at a live instance by a mistyped host.
+    |  - Outbound mail and webhook delivery refuse to send. A restored database
+    |    holds real recipient addresses and real endpoint URLs with queued work
+    |    against both; a worker started in that copy would re-invite people to
+    |    agreements they already signed and re-POST completion events to a
+    |    production consumer. Nothing about the copy tells it that it is a copy,
+    |    so this variable does.
+    |
+    | It is a refusal rather than a redirect to a log mailer: a suppressed send
+    | that looks like a successful one teaches the drill nothing.
+    |
+    */
+
+    'restore_drill' => filter_var(
+        env('ESIGN_RESTORE_DRILL', false),
+        FILTER_VALIDATE_BOOLEAN
+    ),
+
 ];

@@ -7,7 +7,7 @@ minimal one.
 | Route | Purpose | Checks | Audience |
 |---|---|---|---|
 | `GET /up` | Liveness | Only that the PHP process answers HTTP. No database, no dependencies. Laravel's built-in probe (`bootstrap/app.php`, `health: '/up'`). | Load balancers, container orchestrators |
-| `GET /health/ready` | Readiness | Database, queue lag, scheduler heartbeat, storage, mail configuration, mail backlog, webhook backlog, signing material, TSA configuration. | Operators, uptime monitors |
+| `GET /health/ready` | Readiness | Database, queue lag, scheduler heartbeat, storage, mail configuration, mail backlog, webhook backlog, signing material, TSA configuration, artifact integrity. | Operators, uptime monitors |
 
 ## `/health/ready`
 
@@ -60,11 +60,13 @@ ESIGN_HEALTH_ALLOW_CIDRS=127.0.0.1/32,::1/128
 | `webhook_backlog` | No overdue delivery, and no disabled endpoint | Oldest overdue delivery exceeds `esign.delivery.webhooks.backlog_warn_seconds` (default 300s), or ≥1 endpoint is disabled | Oldest overdue delivery exceeds `esign.delivery.webhooks.backlog_fail_seconds` (default 1800s), or the outbox tables are unavailable |
 | `signing_material` | Certificate and private key paths are configured and readable, and the certificate expires more than `esign.health.cert_warn_days` (default 30) days out | Unset outside production, or the certificate expires within the warn window | Unset in production, unreadable, unparseable, or expired |
 | `tsa` | `ESIGN_TSA_URL` unset, or set and parses as `http`/`https` | — | Set but not a valid `http(s)` URL |
+| `artifact_integrity` | The last completed `esign:artifacts:verify` run passed and finished within `esign.retention.verification_warn_days` (default 8) | That run passed but is older than the window, or no verification has ever completed | The last completed run found a digest mismatch, a missing object, or a seal that no longer validates |
 
 The queue, scheduler, and certificate thresholds live in `config/esign.php` under the
 `health` key and are each overridable by an `ESIGN_HEALTH_*` environment variable. The mail
 backlog thresholds live under the `mail` key, overridable by `ESIGN_MAIL_BACKLOG_*` and
-`ESIGN_MAIL_FAILED_*`.
+`ESIGN_MAIL_FAILED_*`. The artifact-integrity window lives under `retention`, overridable by
+`ESIGN_RETENTION_VERIFICATION_WARN_DAYS`.
 
 **Overall status** is the worst of every probe: `ok` only if all probes are `ok`, `degraded`
 if the worst is a `warn`, `fail` if any probe `fail`s.
@@ -92,6 +94,19 @@ if the worst is a `warn`, `fail` if any probe `fail`s.
   but the instance is not unready. The message names no endpoint and no URL;
   `php artisan esign:webhook:backlog` prints the same snapshot with more detail, and
   `docs/delivery/webhooks.md` is the runbook.
+- **`artifact_integrity` verifies nothing itself.** Re-hashing every published artifact is
+  minutes of I/O, so an endpoint that did it would either time out or become a way to make
+  the instance unavailable by requesting it repeatedly. `esign:artifacts:verify` does the
+  work on the weekly schedule in `routes/console.php` and records the outcome in
+  `artifact_verification_runs`; the probe reads the last completed row. That split creates a
+  second failure mode and the probe treats it as the more important one: a verification that
+  **stopped running** is worse than one that ran and failed, because a failure is visible and
+  a silence is not — so an old result warns even when it passed. A verification that has
+  never run warns rather than fails, because a freshly provisioned instance has no artifacts
+  and no schedule history, and failing readiness there would make a correct deployment look
+  broken on its first day. Artifacts belonging to an envelope retention soft-deleted are
+  skipped: bytes removed on purpose are not an integrity failure
+  (`docs/operations/retention.md`).
 - **The scheduler heartbeat** is written by a task in `routes/console.php`
   (`Schedule::call(...)->everyMinute()`) that stores the current time under the cache key
   `App\Domain\Delivery\Health\SchedulerHeartbeat::CACHE_KEY`. If `scheduler` reports `fail`,
@@ -103,7 +118,9 @@ if the worst is a `warn`, `fail` if any probe `fail`s.
 
 - Probe contracts and implementations: `app/Domain/Delivery/Health/` (interface `HealthProbe`,
   value objects `ProbeResult`/`HealthStatus`/`ReadinessReport`, orchestrator
-  `ReadinessChecker`, and `Probes/*` for each check).
+  `ReadinessChecker`, and `Probes/*` for each check). `ArtifactIntegrityProbe` lives there with
+  the others and reads `App\Domain\Evidence\Retention\ArtifactVerificationRun`, which the
+  Evidence module writes.
 - HTTP surface: `app/Http/Controllers/HealthController.php`, routed from
   `routes/health.php`, registered via the `then:` hook in `bootstrap/app.php` (not merged into
   `web.php`/`api.php`, so it never picks up session or CSRF middleware).

@@ -11,6 +11,7 @@ use App\Domain\Delivery\Webhooks\TextRedactor;
 use App\Domain\Delivery\Webhooks\WebhookDispatcher;
 use App\Domain\Delivery\Webhooks\WebhookSigner;
 use App\Domain\Delivery\Webhooks\WebhookTransport;
+use App\Domain\Evidence\Retention\RestoreDrill;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -47,7 +48,15 @@ final class DeliverWebhook implements ShouldQueue
         WebhookDispatcher $dispatcher,
         WebhookSigner $signer,
         TextRedactor $redactor,
+        RestoreDrill $restoreDrill,
     ): void {
+        // Before anything, including before the row is loaded. A restored copy holds
+        // deliveries that were queued in the instance it was copied from, aimed at that
+        // instance's consumers; the dispatcher's guard cannot see those because it never ran
+        // for them. Throwing leaves the row `pending` and the job visibly failed, which is
+        // what an operator who started a worker in a drill environment needs to see.
+        $restoreDrill->assertNotDrilling('to deliver a webhook');
+
         $delivery = WebhookDelivery::query()->with(['event', 'endpoint'])->find($this->webhookDeliveryId);
 
         // A row that is already settled has been handled: a duplicate job
