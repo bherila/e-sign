@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Domain\Delivery\Mail\Feedback;
 
 use App\Domain\Delivery\Mail\MailEventSource;
+use App\Domain\Delivery\Outbound\DestinationPolicy;
+use App\Domain\Delivery\Webhooks\WebhookTransport;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Support\Carbon;
 use RuntimeException;
@@ -33,18 +35,38 @@ final class SesFeedbackProcessor
      */
     private const SUBSCRIBE_HOST_PATTERN = '/^sns\.[a-z0-9\-]+\.amazonaws\.com(\.cn)?$/';
 
+    /** Seconds. Confirming a subscription is a one-shot AWS call, not a long job. */
+    private const CONFIRM_TIMEOUT = 10;
+
     public function __construct(
         private readonly SesEventMapper $mapper,
         private readonly MailFeedbackRecorder $recorder,
         private readonly HttpFactory $http,
+        private readonly DestinationPolicy $destinations,
     ) {}
 
     /**
      * Confirm a topic subscription by fetching the URL AWS supplied.
      *
+     * The URL comes out of a request body, so it is treated as hostile until proved
+     * otherwise, in two stages that catch different things.
+     *
+     * The host pin is first and is the narrow one: an SNS confirmation goes to
+     * `sns.<region>.amazonaws.com` over HTTPS or it goes nowhere. It costs no DNS and it
+     * rejects the obvious attempts — `sns.us-east-1.amazonaws.com.attacker.test`, a
+     * literal address, the instance metadata endpoint.
+     *
+     * The shared DestinationPolicy is second and adds what a name pin cannot: it refuses a
+     * host that *resolves* to a loopback, private, link-local, or otherwise reserved
+     * address, and it returns the addresses it checked so the connection can be pinned to
+     * them. Without that, a poisoned or hijacked answer for a legitimate AWS name would
+     * still reach an internal service.
+     *
      * @param  array<string, mixed>  $envelope
      *
-     * @throws RuntimeException When the URL is not an AWS SNS endpoint over HTTPS.
+     * @throws RuntimeException When the URL is not an AWS SNS endpoint reachable under the
+     *                          destination policy. DestinationRefusedException is one of
+     *                          these.
      */
     public function confirmSubscription(array $envelope): void
     {
@@ -59,9 +81,16 @@ final class SesFeedbackProcessor
             throw new RuntimeException('An SNS subscription confirmation URL must point at an AWS SNS endpoint.');
         }
 
-        // No redirects: the whole point of pinning the host is lost if the first response
-        // can send the request somewhere else.
-        $this->http->withoutRedirecting()->timeout(10)->get($url)->throw();
+        $destination = $this->destinations->for('SNS subscription confirmation')->validate($url);
+
+        // The same transport options the webhook outbox uses, for the same reason: only the
+        // first hop was validated, so redirects are never followed, and the connection is
+        // pinned to the addresses that were actually checked.
+        $this->http
+            ->timeout(self::CONFIRM_TIMEOUT)
+            ->withOptions(WebhookTransport::transportOptions($destination))
+            ->get($destination->url)
+            ->throw();
     }
 
     /**

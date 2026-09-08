@@ -11,11 +11,13 @@ use App\Domain\Delivery\Mail\MailEventSource;
 use App\Domain\Delivery\Mail\MailState;
 use App\Domain\Delivery\Mail\Models\OutboundMail;
 use App\Domain\Delivery\Mail\Models\OutboundMailEvent;
+use App\Domain\Delivery\Outbound\DestinationPolicy;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\TestResponse;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Support\FakeHostResolver;
 use Tests\TestCase;
 
 /**
@@ -193,6 +195,7 @@ class SesMailWebhookTest extends TestCase
     public function test_a_subscription_confirmation_is_fetched_from_aws_only(): void
     {
         $this->withStubVerifier();
+        $this->withResolvedSnsHost(['203.0.113.10']);
         Http::fake();
 
         $envelope = $this->notification('Delivery', 'ses@mail.example.test');
@@ -222,6 +225,7 @@ class SesMailWebhookTest extends TestCase
     public function test_a_subscription_confirmation_url_that_is_not_aws_is_refused(string $url): void
     {
         $this->withStubVerifier();
+        $this->withResolvedSnsHost(['203.0.113.10']);
         Http::fake();
 
         $envelope = $this->notification('Delivery', 'ses@mail.example.test');
@@ -232,6 +236,23 @@ class SesMailWebhookTest extends TestCase
 
         // Nothing was fetched: an unauthenticated webhook that chooses its own outbound
         // destination is a server-side request forgery primitive.
+        Http::assertNothingSent();
+    }
+
+    public function test_a_confirmation_url_on_an_aws_name_that_resolves_internally_is_refused(): void
+    {
+        $this->withStubVerifier();
+        // A legitimate AWS hostname whose DNS answer points inside the network. The host
+        // pin cannot catch this; the shared destination policy is what does.
+        $this->withResolvedSnsHost(['169.254.169.254']);
+        Http::fake();
+
+        $envelope = $this->notification('Delivery', 'ses@mail.example.test');
+        $envelope['Type'] = 'SubscriptionConfirmation';
+        $envelope['SubscribeURL'] = 'https://sns.us-east-1.amazonaws.com/?Action=ConfirmSubscription';
+
+        $this->postSns($envelope)->assertStatus(422);
+
         Http::assertNothingSent();
     }
 
@@ -259,6 +280,17 @@ class SesMailWebhookTest extends TestCase
                 //
             }
         });
+    }
+
+    /**
+     * @param  list<string>  $addresses
+     */
+    private function withResolvedSnsHost(array $addresses): void
+    {
+        $this->app->instance(DestinationPolicy::class, new DestinationPolicy(
+            resolver: new FakeHostResolver(['sns.us-east-1.amazonaws.com' => $addresses]),
+            subject: 'SNS subscription confirmation',
+        ));
     }
 
     /**

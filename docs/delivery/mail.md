@@ -216,9 +216,17 @@ SNS treats 503 as retryable, so a deployment that later turns verification on do
 the feedback that arrived in the meantime.
 
 Everything behind the verifier is implemented and tested: the topic-ARN check
-(`ESIGN_MAIL_SES_TOPIC_ARN`, unset disables the endpoint), subscription confirmation with the
-`SubscribeURL` host pinned to AWS SNS over HTTPS and no redirects followed, and the
+(`ESIGN_MAIL_SES_TOPIC_ARN`, unset disables the endpoint), subscription confirmation, and the
 notification mapping.
+
+Subscription confirmation is the one outbound request this endpoint makes, to a URL that
+arrived in a request body, so it is guarded twice. The host is pinned to
+`sns.<region>.amazonaws.com` over HTTPS, which costs no DNS and rejects the obvious attempts
+(`sns.us-east-1.amazonaws.com.attacker.test`, a literal address, the metadata endpoint). Then
+the shared `DestinationPolicy` — the same one the webhook outbox and the timestamp authority
+use — refuses a host that *resolves* to a loopback, private, link-local, or reserved address
+and pins the connection to the addresses it checked. Redirects are never followed, because
+only the first hop was validated.
 
 | SES `notificationType` / `eventType` | State |
 |---|---|
