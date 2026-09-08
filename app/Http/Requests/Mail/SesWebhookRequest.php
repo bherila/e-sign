@@ -67,6 +67,16 @@ class SesWebhookRequest extends FormRequest
             'SignatureVersion' => ['required', 'string', 'max:8'],
             'SigningCertURL' => ['required', 'string', 'max:2048'],
             'SubscribeURL' => ['nullable', 'string', 'max:2048'],
+            /*
+             * Named so that envelope() keeps them, because validated() drops every key the
+             * rules do not mention and these two are part of what a real verifier checks:
+             * `Token` is in the string-to-sign for a subscription or unsubscribe
+             * confirmation (and is what confirms one), and `Subject` is in it for any
+             * notification that carries one. Without them here, binding a genuine
+             * SnsMessageVerifier would fail on exactly those messages.
+             */
+            'Token' => ['nullable', 'string', 'max:2048'],
+            'Subject' => ['nullable', 'string', 'max:255'],
         ];
     }
 

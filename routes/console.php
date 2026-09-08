@@ -1,5 +1,7 @@
 <?php
 
+use App\Domain\Delivery\Events\Console\ExpireCommand;
+use App\Domain\Delivery\Events\Console\RemindCommand;
 use App\Domain\Delivery\Health\SchedulerHeartbeat;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
@@ -16,13 +18,36 @@ Schedule::call(fn () => app(SchedulerHeartbeat::class)->record())
     ->name('health:scheduler-heartbeat');
 
 /*
- * Native API idempotency keys expire after 24 hours (App\Domain\Integration\Native\IdempotencyStore::TTL_HOURS)
- * and are removed here.
+ * The two things about an envelope that only the clock can cause (issue #35).
+ *
+ * Expiry runs first and hourly, because an expiry that has arrived is a state the product
+ * claims is true and every hour it is not applied is an hour a signer can still act on an
+ * agreement that should have closed. Reminders run once a day: their own thresholds decide
+ * who is due, so a daily pass is a floor on the delay and never a cause of a second message.
+ *
+ * `withoutOverlapping()` on both. On the cPanel profile cron can start a run while the last
+ * one is still going; the row-level claims in the schedulers already make a double send
+ * impossible, and this keeps the queue from filling with work that will decide to do nothing.
+ */
+Schedule::command(ExpireCommand::class)
+    ->hourly()
+    ->withoutOverlapping()
+    ->name('signing:expire');
+
+Schedule::command(RemindCommand::class)
+    ->daily()
+    ->withoutOverlapping()
+    ->name('signing:remind');
+
+/*
+ * Native API idempotency keys expire after 24 hours
+ * (App\Domain\Integration\Native\IdempotencyStore::TTL_HOURS) and are removed here.
+ *
  * The table is operational scratch: without a prune it grows with every mutating API call
  * forever, and the replay guarantee only ever covers a day, so nothing of value is lost.
  * Hourly rather than daily so a busy deployment never carries more than an hour of dead rows.
  */
 Schedule::command('esign:api:prune-idempotency-keys')
     ->hourly()
-    ->name('api:prune-idempotency-keys')
-    ->withoutOverlapping();
+    ->withoutOverlapping()
+    ->name('api:prune-idempotency-keys');

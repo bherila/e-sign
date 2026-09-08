@@ -30,6 +30,7 @@ return Application::configure(basePath: dirname(__DIR__))
             Route::group([], base_path('routes/documents.php'));
             Route::group([], base_path('routes/templates.php'));
             Route::group([], base_path('routes/editor.php'));
+            Route::group([], base_path('routes/mail-webhooks.php'));
         },
     )
     // Domain commands live under app/Domain/<Module>/Console, which Laravel's

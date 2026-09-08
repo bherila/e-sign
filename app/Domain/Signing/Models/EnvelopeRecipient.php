@@ -35,6 +35,8 @@ use Illuminate\Support\Str;
  * @property CarbonImmutable|null $signed_at
  * @property CarbonImmutable|null $declined_at
  * @property string|null $decline_reason
+ * @property CarbonImmutable|null $invited_at
+ * @property CarbonImmutable|null $last_reminded_at
  * @property array<string, mixed> $identity_snapshot
  */
 class EnvelopeRecipient extends Model
@@ -59,6 +61,10 @@ class EnvelopeRecipient extends Model
             'identity_snapshot' => 'array',
             'signed_at' => 'immutable_datetime',
             'declined_at' => 'immutable_datetime',
+            // Delivery facts, not signing state: written by App\Domain\Delivery\Events and
+            // never read by the state machine. See the migration that adds them.
+            'invited_at' => 'immutable_datetime',
+            'last_reminded_at' => 'immutable_datetime',
             'created_at' => 'immutable_datetime',
             'updated_at' => 'immutable_datetime',
         ];

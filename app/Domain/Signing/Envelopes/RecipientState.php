@@ -27,6 +27,18 @@ enum RecipientState: string
     case Declined = 'declined';
 
     /**
+     * True once this recipient has given a final answer, either way.
+     *
+     * Their fields close at that moment — including the signer-specific ones, which the
+     * material digest deliberately does not cover and their attestation therefore cannot
+     * detect a change to.
+     */
+    public function hasAttested(): bool
+    {
+        return $this === self::Signed || $this === self::Declined;
+    }
+
+    /**
      * @return list<string>
      */
     public static function values(): array

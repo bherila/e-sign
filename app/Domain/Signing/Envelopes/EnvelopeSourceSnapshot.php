@@ -35,7 +35,7 @@ use App\Domain\Signing\Exceptions\InvalidEnvelopeSnapshot;
  * | `signing_mode` | no, default `sequential` | `sequential` or `parallel` |
  * | `render_settings` | no, default `[]` | snapshotted rendering settings |
  * | `source_template_version_id` | no | the template version's **public** ULID; provenance only, no foreign key |
- * | `expiration_hours` | no | expiry is computed from this at send, never before |
+ * | `expiration_hours` | no | at most 8760 (a year); expiry is computed from this at send, never before |
  *
  * `assurance_level` uses {@see AssuranceLevel}, the Evidence module's enum, rather than a
  * private copy. Its values are `pades-b-b` and `pades-b-t`: one vocabulary for the level an
@@ -59,6 +59,21 @@ final readonly class EnvelopeSourceSnapshot
     public const MAX_TITLE_LENGTH = 255;
 
     public const MAX_CONSENT_POLICY_VERSION_LENGTH = 64;
+
+    /** `envelopes.source_template_version_id` is a ULID column, and a ULID is 26 characters. */
+    public const MAX_SOURCE_TEMPLATE_VERSION_ID_LENGTH = 26;
+
+    /**
+     * A year, and the reason is the column type rather than the workflow.
+     *
+     * `send()` computes `expires_at` from this, and on MySQL and MariaDB a `TIMESTAMP` runs
+     * out in 2038. An unbounded value would therefore make `send()` succeed on SQLite and
+     * fail on the production engines — the class of divergence
+     * docs/adr/0002-supported-databases.md exists to prevent. An invitation that stays open
+     * for more than a year is not a workflow this product has; the profile's own default is
+     * seven days.
+     */
+    public const MAX_EXPIRATION_HOURS = 8_760;
 
     /**
      * @param  array<string, mixed>  $renderSettings
@@ -134,7 +149,11 @@ final readonly class EnvelopeSourceSnapshot
             assuranceLevel: self::assuranceLevel($snapshot),
             signingMode: self::signingMode($snapshot),
             renderSettings: self::renderSettings($snapshot),
-            sourceTemplateVersionId: self::nullablePublicId($snapshot, 'source_template_version_id'),
+            sourceTemplateVersionId: self::nullablePublicId(
+                $snapshot,
+                'source_template_version_id',
+                self::MAX_SOURCE_TEMPLATE_VERSION_ID_LENGTH,
+            ),
             expirationHours: self::expirationHours($snapshot),
         );
     }
@@ -286,7 +305,7 @@ final readonly class EnvelopeSourceSnapshot
     /**
      * @param  array<string, mixed>  $snapshot
      */
-    private static function nullablePublicId(array $snapshot, string $key): ?string
+    private static function nullablePublicId(array $snapshot, string $key, int $maxLength): ?string
     {
         $value = $snapshot[$key] ?? null;
 
@@ -294,8 +313,11 @@ final readonly class EnvelopeSourceSnapshot
             return null;
         }
 
-        if (! is_string($value) || mb_strlen($value) > 64) {
-            throw InvalidEnvelopeSnapshot::invalidProperty($key, 'expected a public identifier string or null.');
+        if (! is_string($value) || mb_strlen($value) > $maxLength) {
+            throw InvalidEnvelopeSnapshot::invalidProperty(
+                $key,
+                'expected a public identifier of at most '.$maxLength.' characters, or null.',
+            );
         }
 
         return $value;
@@ -317,10 +339,10 @@ final readonly class EnvelopeSourceSnapshot
             return null;
         }
 
-        if (! is_int($value) || $value < 1) {
+        if (! is_int($value) || $value < 1 || $value > self::MAX_EXPIRATION_HOURS) {
             throw InvalidEnvelopeSnapshot::invalidProperty(
                 'expiration_hours',
-                'expected a positive number of hours, or null for no expiry.',
+                'expected between 1 and '.self::MAX_EXPIRATION_HOURS.' hours, or null for no expiry.',
             );
         }
 

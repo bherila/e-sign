@@ -29,13 +29,20 @@ use InvalidArgumentException;
  * transactional mail about an agreement should not also report when the agreement was read,
  * and a message that fetches nothing renders identically in a client with remote content
  * blocked.
+ *
+ * The context reaches the view as a MailCopy, never as the MailContext itself, because Blade
+ * escapes HTML and these are Markdown templates — see MailCopy for what that lets an
+ * untrusted decline reason do otherwise. The property below is protected for that reason and
+ * not merely for tidiness: Mailable exposes every *public* property to the view and it wins
+ * over anything passed through `with()`, so a public `$context` would silently put the
+ * unescaped object back in the template's hands.
  */
 abstract class OutboundMailable extends Mailable
 {
     /** Beyond this the subject is truncated; mail clients elide it anyway. */
     private const MAX_SUBJECT_TITLE_LENGTH = 120;
 
-    public function __construct(public readonly MailContext $context)
+    public function __construct(protected readonly MailContext $context)
     {
         $missing = $context->missing($this->requiredFields());
 
@@ -58,6 +65,10 @@ abstract class OutboundMailable extends Mailable
     /**
      * The subject, derived from the context so the value stored on `outbound_mails.subject`
      * is the value that goes out rather than a second copy that can drift from it.
+     *
+     * Built from the raw context, not the escaped copy: a subject is a header, never
+     * Markdown, and backslashes added for CommonMark's benefit would be read literally by
+     * every mail client.
      */
     abstract public function subjectLine(): string;
 
@@ -74,7 +85,7 @@ abstract class OutboundMailable extends Mailable
         return new Content(
             markdown: $this->markdownView(),
             with: [
-                'context' => $this->context,
+                'context' => MailCopy::from($this->context),
                 'brand' => $this->brand(),
             ],
         );
