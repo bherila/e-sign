@@ -1,6 +1,7 @@
 <?php
 
 use App\Domain\Identity\Console\BootstrapOwnerCommand;
+use App\Domain\Identity\Console\CreateUserCommand;
 use App\Domain\Identity\Credentials\Console\IssueServiceCredentialCommand;
 use App\Domain\Identity\Credentials\Console\ListServiceCredentialsCommand;
 use App\Domain\Identity\Credentials\Console\RevokeServiceCredentialCommand;
@@ -28,6 +29,7 @@ return Application::configure(basePath: dirname(__DIR__))
     // app/Console/Commands auto-discovery does not scan, so they are listed here.
     ->withCommands([
         BootstrapOwnerCommand::class,
+        CreateUserCommand::class,
         IssueServiceCredentialCommand::class,
         RotateServiceCredentialCommand::class,
         RevokeServiceCredentialCommand::class,
