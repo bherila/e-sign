@@ -537,16 +537,49 @@ class EnvelopeFinalizationTest extends TestCase
         $text = $pdf;
         $matches = [];
 
-        if (preg_match_all('/stream\r?\n(.*?)\r?\nendstream/s', $pdf, $matches) !== false) {
+        // Where a stream's payload ends is not something to infer from the bytes around it:
+        // a Flate stream may itself end in 0x0A or 0x0D, and a writer may or may not put a
+        // separator before `endstream`, so slicing on `\nendstream` can take a byte with it
+        // and leave a payload zlib refuses. Losing that gamble used to leave this helper
+        // returning the raw PDF, and every assertion below then failed against binary rather
+        // than saying the text was missing. So: take the widest plausible payload and try the
+        // handful of ends it could really have, with both zlib framings.
+        if (preg_match_all('/stream\r?\n(.*?)endstream/s', $pdf, $matches) !== false) {
             foreach ($matches[1] as $stream) {
-                $inflated = @gzuncompress($stream);
+                $inflated = $this->inflateStream($stream);
 
-                if (is_string($inflated)) {
+                if ($inflated !== null) {
                     $text .= "\n".$inflated;
                 }
             }
         }
 
         return $text;
+    }
+
+    /**
+     * Inflate one stream payload, or null when nothing plausible about it inflates.
+     */
+    private function inflateStream(string $stream): ?string
+    {
+        $candidates = [$stream];
+
+        foreach (["\n", "\r\n", "\r"] as $terminator) {
+            if (str_ends_with($stream, $terminator)) {
+                $candidates[] = substr($stream, 0, -strlen($terminator));
+            }
+        }
+
+        foreach ($candidates as $candidate) {
+            foreach (['gzuncompress', 'gzinflate'] as $inflate) {
+                $inflated = @$inflate($candidate);
+
+                if (is_string($inflated) && $inflated !== '') {
+                    return $inflated;
+                }
+            }
+        }
+
+        return null;
     }
 }
