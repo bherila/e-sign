@@ -115,6 +115,15 @@ Recipients carry their own `version`, so two recipients acting at once do not co
 counter. Locks are always taken envelope-first, then recipient, so two transitions cannot
 deadlock by approaching the same pair from opposite ends.
 
+Three string columns — `envelope_field_values.schema_field_id`,
+`envelope_recipients.schema_recipient_id`, and `recipient_attestations.session_ref` — are
+declared with a binary collation on MySQL and MariaDB. The connection default is
+`utf8mb4_unicode_ci`, under which `notes` and `Notes` are the same value; SQLite's default is
+binary, so they are two. The field schema's identifier grammar allows both, so a unique key
+over them would otherwise mean different things on different engines — one recipient's value
+silently overwriting another's, or two sessions collapsing into one logical acceptance. The
+collation is applied per driver, because `utf8mb4_bin` is not a name SQLite knows.
+
 Because the guard needs no real concurrency to exercise, the race tests do not use threads:
 they load two model instances, transition one, and assert the other's attempt loses.
 
@@ -139,10 +148,25 @@ a prefill. `text` and `checkbox` are material even when a later signer owns them
 on an agreement changes what the agreement says, and a tick box beside a term is the term
 being accepted.
 
+The "who has not signed" half binds the sender as much as the signer, and for a reason worth
+stating: a signer-specific field is deliberately *outside* the material digest, so a signed
+recipient's attestation cannot detect a change to it. Without the rule, a sender could
+rewrite a signed party's printed name, title, or company while a later signer was still
+outstanding, and finalization would render values nobody agreed to. `submitValues()` gets it
+for free — only an `active` recipient reaches it — and `setSenderValues()` checks the owner's
+state explicitly (`field_owner_signed`).
+
 That conservative reading has a consequence the send gate handles rather than deferring: a
 required material field whose owner only acts after the freeze can never be completed. Rather
 than let the envelope deadlock in front of a person with an uncompletable form, `send()`
 refuses it with `required_material_field_unfillable` and asks the sender to supply a value.
+
+"After the freeze" is narrower than "after stage one". A *sequential* order may put several
+recipients in one stage — `[["a","b"],["c"]]` is a valid document — and the freeze happens on
+the first acceptance, not at the end of the stage, so the second member of stage one is
+already too late. The gate therefore treats a material field as fillable by its owner only
+when that owner is the sole person who acts before the freeze: sequential mode, stage one,
+and stage one holding exactly one recipient.
 
 ## Send gate
 
@@ -190,6 +214,19 @@ Off-host checkpoints and signer copies are what would make it one, and they are 
 `client_evidence` is minimized by an allowlist (`ip`, `user_agent`, `accept_language`,
 `client_timezone`, `channel`), not by a scrubber: an allowlist only has to be right about
 what it keeps. It corroborates a session and is never identity proof.
+
+A replay returns the attestation that already exists, unchanged, and that row is the
+authority for what was recorded — including the verification method. A retry presenting a
+different method does not alter it and does not make the original wrong; a caller reporting
+what happened reads the returned attestation, not its own request.
+
+Every free-form value is refused rather than truncated when it will not fit its column: title
+255, consent policy version 64, session reference 191, reasons 500, artifact reference 512,
+template version id 26, expiry 8760 hours. The last two are the least obvious. An expiry
+beyond a year would put `expires_at` past the 2038 limit of a MySQL `TIMESTAMP`, so `send()`
+would succeed on SQLite and fail on the production engines. And a truncated session reference
+is worse than an error, because it is the idempotency key: two sessions sharing a prefix would
+become one logical acceptance.
 
 ## Events
 

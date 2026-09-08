@@ -7,10 +7,12 @@ namespace Tests\Feature\Signing;
 use App\Domain\Signing\Envelopes\EnvelopeState;
 use App\Domain\Signing\Envelopes\ValueSource;
 use App\Domain\Signing\Exceptions\FieldSubmissionRejected;
+use App\Domain\Signing\Exceptions\IllegalTransition;
 use App\Domain\Signing\Exceptions\RecipientNotEligible;
 use App\Domain\Signing\Fields\CanonicalValue;
 use App\Domain\Signing\Models\EnvelopeFieldValue;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Support\SigningFixtures;
 use Tests\Support\SigningScenario;
 use Tests\TestCase;
 
@@ -266,6 +268,75 @@ class EnvelopeFieldValuesTest extends TestCase
             'Prefilled title',
             EnvelopeFieldValue::query()->where('schema_field_id', 'seller_title')->sole()->value,
         );
+    }
+
+    /**
+     * The sender is bound by the same rule, and it is not the freeze that binds them.
+     *
+     * A signer-specific field is deliberately outside the material digest — that is what
+     * makes it signer-specific — so a signed recipient's attestation cannot detect a change
+     * to it. If the sender could still write one, they could rewrite a signed party's
+     * printed name or title while a later signer was outstanding, and #28 would render a
+     * value nobody agreed to.
+     */
+    public function test_a_sender_cannot_rewrite_the_fields_of_a_recipient_who_has_signed(): void
+    {
+        $scenario = SigningScenario::create();
+        $envelope = $scenario->sent([
+            'field_schema' => SigningFixtures::parallelTwoSigners(),
+            'signing_mode' => 'parallel',
+        ]);
+        $scenario->machine()->setSenderValues($envelope, ['alice_title' => 'Head of Synthetic Affairs']);
+        $scenario->signAs($envelope->refresh(), $scenario->recipient($envelope, 'alice'), 'session-alice');
+
+        // Bob is still outstanding, so the envelope is in_progress and sender edits are
+        // still a legal transition. Alice's fields are not.
+        $this->assertSame(EnvelopeState::InProgress, $envelope->refresh()->state);
+
+        try {
+            $scenario->machine()->setSenderValues($envelope, ['alice_title' => 'Something she never saw']);
+            $this->fail('An attested recipient\'s own fields are as closed as the agreement text.');
+        } catch (FieldSubmissionRejected $e) {
+            $this->assertSame('field_owner_signed', $e->code());
+            $this->assertSame('alice_title', $e->fieldId);
+        }
+
+        $this->assertSame(
+            'Head of Synthetic Affairs',
+            EnvelopeFieldValue::query()->where('schema_field_id', 'alice_title')->sole()->value,
+        );
+
+        // Bob has not signed, so his are still open to a prefill.
+        $scenario->machine()->setSenderValues($envelope->refresh(), ['bob_company' => 'Synthetic Holdings']);
+        $this->assertSame(
+            'Synthetic Holdings',
+            EnvelopeFieldValue::query()->where('schema_field_id', 'bob_company')->sole()->value,
+        );
+    }
+
+    /**
+     * A declined owner is stopped a level higher up, and that is worth pinning.
+     *
+     * Declining ends the envelope for everyone, so `set_sender_values` is not a legal
+     * transition from `declined` at all — the per-field owner check never runs. It still
+     * treats a declined owner as having attested, because the ordering of those two guards
+     * is not something the field rule should depend on.
+     */
+    public function test_a_decline_closes_the_envelope_before_the_field_rules_are_reached(): void
+    {
+        $scenario = SigningScenario::create();
+        $envelope = $scenario->sent([
+            'field_schema' => SigningFixtures::parallelTwoSigners(),
+            'signing_mode' => 'parallel',
+        ]);
+        $scenario->machine()->decline($scenario->recipient($envelope, 'alice'), 'No.');
+
+        $this->assertTrue($scenario->recipient($envelope->refresh(), 'alice')->state->hasAttested());
+
+        $this->expectException(IllegalTransition::class);
+        $this->expectExceptionMessageMatches('/state "declined"/');
+
+        $scenario->machine()->setSenderValues($envelope, ['bob_company' => 'Synthetic Holdings']);
     }
 
     public function test_freezing_stamps_material_values_and_leaves_signer_specific_ones_open(): void
