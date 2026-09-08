@@ -175,6 +175,12 @@ the Firma profile's two-phase validation surfaces them.
 
 | Code | Refused |
 |---|---|
+| `anchor_not_found` | a required anchor's text is not on the field's page |
+| `anchor_ambiguous` | an anchor asked for the sole occurrence and matched more than once |
+| `anchor_occurrence_out_of_range` | an anchor asked for occurrence *n* and fewer exist |
+| `anchor_cross_check_failed` | a `cross_check` anchor resolved further than its tolerance from the declared rectangle |
+| `anchor_resolved_off_page` | an anchor's offset put the rectangle off the page it was found on |
+| `anchor_text_unreadable` | the document's text could not be extracted, so no anchor in it can be resolved |
 | `no_recipients` | an envelope nobody is asked to sign |
 | `recipient_missing_email` | a recipient row with no usable address |
 | `recipient_has_no_required_field` | a recipient with nothing required of them |
@@ -182,7 +188,21 @@ the Firma profile's two-phase validation surfaces them.
 | `required_material_field_unfillable` | a required material field its owner will never be allowed to fill |
 | `assurance_material_unavailable` | the requested assurance level's material is not declared available |
 
-The last one comes from the `AssurancePolicyCheck` port. `docs/HANDOFF.md` section 9 requires
+The six anchor codes come from the `AnchorResolution` port and are the send-time half of
+[preparation/anchors.md](../preparation/anchors.md). Resolution runs **first**, before the rest of
+the gate, so the checks below reason about the field set that will actually be sent: a field whose
+optional anchor was absent is already gone by then, and a recipient left with nothing required of
+them is caught by `recipient_has_no_required_field` rather than discovered by the person who opens
+the link. Each anchor problem carries `field`, `recipient`, `anchor_text` and `found` beside its
+code, so a client can put the message on the field.
+
+Resolution is also where an anchored field stops being a request and becomes a rectangle. `send()`
+writes the resolved `field_schema` and its digest in the same statement as the transition, so
+there is no window in which an envelope is sent with unresolved anchors and none in which it holds
+rectangles for a send that rolled back. Nothing re-resolves afterwards, which is what makes a
+rectangle a signer saw unable to move.
+
+`assurance_material_unavailable` comes from the `AssurancePolicyCheck` port. `docs/HANDOFF.md` section 9 requires
 rejecting absent, unusable, or mismatched signing material *before* inviting signers, and
 never downgrading a requested level to one that can be met. The default implementation reads
 the same `config('esign.seal')` and `config('esign.tsa')` the sealer reads; it checks that the
@@ -287,6 +307,7 @@ already marks that row "intentionally different".
 | 7. Retries produce one logical acceptance | `EnvelopeAcceptanceTest` |
 | One transition table | `EnvelopeTransitionMatrixTest` |
 | Events are transactional | `EnvelopeEventSinkTest` |
+| Anchors resolve before send, once, and never after | `EnvelopeAnchorResolutionTest` |
 
 ## Deferred
 

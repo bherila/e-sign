@@ -6,6 +6,7 @@ namespace Tests\Feature\Signing;
 
 use App\Domain\Identity\Audit\AuditActor;
 use App\Domain\Identity\Audit\AuditEvent;
+use App\Domain\Identity\Credentials\IssuedServiceCredential;
 use App\Domain\Identity\Credentials\Scope;
 use App\Domain\Identity\Credentials\ServiceCredentialIssuer;
 use App\Domain\Preparation\Anchoring\AnchorResolutionOutcome;
@@ -265,12 +266,7 @@ class EnvelopeAnchorResolutionTest extends TestCase
 
     public function test_the_native_api_reports_an_unplaceable_anchor_as_a_structured_422(): void
     {
-        $issued = app(ServiceCredentialIssuer::class)->issue(
-            $this->scenario->workspace,
-            'anchor test',
-            [Scope::EnvelopesRead->value, Scope::EnvelopesWrite->value],
-            AuditActor::system('tests'),
-        );
+        $issued = $this->credential();
 
         $envelope = $this->scenario->preparedDraft([
             'field_schema' => $this->anchoredSchema(sellerSignatureText: 'Witness signature:'),
@@ -296,7 +292,39 @@ class EnvelopeAnchorResolutionTest extends TestCase
         $this->assertSame('no match on page 2', $problem['found']);
     }
 
+    public function test_the_native_api_publishes_what_was_omitted(): void
+    {
+        $issued = $this->credential();
+        $envelope = $this->scenario->preparedDraft([
+            'field_schema' => $this->anchoredSchema(notesText: 'Witness signature:', notesAnchorRequired: false),
+        ]);
+
+        $headers = ['Authorization' => 'Bearer '.$issued->secret];
+
+        $this->postJson('/api/v1/envelopes/'.$envelope->public_id.'/send', [], $headers)
+            ->assertOk()
+            ->assertJsonPath('state', 'sent')
+            ->assertJsonPath('omitted_anchor_fields.0.field_id', 'seller_notes')
+            ->assertJsonPath('omitted_anchor_fields.0.reason', 'optional_anchor_absent');
+
+        // And it stays visible: this is the answer to "why is there no notes box on this
+        // agreement?", asked long after the send.
+        $this->getJson('/api/v1/envelopes/'.$envelope->public_id, $headers)
+            ->assertOk()
+            ->assertJsonPath('omitted_anchor_fields.0.anchor_text', 'Witness signature:');
+    }
+
     // ------------------------------------------------------------------------ helpers
+
+    private function credential(): IssuedServiceCredential
+    {
+        return app(ServiceCredentialIssuer::class)->issue(
+            $this->scenario->workspace,
+            'anchor test',
+            [Scope::EnvelopesRead->value, Scope::EnvelopesWrite->value],
+            AuditActor::system('tests'),
+        );
+    }
 
     private function refusedSend(Envelope $envelope): SendPreconditionsFailed
     {

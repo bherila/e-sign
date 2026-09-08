@@ -27,6 +27,10 @@ use Illuminate\Http\Resources\Json\JsonResource;
  *   first acceptance, or send in parallel mode. After it, a prefill correction is refused
  *   rather than applied, so a caller can tell in advance which of its edits will be taken.
  *
+ * `omitted_anchor_fields` is the third: it is normally empty, and when it is not it says that a
+ * field the source declared was deliberately not placed, because its anchor declared that its
+ * text may legitimately be absent and it was.
+ *
  * The digests are published deliberately: `document_sha256` and `field_schema_sha256` are
  * what every attestation binds, so a caller can prove the envelope it is looking at is built
  * from the document and field set it thinks it is. No disk name and no storage path appear
@@ -66,6 +70,13 @@ class EnvelopeResource extends JsonResource
 
             'cancel_reason' => $envelope->cancel_reason,
             'finalization_failure_reason' => $envelope->finalization_failure_reason,
+
+            // Empty for almost every envelope. When it is not, each entry names a field that
+            // was declared and then intentionally left out because its optional anchor was not
+            // in the document — the one narrow compatibility option in docs/HANDOFF.md
+            // section 7, published here so a reader can tell an intentional omission from a
+            // field that went missing. See docs/preparation/anchors.md.
+            'omitted_anchor_fields' => $envelope->omittedAnchorFields(),
 
             'created_at' => $envelope->created_at?->toIso8601String(),
             'sent_at' => $envelope->sent_at?->toIso8601String(),

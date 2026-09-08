@@ -2419,6 +2419,45 @@
               "null"
             ]
           },
+          "omitted_anchor_fields": {
+            "description": "Fields the source declared that were deliberately not placed, because their anchor declared that its text may legitimately be absent from this document and it was. Empty for almost every envelope. Written once, when the envelope is sent; an anchor that could not be resolved is a refused send, not an entry here. See docs/preparation/anchors.md.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field_id": {
+                  "type": "string"
+                },
+                "recipient_id": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "alias": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "page": {
+                  "type": "integer"
+                },
+                "anchor_text": {
+                  "type": "string"
+                },
+                "occurrence": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "optional_anchor_absent"
+                  ]
+                }
+              }
+            }
+          },
           "created_at": {
             "type": [
               "string",
