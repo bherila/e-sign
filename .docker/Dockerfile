@@ -24,7 +24,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         default-mysql-client \
     && rm -rf /var/lib/apt/lists/*
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install -j"$(nproc)" pdo_mysql mbstring exif pcntl bcmath gd zip intl opcache
+    && docker-php-ext-install -j"$(nproc)" pdo_mysql mbstring exif pcntl bcmath gd zip intl \
+    && docker-php-ext-enable opcache
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 COPY .docker/php/php.ini            /usr/local/etc/php/conf.d/custom.ini
 COPY .docker/php/fpm-pool.conf      /usr/local/etc/php-fpm.d/zz-esign.conf
