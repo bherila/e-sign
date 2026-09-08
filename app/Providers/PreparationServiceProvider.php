@@ -12,9 +12,11 @@ use App\Domain\Preparation\Documents\DocumentBlobStore;
 use App\Domain\Preparation\Documents\DocumentIntake;
 use App\Domain\Preparation\Documents\ReviewNormalizer;
 use App\Domain\Preparation\Preflight\PreflightLimits;
+use App\Domain\Preparation\Schema\FieldSchemaValidator;
 use App\Domain\Preparation\TcPdf\TcPdfAssembler;
 use App\Domain\Preparation\TcPdf\TcPdfPreflight;
 use App\Domain\Preparation\TcPdf\TcPdfTextLocator;
+use App\Domain\Preparation\Templates\TemplateService;
 use Illuminate\Contracts\Config\Repository;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
@@ -77,6 +79,17 @@ class PreparationServiceProvider extends ServiceProvider
                 $app->make(DocumentBlobStore::class),
                 $app->make(AuditRecorder::class),
                 (string) $config->get('esign.documents.disk'),
+            );
+        });
+
+        $this->app->bind(TemplateService::class, function (Application $app): TemplateService {
+            /** @var Repository $config */
+            $config = $app->make('config');
+
+            return new TemplateService(
+                $app->make(FieldSchemaValidator::class),
+                $app->make(AuditRecorder::class),
+                (string) $config->get('esign.templates.default_consent_policy_version'),
             );
         });
     }

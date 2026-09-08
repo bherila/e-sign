@@ -199,6 +199,12 @@ RFC 1918, link-local, or otherwise reserved. It then pins the connection to the 
 validated (`CURLOPT_RESOLVE`), so a second DNS answer cannot move the target, and never
 follows a redirect, because only the first hop was checked.
 
+The rules themselves now live in `App\Domain\Delivery\Outbound\DestinationPolicy` (issue
+#34), because webhook delivery needs exactly the same ones against a URL a tenant supplies;
+`HttpTimestampAuthority` is the RFC 3161 transport and the TSA-specific wording of the
+refusals. Everything described in this section is unchanged by that move, and
+`HttpTimestampAuthorityTest` still pins it through the transport.
+
 PHP's own `FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE` is not sufficient on its
 own, which was worth measuring rather than assuming. It covers RFC 1918, loopback,
 link-local, IPv6 unique-local, and IPv4-mapped IPv6, and lets through:
@@ -224,7 +230,8 @@ prefixes so the list cannot over-reach.
 
 One residual, documented rather than fixed: an AAAA lookup that *fails* (SERVFAIL, timeout, a
 resolver refusing the query type) is indistinguishable from "no AAAA record" through
-`dns_get_record()`, and is treated as the latter — refusing on it would make sealing fail on
+`dns_get_record()` (now behind `App\Domain\Delivery\Outbound\SystemHostResolver`), and is
+treated as the latter — refusing on it would make sealing fail on
 any network whose resolver filters AAAA. The connection is pinned with `CURLOPT_RESOLVE` to
 the addresses that were checked, so an unvalidated record cannot be reached even if one
 existed.

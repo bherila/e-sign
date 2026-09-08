@@ -6,10 +6,10 @@ namespace App\Domain\Identity\Console;
 
 use App\Domain\Identity\Audit\AuditActor;
 use App\Domain\Identity\Services\BootstrapOutcome;
+use App\Domain\Identity\Services\BootstrapRefused;
 use App\Domain\Identity\Services\OwnerBootstrapper;
 use App\Models\User;
 use Illuminate\Console\Command;
-use RuntimeException;
 
 /**
  * Provision the first workspace owner.
@@ -98,6 +98,17 @@ class BootstrapOwnerCommand extends Command
                     );
                 }
 
+                $provider = $this->configuredProvider();
+
+                if ($issuer !== $provider) {
+                    return $this->refuse(
+                        "--issuer must be '{$provider}', the configured OAUTH_PROVIDER; '{$issuer}' was given.",
+                        'Sign-in resolves a binding on the provider key, so a binding stored under any other issuer can '.
+                        'never be matched: the owner would authenticate and find no membership, and re-running with the '.
+                        'correct issuer would leave the first placeholder user orphaned. Pass the provider key, not its URL.',
+                    );
+                }
+
                 $outcome = $bootstrapper->bootstrapWithBinding($issuer, $subject, $slug, $name, $actor);
             } else {
                 $user = $this->resolveLocalUser((string) $localUser);
@@ -108,9 +119,16 @@ class BootstrapOwnerCommand extends Command
 
                 $outcome = $bootstrapper->bootstrapLocalUser($user, $slug, $name, $actor);
             }
-        } catch (RuntimeException $exception) {
-            // Domain refusals carry their remedy after a newline so each part is printed
-            // on its own and neither is wrapped into nonsense.
+        } catch (BootstrapRefused $exception) {
+            // Only this domain's own refusals. Catching RuntimeException here
+            // also caught QueryException, which extends PDOException extends
+            // RuntimeException, so a dropped connection or a column-length
+            // violation was printed as an operator refusal with the SQL and its
+            // bindings in place of the problem. A database fault now propagates
+            // with its stack trace, where it belongs.
+            //
+            // Refusals carry their remedy after a newline so each part is
+            // printed on its own and neither is wrapped into nonsense.
             [$problem, $remedy] = array_pad(explode("\n", $exception->getMessage(), 2), 2, null);
 
             return $this->refuse((string) $problem, $remedy);
@@ -161,21 +179,59 @@ class BootstrapOwnerCommand extends Command
     }
 
     /**
+     * Settings SSO mode needs that this deployment has not set.
+     *
+     * OAUTH_PROVIDER is read from `esign.oauth_provider`, not from
+     * `bherila-auth.oauth_client.provider`: the package still defaults that
+     * key to `bherila`, so it is never empty and this guard could never fire
+     * on it. An operator who set the client credentials and forgot the
+     * provider key therefore passed the check and provisioned an owner bound
+     * to somebody else's provider — and the runbook advertises this refusal
+     * as the check that the registration step actually happened.
+     * OAUTH_PROVIDER_URL is read from the same `esign.*` mirror for a
+     * different reason: `bherila-auth.oauth_client.base_url` carries no
+     * package default, but calling env() directly at this call site would
+     * still read as null under `config:cache`.
+     *
      * @return list<string>
      */
     private function missingOAuthSettings(): array
     {
         $missing = [];
 
-        foreach (['base_url' => 'OAUTH_PROVIDER_URL', 'client_id' => 'OAUTH_CLIENT_ID'] as $key => $envName) {
-            $value = config("bherila-auth.oauth_client.{$key}");
+        // OAUTH_PROVIDER is read from `esign.*` rather than the package key
+        // because the package key defaults to `bherila` and so can never
+        // read as unset. OAUTH_PROVIDER_URL is read from the same mirror to
+        // stay correct under `config:cache`, where calling env() directly at
+        // this call site would return null.
+        $settings = [
+            'OAUTH_PROVIDER' => config('esign.oauth_provider'),
+            'OAUTH_PROVIDER_URL' => config('esign.oauth_provider_url'),
+            'OAUTH_CLIENT_ID' => config('bherila-auth.oauth_client.client_id'),
+        ];
 
+        foreach ($settings as $envName => $value) {
             if (! is_string($value) || trim($value) === '') {
                 $missing[] = $envName;
             }
         }
 
         return $missing;
+    }
+
+    /**
+     * The provider key a sign-in will resolve bindings on.
+     *
+     * Deliberately the package's resolved value, not `esign.oauth_provider`:
+     * this has to be the string the callback will actually match a binding
+     * against. missingOAuthSettings() has already established that the operator
+     * chose one, so the two agree by the time this is compared.
+     */
+    private function configuredProvider(): string
+    {
+        $provider = config('bherila-auth.oauth_client.provider');
+
+        return is_string($provider) ? trim($provider) : '';
     }
 
     private function report(BootstrapOutcome $outcome): void
