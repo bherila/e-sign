@@ -30,6 +30,7 @@ use App\Domain\Evidence\Retention\Console\WriteBackupManifestCommand;
 use App\Domain\Evidence\Sealing\ConfiguredSealIdentity;
 use App\Domain\Evidence\Sealing\Console\SealStatusCommand;
 use App\Domain\Evidence\Sealing\HttpTimestampAuthority;
+use App\Domain\Evidence\Sealing\SealCertificateDirectory;
 use App\Domain\Evidence\Sealing\SealMaterial;
 use App\Domain\Evidence\Sealing\TcLibPdfArtifactValidator;
 use App\Domain\Evidence\Sealing\TcLibPdfSealer;
@@ -102,6 +103,23 @@ final class EvidenceServiceProvider extends ServiceProvider
                 },
                 timestampAuthority: $app->make(TimestampAuthority::class),
             );
+        });
+
+        /*
+         * Every seal key version this deployment can verify with (issue #29).
+         *
+         * bind(), not singleton(): the directory memoizes each certificate it loads, which is
+         * what makes a verification run over ten thousand artifacts read each certificate
+         * once, but the memo must not outlive the configuration it was read under. A fresh
+         * instance per resolution keeps "an operator fixed ESIGN_SEAL_RETIRED_KEYS" from
+         * needing a process restart to be believed, and keeps a test that reconfigures the
+         * seal from being answered out of a cache.
+         */
+        $this->app->bind(SealCertificateDirectory::class, function (Application $app): SealCertificateDirectory {
+            /** @var array<string, mixed> $seal */
+            $seal = $app->make('config')->get('esign.seal', []);
+
+            return SealCertificateDirectory::fromConfig($seal);
         });
 
         $this->app->bind(ArtifactStore::class, DiskArtifactStore::class);
