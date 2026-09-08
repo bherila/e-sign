@@ -1,6 +1,10 @@
 <?php
 
 use App\Domain\Identity\Console\BootstrapOwnerCommand;
+use App\Domain\Identity\Credentials\Console\IssueServiceCredentialCommand;
+use App\Domain\Identity\Credentials\Console\ListServiceCredentialsCommand;
+use App\Domain\Identity\Credentials\Console\RevokeServiceCredentialCommand;
+use App\Domain\Identity\Credentials\Console\RotateServiceCredentialCommand;
 use App\Http\Middleware\AuthenticateServiceCredential;
 use App\Http\Middleware\RequireScope;
 use Illuminate\Foundation\Application;
@@ -19,6 +23,10 @@ return Application::configure(basePath: dirname(__DIR__))
     // app/Console/Commands auto-discovery does not scan, so they are listed here.
     ->withCommands([
         BootstrapOwnerCommand::class,
+        IssueServiceCredentialCommand::class,
+        RotateServiceCredentialCommand::class,
+        RevokeServiceCredentialCommand::class,
+        ListServiceCredentialsCommand::class,
     ])
     ->withMiddleware(function (Middleware $middleware): void {
         // Service credentials are their own kind of principal (docs/HANDOFF.md section 10),
