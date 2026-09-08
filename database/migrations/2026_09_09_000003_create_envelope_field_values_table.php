@@ -36,7 +36,10 @@ return new class extends Migration
             // has been removed from an envelope, which cannot happen today.
             $table->foreignId('recipient_id')->nullable()->constrained('envelope_recipients')->restrictOnDelete();
 
-            $table->string('schema_field_id', 191);
+            // Compared byte-for-byte: the field schema's identifier grammar allows `notes`
+            // and `Notes` to be two different fields, possibly owned by two different
+            // recipients. See binaryCollation() below.
+            $table->string('schema_field_id', 191)->collation($this->binaryCollation());
 
             // The value in its native JSON shape: a string for text and signatures, a
             // boolean for a checkbox, an ISO date string for a date.
@@ -54,6 +57,29 @@ return new class extends Migration
             $table->unique(['envelope_id', 'schema_field_id']);
             $table->index(['envelope_id', 'recipient_id']);
         });
+    }
+
+    /**
+     * The collation that makes a string column compare byte-for-byte, or null where the
+     * engine already does.
+     *
+     * The connection default is `utf8mb4_unicode_ci`, under which MySQL and MariaDB treat
+     * `notes` and `Notes` as the same value. SQLite's default is binary, so it treats them
+     * as two. Schema identifiers and session references are exact tokens, and a unique key
+     * over them that means different things on different engines is precisely the collation
+     * assumption docs/adr/0002-supported-databases.md rules out — here it would let one
+     * recipient's value overwrite another's, or two sessions collapse into one acceptance.
+     *
+     * Driver-conditional rather than a literal, because `utf8mb4_bin` is not a collation
+     * SQLite knows and Laravel's SQLite grammar emits the `collate` clause verbatim. The CI
+     * `database` job runs this migration on both engines, which is what
+     * docs/adr/0002-supported-databases.md asks of an engine-specific choice.
+     */
+    private function binaryCollation(): ?string
+    {
+        return in_array(Schema::getConnection()->getDriverName(), ['mysql', 'mariadb'], true)
+            ? 'utf8mb4_bin'
+            : null;
     }
 
     public function down(): void
