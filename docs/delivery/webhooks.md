@@ -3,10 +3,12 @@
 How BWH eSign publishes events, what a receiver has to do to verify one, and what an
 operator can do when delivery goes wrong.
 
-Scope note: this ships the outbox, not the events. Envelope transitions do not exist yet
-(issue #34 is Stage 4; envelopes arrive with the signing state machine), so nothing calls
-`OutboxWriter::record()` in production code today. The contract below is what those callers
-will get, and it is fully exercised by tests.
+Scope note: this document is the transport — the envelope, the signature, retries, rotation,
+replay, and the destination policy. *Which* events exist, what their `data` object contains,
+and which message each one also produces is `docs/delivery/envelope-events.md`. The one caller
+of `OutboxWriter::record()` in production code is
+`App\Domain\Delivery\Events\DeliveryEnvelopeEventSink`, which the signing state machine
+invokes inside the transaction that made the transition.
 
 ## The contract at a glance
 
