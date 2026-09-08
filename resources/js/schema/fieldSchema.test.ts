@@ -125,6 +125,44 @@ describe("serializeFieldSchema", () => {
     expect(twice).toBe(once);
   });
 
+  it("round trips a resolution receipt without drift", () => {
+    // The editor reads back documents the service has already resolved: a published template
+    // version, or an envelope. A receipt it could not re-emit byte for byte would show up as a
+    // spurious unsaved change the moment somebody opened one.
+    const json = serializeFieldSchema(
+      parseFieldSchema(
+        brokenFixture((raw) => {
+          raw.fields[5].anchor.resolved = {
+            document_sha256: "b".repeat(64),
+            page: 2,
+            occurrence_index: 1,
+            anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
+            rect: { x: 330, y: 646.9004, width: 170, height: 36 },
+          };
+        }),
+      ),
+    );
+
+    expect(json).toContain('"occurrence_index":1');
+    expect(json).toContain('"rect":{"x":330,"y":646.9,"width":170,"height":36}');
+    expect(serializeFieldSchema(parseFieldSchema(json))).toBe(json);
+  });
+
+  it("states anchor.required even when the document left it out", () => {
+    const json = serializeFieldSchema(
+      parseFieldSchema(
+        brokenFixture((raw) => {
+          delete raw.fields[5].anchor.required;
+        }),
+      ),
+    );
+
+    // Same rule as the field's own `required`: a canonical document states it rather than
+    // leaning on a default, so nothing has to know the default to read the document.
+    expect(json).toContain('"placement":"replace","origin":"bottom_left"');
+    expect(json).toContain('"required":true');
+  });
+
   it("preserves stable field ids and template aliases", () => {
     const reimported = parseFieldSchema(serializeFieldSchema(parseFieldSchema(fixture())));
     const aliased = reimported.fields.find((field) => field.alias === "counterparty_signature_block");
@@ -431,6 +469,80 @@ describe("validateFieldSchema", () => {
       (raw) => delete raw.fields[5].anchor.offset.dx,
       "missing_property",
       "/fields/5/anchor/offset",
+    ],
+    [
+      "an anchor that does not say which of the two positions governs",
+      (raw) => delete raw.fields[5].anchor.placement,
+      "missing_property",
+      "/fields/5/anchor",
+    ],
+    [
+      "an undeclared anchor placement",
+      (raw) => (raw.fields[5].anchor.placement = "nudge"),
+      "invalid_format",
+      "/fields/5/anchor/placement",
+    ],
+    [
+      "an optional anchor on a required field",
+      (raw) => (raw.fields[5].anchor.required = false),
+      "anchor_optional_on_required_field",
+      "/fields/5/anchor/required",
+    ],
+    [
+      "a tolerance on an anchor that decides the position outright",
+      (raw) => (raw.fields[5].anchor.tolerance = 2),
+      "invalid_format",
+      "/fields/5/anchor/tolerance",
+    ],
+    [
+      "a negative cross-check tolerance",
+      (raw) => {
+        raw.fields[5].anchor.placement = "cross_check";
+        raw.fields[5].anchor.tolerance = -1;
+      },
+      "invalid_format",
+      "/fields/5/anchor/tolerance",
+    ],
+    [
+      "a resolution receipt with a digest that is not one",
+      (raw) => {
+        raw.fields[5].anchor.resolved = {
+          document_sha256: "not-a-digest",
+          page: 2,
+          occurrence_index: 1,
+          anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
+          rect: { x: 330, y: 646.9, width: 170, height: 36 },
+        };
+      },
+      "invalid_format",
+      "/fields/5/anchor/resolved/document_sha256",
+    ],
+    [
+      "a resolution receipt with a zero occurrence index",
+      (raw) => {
+        raw.fields[5].anchor.resolved = {
+          document_sha256: "a".repeat(64),
+          page: 2,
+          occurrence_index: 0,
+          anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
+          rect: { x: 330, y: 646.9, width: 170, height: 36 },
+        };
+      },
+      "invalid_format",
+      "/fields/5/anchor/resolved/occurrence_index",
+    ],
+    [
+      "a resolution receipt missing the digest of the bytes it measured",
+      (raw) => {
+        raw.fields[5].anchor.resolved = {
+          page: 2,
+          occurrence_index: 1,
+          anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
+          rect: { x: 330, y: 646.9, width: 170, height: 36 },
+        };
+      },
+      "missing_property",
+      "/fields/5/anchor/resolved",
     ],
     [
       "a recipient email that is not an address",

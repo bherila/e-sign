@@ -7,6 +7,7 @@ namespace Tests\Feature\Integration\Firma;
 use App\Domain\Identity\Credentials\IssuedServiceCredential;
 use App\Domain\Preparation\Documents\DocumentBlobStore;
 use App\Domain\Preparation\Documents\Models\Document;
+use App\Domain\Preparation\Schema\AnchorPlacementMode;
 use App\Domain\Signing\Envelopes\EnvelopeState;
 use App\Domain\Signing\Models\Envelope;
 use App\Domain\Signing\Sessions\Models\RecipientInvitation;
@@ -245,6 +246,31 @@ class FirmaCreateAndSendTest extends TestCase
         $this->assertEqualsWithDelta(582.4, $field->rect->y, 0.01);
         $this->assertEqualsWithDelta(170.0, $field->rect->width, 0.01);
         $this->assertEqualsWithDelta(36.0, $field->rect->height, 0.01);
+
+        // Issue #23: the request is kept beside the rectangle it produced, with a receipt
+        // naming the revision the text was located in. That is what tells the envelope's own
+        // send-time resolution the work is already done for these exact bytes.
+        $anchor = $field->anchor;
+        $this->assertNotNull($anchor);
+        $this->assertSame('Signature:', $anchor->text);
+        $this->assertSame(AnchorPlacementMode::Replace, $anchor->placement);
+        $this->assertTrue($anchor->required);
+
+        $receipt = $anchor->resolved;
+        $this->assertNotNull($receipt);
+        $this->assertSame($envelope->document_sha256, $receipt->documentSha256);
+        $this->assertSame(1, $receipt->page);
+        $this->assertSame(1, $receipt->occurrenceIndex);
+        $this->assertSame($field->rect->toArray(), $receipt->rect->toArray());
+        // The receipt also records where the *text* was, which is not the field's rectangle.
+        $this->assertSame(['x' => 72, 'y' => 582.4, 'width' => 72, 'height' => 12], $receipt->anchorRect->toArray());
+
+        // And the send that create-and-send performed did not move any of it.
+        $this->assertSame(
+            hash('sha256', $envelope->fieldSchema()->canonicalJson()),
+            $envelope->field_schema_sha256,
+        );
+        $this->assertNull($envelope->omitted_anchor_fields);
     }
 
     /**
