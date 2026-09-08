@@ -30,8 +30,11 @@ return new class extends Migration
             $table->string('event_name', 128);
             // The `data` object of the envelope, kept queryable.
             $table->json('payload');
-            // The whole envelope, byte-for-byte as signed and sent.
-            $table->text('canonical_body');
+            // The whole envelope, byte-for-byte as signed and sent. longText
+            // rather than text because MySQL's TEXT caps at 64 KB and a payload
+            // that quietly exceeds it would be truncated into an unverifiable
+            // body rather than rejected.
+            $table->longText('canonical_body');
             // When the domain transition happened, which is not when the row was
             // written and not when a delivery was attempted. Two events delivered
             // out of order still carry the order in which they occurred.
