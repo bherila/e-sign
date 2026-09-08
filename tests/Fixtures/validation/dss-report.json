@@ -1,0 +1,356 @@
+{
+  "runs": [
+  { "trustMode": "fixture-only", "report":
+{
+  "tool": "eu.europa.esig.dss (European Commission DSS)",
+  "dssVersion": "6.5",
+  "java": "21.0.12.1",
+  "trustAnchors": ["CN=BWH eSign TEST SEAL ROOT - NOT FOR USE,O=BWH eSign TEST FIXTURES"],
+  "policy": "tools/dss/validation-policy.xml",
+  "results": [
+    {
+      "file": "sealed-b-b.pdf",
+      "opened": true,
+      "signatureCount": 1,
+      "validSignatureCount": 1,
+      "signatures": [
+        {
+          "id": "S-4C16BD1C0C602A066461E0036DD12861E95CEF1832AD5DD1377E8FB252254390",
+          "level": "PAdES_BASELINE_B",
+          "indication": "TOTAL_PASSED",
+          "subIndication": null,
+          "valid": true,
+          "signedBy": "BWH eSign TEST SEAL - NOT FOR USE",
+          "digestAlgorithm": "SHA256",
+          "encryptionAlgorithm": "RSA",
+          "signatureIntact": true,
+          "signatureValid": true,
+          "pdfRevision": {"filter": "Adobe.PPKLite", "subFilter": "ETSI.CAdES.detached", "byteRange": [0, 1821, 13565, 4566], "byteRangeValid": true, "signatureDictionaryConsistent": true, "pdfModificationsDetected": false, "pdfObjectModificationsDetected": false, "undefinedObjectChanges": 0, "signatureFieldNames": [""]},
+          "timestamps": [],
+          "errors": [],
+          "warnings": ["The authority info access is not present!", "The revocation info access is not present!"],
+          "info": []
+        }
+      ]
+    },
+    {
+      "file": "sealed-b-t.pdf",
+      "opened": true,
+      "signatureCount": 1,
+      "validSignatureCount": 1,
+      "signatures": [
+        {
+          "id": "S-F72B40900266D893E4B927AF2F16685E13E759682242D8ED1546F2D3424D6DD3",
+          "level": "PAdES_BASELINE_T",
+          "indication": "TOTAL_PASSED",
+          "subIndication": null,
+          "valid": true,
+          "signedBy": "BWH eSign TEST SEAL - NOT FOR USE",
+          "digestAlgorithm": "SHA256",
+          "encryptionAlgorithm": "RSA",
+          "signatureIntact": true,
+          "signatureValid": true,
+          "pdfRevision": {"filter": "Adobe.PPKLite", "subFilter": "ETSI.CAdES.detached", "byteRange": [0, 1821, 33565, 4566], "byteRangeValid": true, "signatureDictionaryConsistent": true, "pdfModificationsDetected": false, "pdfObjectModificationsDetected": false, "undefinedObjectChanges": 0, "signatureFieldNames": [""]},
+          "timestamps": [{"type": "SIGNATURE_TIMESTAMP", "productionTime": "2026-09-08T14:40:36Z", "messageImprintIntact": true, "signatureIntact": true, "signatureValid": true, "indication": "INDETERMINATE", "subIndication": "NO_CERTIFICATE_CHAIN_FOUND", "producedBy": "DigiCert SHA256 RSA4096 Timestamp Responder 2026 1"}],
+          "errors": [],
+          "warnings": ["The authority info access is not present!", "The revocation info access is not present!"],
+          "info": []
+        }
+      ]
+    },
+    {
+      "file": "sealed-b-t-untrusted-tsa.pdf",
+      "opened": true,
+      "signatureCount": 1,
+      "validSignatureCount": 1,
+      "signatures": [
+        {
+          "id": "S-5EBF5B996B1D76F6C290FDC1B3EAD744BC882D0DE515B15C6EF27E7C8D75EECC",
+          "level": "PAdES_BASELINE_T",
+          "indication": "TOTAL_PASSED",
+          "subIndication": null,
+          "valid": true,
+          "signedBy": "BWH eSign TEST SEAL - NOT FOR USE",
+          "digestAlgorithm": "SHA256",
+          "encryptionAlgorithm": "RSA",
+          "signatureIntact": true,
+          "signatureValid": true,
+          "pdfRevision": {"filter": "Adobe.PPKLite", "subFilter": "ETSI.CAdES.detached", "byteRange": [0, 1821, 33565, 4566], "byteRangeValid": true, "signatureDictionaryConsistent": true, "pdfModificationsDetected": false, "pdfObjectModificationsDetected": false, "undefinedObjectChanges": 0, "signatureFieldNames": [""]},
+          "timestamps": [{"type": "SIGNATURE_TIMESTAMP", "productionTime": "2026-09-08T14:40:36Z", "messageImprintIntact": true, "signatureIntact": true, "signatureValid": true, "indication": "INDETERMINATE", "subIndication": "NO_CERTIFICATE_CHAIN_FOUND", "producedBy": "www.freetsa.org"}],
+          "errors": [],
+          "warnings": ["The authority info access is not present!", "The revocation info access is not present!"],
+          "info": []
+        }
+      ]
+    },
+    {
+      "file": "finalized-executed.pdf",
+      "opened": true,
+      "signatureCount": 1,
+      "validSignatureCount": 1,
+      "signatures": [
+        {
+          "id": "S-0C21F2B9C490BA2D74E376C0DA2860428B7F8A8279E0ED9D517F9099FF8263D4",
+          "level": "PAdES_BASELINE_B",
+          "indication": "TOTAL_PASSED",
+          "subIndication": null,
+          "valid": true,
+          "signedBy": "BWH eSign TEST SEAL - NOT FOR USE",
+          "digestAlgorithm": "SHA256",
+          "encryptionAlgorithm": "RSA",
+          "signatureIntact": true,
+          "signatureValid": true,
+          "pdfRevision": {"filter": "Adobe.PPKLite", "subFilter": "ETSI.CAdES.detached", "byteRange": [0, 10655, 22399, 4931], "byteRangeValid": true, "signatureDictionaryConsistent": true, "pdfModificationsDetected": false, "pdfObjectModificationsDetected": false, "undefinedObjectChanges": 0, "signatureFieldNames": [""]},
+          "timestamps": [],
+          "errors": [],
+          "warnings": ["The authority info access is not present!", "The revocation info access is not present!"],
+          "info": []
+        }
+      ]
+    },
+    {
+      "file": "rotation-retired-key.pdf",
+      "opened": true,
+      "signatureCount": 1,
+      "validSignatureCount": 1,
+      "signatures": [
+        {
+          "id": "S-87B718AAE0A152867415A0F65882388B3FFF235626C80A166A7B3CBBC3A181D5",
+          "level": "PAdES_BASELINE_B",
+          "indication": "TOTAL_PASSED",
+          "subIndication": null,
+          "valid": true,
+          "signedBy": "BWH eSign TEST SEAL - NOT FOR USE",
+          "digestAlgorithm": "SHA256",
+          "encryptionAlgorithm": "RSA",
+          "signatureIntact": true,
+          "signatureValid": true,
+          "pdfRevision": {"filter": "Adobe.PPKLite", "subFilter": "ETSI.CAdES.detached", "byteRange": [0, 1821, 13565, 4566], "byteRangeValid": true, "signatureDictionaryConsistent": true, "pdfModificationsDetected": false, "pdfObjectModificationsDetected": false, "undefinedObjectChanges": 0, "signatureFieldNames": [""]},
+          "timestamps": [],
+          "errors": [],
+          "warnings": ["The authority info access is not present!", "The revocation info access is not present!"],
+          "info": []
+        }
+      ]
+    },
+    {
+      "file": "rotation-active-key.pdf",
+      "opened": true,
+      "signatureCount": 1,
+      "validSignatureCount": 0,
+      "signatures": [
+        {
+          "id": "S-F9BE52A76C64535147BF1877DE6570DEB16917814C0FA9647D09312E66C63B0D",
+          "level": "PAdES_BASELINE_B",
+          "indication": "INDETERMINATE",
+          "subIndication": "NO_CERTIFICATE_CHAIN_FOUND",
+          "valid": false,
+          "signedBy": "BWH eSign TEST SEAL B - NOT FOR USE",
+          "digestAlgorithm": "SHA256",
+          "encryptionAlgorithm": "RSA",
+          "signatureIntact": true,
+          "signatureValid": true,
+          "pdfRevision": {"filter": "Adobe.PPKLite", "subFilter": "ETSI.CAdES.detached", "byteRange": [0, 1821, 13565, 4570], "byteRangeValid": true, "signatureDictionaryConsistent": true, "pdfModificationsDetected": false, "pdfObjectModificationsDetected": false, "undefinedObjectChanges": 0, "signatureFieldNames": [""]},
+          "timestamps": [],
+          "errors": ["The certificate chain for signature is not trusted, it does not contain a trust anchor."],
+          "warnings": [],
+          "info": []
+        }
+      ]
+    },
+    {
+      "file": "negative-modified-content.pdf",
+      "opened": true,
+      "signatureCount": 1,
+      "validSignatureCount": 0,
+      "signatures": [
+        {
+          "id": "S-4C16BD1C0C602A066461E0036DD12861E95CEF1832AD5DD1377E8FB252254390",
+          "level": "PAdES_BASELINE_B",
+          "indication": "TOTAL_FAILED",
+          "subIndication": "HASH_FAILURE",
+          "valid": false,
+          "signedBy": "BWH eSign TEST SEAL - NOT FOR USE",
+          "digestAlgorithm": "SHA256",
+          "encryptionAlgorithm": "RSA",
+          "signatureIntact": false,
+          "signatureValid": false,
+          "pdfRevision": {"filter": "Adobe.PPKLite", "subFilter": "ETSI.CAdES.detached", "byteRange": [0, 1821, 13565, 4566], "byteRangeValid": true, "signatureDictionaryConsistent": true, "pdfModificationsDetected": false, "pdfObjectModificationsDetected": false, "undefinedObjectChanges": 0, "signatureFieldNames": [""]},
+          "timestamps": [],
+          "errors": ["The reference data object is not intact!"],
+          "warnings": ["The authority info access is not present!", "The revocation info access is not present!"],
+          "info": []
+        }
+      ]
+    },
+    {
+      "file": "negative-forged-cms.pdf",
+      "opened": true,
+      "signatureCount": 1,
+      "validSignatureCount": 0,
+      "signatures": [
+        {
+          "id": "S-B7679BFFDA77E593E064DBF14B6CD691FC86C657A5AE34BADD44C02CBAFAA1EA",
+          "level": "PAdES_BASELINE_B",
+          "indication": "TOTAL_FAILED",
+          "subIndication": "HASH_FAILURE",
+          "valid": false,
+          "signedBy": "BWH eSign TEST SEAL - NOT FOR USE",
+          "digestAlgorithm": "SHA256",
+          "encryptionAlgorithm": "RSA",
+          "signatureIntact": false,
+          "signatureValid": false,
+          "pdfRevision": {"filter": "Adobe.PPKLite", "subFilter": "ETSI.CAdES.detached", "byteRange": [0, 1821, 13565, 4566], "byteRangeValid": true, "signatureDictionaryConsistent": true, "pdfModificationsDetected": false, "pdfObjectModificationsDetected": false, "undefinedObjectChanges": 0, "signatureFieldNames": [""]},
+          "timestamps": [],
+          "errors": ["The reference data object is not intact!"],
+          "warnings": ["The authority info access is not present!", "The revocation info access is not present!"],
+          "info": []
+        }
+      ]
+    },
+    {
+      "file": "negative-byte-range-overclaim.pdf",
+      "opened": true,
+      "signatureCount": 1,
+      "validSignatureCount": 0,
+      "signatures": [
+        {
+          "id": "S-4C16BD1C0C602A066461E0036DD12861E95CEF1832AD5DD1377E8FB252254390",
+          "level": "PAdES_BASELINE_B",
+          "indication": "TOTAL_FAILED",
+          "subIndication": "FORMAT_FAILURE",
+          "valid": false,
+          "signedBy": "BWH eSign TEST SEAL - NOT FOR USE",
+          "digestAlgorithm": "SHA256",
+          "encryptionAlgorithm": "RSA",
+          "signatureIntact": false,
+          "signatureValid": false,
+          "pdfRevision": {"filter": "Adobe.PPKLite", "subFilter": "ETSI.CAdES.detached", "byteRange": [0, 1821, 13565, 9566], "byteRangeValid": false, "signatureDictionaryConsistent": true, "pdfModificationsDetected": false, "pdfObjectModificationsDetected": false, "undefinedObjectChanges": 0, "signatureFieldNames": [""]},
+          "timestamps": [],
+          "errors": ["The /ByteRange dictionary is not consistent!", "The reference data object is not intact!"],
+          "warnings": ["The authority info access is not present!", "The revocation info access is not present!"],
+          "info": []
+        }
+      ]
+    },
+    {
+      "file": "negative-incremental-update.pdf",
+      "opened": true,
+      "signatureCount": 1,
+      "validSignatureCount": 0,
+      "signatures": [
+        {
+          "id": "S-4C16BD1C0C602A066461E0036DD12861E95CEF1832AD5DD1377E8FB252254390",
+          "level": "PAdES_BASELINE_B",
+          "indication": "TOTAL_FAILED",
+          "subIndication": "FORMAT_FAILURE",
+          "valid": false,
+          "signedBy": "BWH eSign TEST SEAL - NOT FOR USE",
+          "digestAlgorithm": "SHA256",
+          "encryptionAlgorithm": "RSA",
+          "signatureIntact": true,
+          "signatureValid": true,
+          "pdfRevision": {"filter": "Adobe.PPKLite", "subFilter": "ETSI.CAdES.detached", "byteRange": [0, 1821, 13565, 4566], "byteRangeValid": true, "signatureDictionaryConsistent": true, "pdfModificationsDetected": true, "pdfObjectModificationsDetected": true, "undefinedObjectChanges": 2, "signatureFieldNames": [""]},
+          "timestamps": [],
+          "errors": ["The document contains undefined object modifications after the signature revision!"],
+          "warnings": ["Visual difference is detected on page(s) [1]", "Document contains changes restricted by /DocMDP dictionary!", "The authority info access is not present!", "The revocation info access is not present!"],
+          "info": []
+        }
+      ]
+    },
+    {
+      "file": "negative-untrusted-signer.pdf",
+      "opened": true,
+      "signatureCount": 1,
+      "validSignatureCount": 0,
+      "signatures": [
+        {
+          "id": "S-53F330422E15F563E3569EE276D597F20C6AC64285FCA9205E5A79BD37693CEF",
+          "level": "PAdES_BASELINE_B",
+          "indication": "INDETERMINATE",
+          "subIndication": "NO_CERTIFICATE_CHAIN_FOUND",
+          "valid": false,
+          "signedBy": "BWH eSign TEST SEAL UNTRUSTED - NOT FOR USE",
+          "digestAlgorithm": "SHA256",
+          "encryptionAlgorithm": "RSA",
+          "signatureIntact": true,
+          "signatureValid": true,
+          "pdfRevision": {"filter": "Adobe.PPKLite", "subFilter": "ETSI.CAdES.detached", "byteRange": [0, 1821, 13565, 4586], "byteRangeValid": true, "signatureDictionaryConsistent": true, "pdfModificationsDetected": false, "pdfObjectModificationsDetected": false, "undefinedObjectChanges": 0, "signatureFieldNames": [""]},
+          "timestamps": [],
+          "errors": ["The certificate chain for signature is not trusted, it does not contain a trust anchor."],
+          "warnings": [],
+          "info": []
+        }
+      ]
+    },
+    {
+      "file": "negative-truncated.pdf",
+      "opened": false,
+      "error": "eu.europa.esig.dss.model.DSSException: The document with name [negative-truncated.pdf] is either not accessible or not PDF compatible. Reason : [Missing root object specification in trailer.]"
+    }
+  ]
+}
+  },
+  { "trustMode": "rotation-target-only", "report":
+{
+  "tool": "eu.europa.esig.dss (European Commission DSS)",
+  "dssVersion": "6.5",
+  "java": "21.0.12.1",
+  "trustAnchors": ["CN=BWH eSign TEST SEAL ROOT B - NOT FOR USE,O=BWH eSign TEST FIXTURES"],
+  "policy": "tools/dss/validation-policy.xml",
+  "results": [
+    {
+      "file": "rotation-active-key.pdf",
+      "opened": true,
+      "signatureCount": 1,
+      "validSignatureCount": 1,
+      "signatures": [
+        {
+          "id": "S-F9BE52A76C64535147BF1877DE6570DEB16917814C0FA9647D09312E66C63B0D",
+          "level": "PAdES_BASELINE_B",
+          "indication": "TOTAL_PASSED",
+          "subIndication": null,
+          "valid": true,
+          "signedBy": "BWH eSign TEST SEAL B - NOT FOR USE",
+          "digestAlgorithm": "SHA256",
+          "encryptionAlgorithm": "RSA",
+          "signatureIntact": true,
+          "signatureValid": true,
+          "pdfRevision": {"filter": "Adobe.PPKLite", "subFilter": "ETSI.CAdES.detached", "byteRange": [0, 1821, 13565, 4570], "byteRangeValid": true, "signatureDictionaryConsistent": true, "pdfModificationsDetected": false, "pdfObjectModificationsDetected": false, "undefinedObjectChanges": 0, "signatureFieldNames": [""]},
+          "timestamps": [],
+          "errors": [],
+          "warnings": ["The authority info access is not present!", "The revocation info access is not present!"],
+          "info": []
+        }
+      ]
+    },
+    {
+      "file": "rotation-retired-key.pdf",
+      "opened": true,
+      "signatureCount": 1,
+      "validSignatureCount": 0,
+      "signatures": [
+        {
+          "id": "S-87B718AAE0A152867415A0F65882388B3FFF235626C80A166A7B3CBBC3A181D5",
+          "level": "PAdES_BASELINE_B",
+          "indication": "INDETERMINATE",
+          "subIndication": "NO_CERTIFICATE_CHAIN_FOUND",
+          "valid": false,
+          "signedBy": "BWH eSign TEST SEAL - NOT FOR USE",
+          "digestAlgorithm": "SHA256",
+          "encryptionAlgorithm": "RSA",
+          "signatureIntact": true,
+          "signatureValid": true,
+          "pdfRevision": {"filter": "Adobe.PPKLite", "subFilter": "ETSI.CAdES.detached", "byteRange": [0, 1821, 13565, 4566], "byteRangeValid": true, "signatureDictionaryConsistent": true, "pdfModificationsDetected": false, "pdfObjectModificationsDetected": false, "undefinedObjectChanges": 0, "signatureFieldNames": [""]},
+          "timestamps": [],
+          "errors": ["The certificate chain for signature is not trusted, it does not contain a trust anchor."],
+          "warnings": [],
+          "info": []
+        }
+      ]
+    }
+  ]
+}
+  }
+  ]
+}

@@ -40,6 +40,10 @@ package-lock.json
 /public/storage
 # scripts/build-release.sh output: the cPanel release bundle and its checksum.
 /dist
+# CI-only DSS profile checker: the Maven build output and DSS's own XML reports. The recorded
+# results ARE committed, as tests/Fixtures/validation/dss-output.txt and dss-report.json.
+/tools/dss/target
+/tools/dss/reports
 /storage/*.key
 /storage/pail
 /vendor

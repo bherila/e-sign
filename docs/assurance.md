@@ -233,8 +233,16 @@ identity proof** and nothing in the pipeline treats them as any.
 
 | Tool | What it is run against | What it establishes |
 |---|---|---|
-| **pyHanko 0.37.0** (+ `pyhanko-cli` 0.5.0), in the `validation` CI job via `scripts/validate-seal.sh` | every committed synthetic artifact in `tests/Fixtures/validation/`, against `tests/Fixtures/validation/manifest.tsv` | the CMS verifies over the byte-ranged content, the signer's certificate chains to a configured anchor, and the signature covers the whole file |
+| **pyHanko 0.37.0** (+ `pyhanko-cli` 0.5.0), in the `validation` CI job via `scripts/validate-seal.sh` | every committed synthetic artifact in `tests/Fixtures/validation/`, **resealed first** | the CMS verifies over the byte-ranged content, the signer's certificate chains to a configured anchor, and the signature covers the whole file |
+| **European Commission DSS 6.5**, in the `pades-profile` CI job via `scripts/validate-pades-profile.sh` | the same artifacts, **committed bytes, not resealed**, against `tests/Fixtures/validation/pades-profile-manifest.tsv`; the two seal-key rotation artifacts under **both** anchors | which ETSI EN 319 142-1 baseline profile each signature actually satisfies — reported as a `SignatureLevel` — plus DSS's own AdES conclusion and a separate conclusion per timestamp token |
 | **`ArtifactValidator`** (in-process, tc-lib-pdf) | the sealer's own output, before it is returned | the produced artifact reaches the level that was requested; below it, `SealFailedException` |
+
+The two external validators share no code, run in separate CI jobs so that neither's
+infrastructure can mask the other's regression, and are **not** tuned to agree: one artifact,
+`sealed-b-t-untrusted-tsa.pdf`, is required to be INVALID for pyHanko (its timestamp authority
+is trusted nowhere) and `TOTAL_PASSED` for DSS (an untrusted timestamp does not sink a B-T
+conclusion, it only fails to contribute a trusted proof of existence). Both verdicts are
+correct about different questions and both are pinned.
 
 The positive artifacts are checked alongside deliberate negatives — modified content, an
 over-claimed `/ByteRange`, a truncated file, an appended incremental revision, a spliced
@@ -246,17 +254,25 @@ non-zero for an unreadable file and an environment error alike.
 **not a complete structural PAdES-profile conformance check**. A VALID verdict means the three
 things in the table above. It does *not* establish that the artifact satisfies every clause of
 ETSI EN 319 142-1 V1.2.1 — which attributes are required, forbidden, or must be absent at each
-baseline level.
+baseline level. That is precisely why DSS was added as a second validator rather than as
+another flag on the first.
 
-**European Commission DSS has not been run.** DSS is the tool that would give a profile-level
-verdict, and it is a Java application, which this repository's PHP-only runtime rule keeps out
-of the CI image for now. The artifacts are committed, synthetic, and small, so a DSS pass can
-be added later against exactly these bytes without resealing anything.
+**DSS reports `PAdES_BASELINE_B` for the B-B artifacts and `PAdES_BASELINE_T` for the B-T
+artifacts.** So the profile claim in section 3 now rests on a conformance verdict from a tool
+built to give one, and not only on a cryptographic check plus the library's documented
+implementation. The Java runtime stays out of the application: `tools/` is excluded from the
+production image and the release bundle, and DSS is fetched from Maven Central by a CI job and
+discarded with the runner.
 
-So the honest form of the profile claim is: **the level in section 3 is supported by a
-cryptographic and trust check plus the library's documented profile implementation, not by a
-profile-conformance verdict.** That gap is open, and it is tracked in
-[`docs/security/release-gates.md`](security/release-gates.md).
+**What that verdict still does not mean.** It is a statement about **format conformance**, not
+about eIDAS status: nothing here is a qualified or advanced electronic signature, and the seal
+remains an organizational seal under a self-issued certificate. Both runs are anchored on a
+throwaway fixture root, so neither says anything about trust in the real world; revocation is
+unchecked in both, because a self-issued chain publishes no responder and no distribution
+point; and DSS's stock policy has one constraint (`UndefinedChanges`) set below the level this
+service enforces, which the pinned policy raises and
+[`docs/stage0/pades-profile.md`](stage0/pades-profile.md) records in full alongside every
+warning DSS raised on artifacts it passed.
 
 Two further limits on validation as practised here:
 
@@ -308,6 +324,8 @@ Do not market blanket legal enforceability on the strength of this software.
 - [`docs/security/release-gates.md`](security/release-gates.md) — every release gate mapped to
   the test or CI job that proves it, or an explicit "not yet proven".
 - [`docs/stage0/sealing.md`](stage0/sealing.md) — what the sealing path was measured to do.
+- [`docs/stage0/pades-profile.md`](stage0/pades-profile.md) — what profile DSS says the
+  artifacts actually reach, every warning it raises, and what neither validator proves.
 - [`docs/evidence/finalization.md`](evidence/finalization.md) — how an artifact is produced,
   validated, stored, and published, and what each digest covers.
 - [`docs/operations/seal-key-management.md`](operations/seal-key-management.md) — key custody,
