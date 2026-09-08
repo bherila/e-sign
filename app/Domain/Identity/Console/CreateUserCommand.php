@@ -10,6 +10,7 @@ use App\Domain\Identity\Enums\AuthMode;
 use App\Models\User;
 use Illuminate\Console\Command;
 use Illuminate\Support\Str;
+use Symfony\Component\Console\Formatter\OutputFormatter;
 use Symfony\Component\Console\Input\StreamableInputInterface;
 
 /**
@@ -97,12 +98,14 @@ class CreateUserCommand extends Command
             ['email' => $email, 'password_generated' => $generated],
         );
 
-        $this->info("Created user #{$user->getKey()} ({$name} <{$email}>).");
+        $this->info(OutputFormatter::escape("Created user #{$user->getKey()} ({$name} <{$email}>)."));
 
         if ($generated) {
             $this->newLine();
             $this->line('Generated password (shown once, not recoverable):');
-            $this->line('  '.$password);
+            // Escaped: the console formatter treats <...> as style tags and would silently
+            // strip them from a password drawn from a symbol set that includes < and >.
+            $this->line('  '.OutputFormatter::escape($password));
         }
 
         $this->newLine();
@@ -154,6 +157,14 @@ class CreateUserCommand extends Command
 
         $generated = true;
 
+        return $this->generatePassword();
+    }
+
+    /**
+     * Draw a fresh password. Overridable so a test can pin the value.
+     */
+    protected function generatePassword(): string
+    {
         return Str::password(24);
     }
 
