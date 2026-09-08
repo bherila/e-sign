@@ -125,6 +125,11 @@ final class TcLibPdfArtifactValidator implements ArtifactValidator
 
         // The approval signature this application applies is the last one
         // written, and its range is the one that must cover the whole file.
+        //
+        // Only that one is reported. This pipeline seals once and refuses an
+        // already-signed input, so a multi-signature artifact is outside what
+        // it produces; a file carrying several is a case for the external
+        // validators, which analyse every field.
         $last = $matches[$found - 1];
 
         return [(int) $last[1], (int) $last[2], (int) $last[3], (int) $last[4]];

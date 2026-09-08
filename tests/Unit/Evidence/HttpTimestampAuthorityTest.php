@@ -67,11 +67,30 @@ final class HttpTimestampAuthorityTest extends TestCase
             'the carrier private range' => ['https://192.168.1.1/tsr', '/non-public address/'],
             'link-local metadata' => ['https://169.254.169.254/latest', '/non-public address/'],
             'ipv6 loopback' => ['https://[::1]/tsr', '/non-public address/'],
+            'an ipv6 unique local address' => ['https://[fc00::1]/tsr', '/non-public address/'],
+            // PHP's filter flags let these through; the extra-range check does not.
+            'carrier-grade nat' => ['https://100.64.1.2/tsr', '/non-public address/'],
+            'ietf protocol assignments' => ['https://192.0.0.170/tsr', '/non-public address/'],
+            'benchmarking space' => ['https://198.19.1.1/tsr', '/non-public address/'],
+            'loopback as ipv4-mapped ipv6' => ['https://[::ffff:127.0.0.1]/tsr', '/non-public address/'],
+            'carrier-grade nat as ipv4-mapped ipv6' => [
+                'https://[::ffff:100.64.1.2]/tsr',
+                '/non-public address/',
+            ],
             'a host that does not resolve' => [
                 'https://tsa.invalid/tsr',
                 '/does not resolve|non-public address/',
             ],
         ];
+    }
+
+    public function test_a_public_ipv6_literal_passes_the_policy(): void
+    {
+        // RFC 3849 documentation space: a global-scope address the policy has no
+        // reason to refuse, so the extra-range check must not over-reach.
+        (new HttpTimestampAuthority('https://[2001:db8::1]/tsr'))->assertUsable();
+
+        $this->assertTrue(true);
     }
 
     public function test_plaintext_http_is_accepted_only_with_the_explicit_opt_in(): void

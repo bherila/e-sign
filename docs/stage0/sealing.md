@@ -183,6 +183,14 @@ RFC 1918, link-local, or otherwise reserved. It then pins the connection to the 
 validated (`CURLOPT_RESOLVE`), so a second DNS answer cannot move the target, and never
 follows a redirect, because only the first hop was checked.
 
+PHP's own `FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE` is not sufficient on its
+own, which was worth measuring rather than assuming. It covers RFC 1918, loopback,
+link-local, IPv6 unique-local, and IPv4-mapped IPv6, but it treats RFC 6598 carrier-grade
+NAT (`100.64.0.0/10`) as public — the address space a shared host's internal network
+typically sits in — along with RFC 6890 IETF protocol assignments (`192.0.0.0/24`) and
+benchmarking space (`198.18.0.0/15`). Those three are refused explicitly, and
+`HttpTimestampAuthorityTest` pins each, including its IPv4-mapped IPv6 form.
+
 tc-lib-pdf's own transport validates the URL's *shape* only. The policy is applied by
 overriding the library's documented `postTimestampRequest()` transport seam
 (`SealingDocument`), so the destination check cannot be bypassed by using the library

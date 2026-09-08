@@ -264,10 +264,44 @@ final class HttpTimestampAuthority implements TimestampAuthority
             FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE
         );
 
-        if ($public === false) {
+        if ($public === false || $this->isInExtraReservedRange($address)) {
             throw new TimestampAuthorityDestinationException(
                 'The timestamp authority host "'.$host.'" resolves to the non-public address '.$address.'.'
             );
         }
+    }
+
+    /**
+     * Ranges PHP's IP filter flags treat as public but which are not the
+     * public internet.
+     *
+     * `FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE` covers RFC 1918,
+     * loopback, link-local, IPv6 ULA, and IPv4-mapped IPv6, but it lets through
+     * RFC 6598 carrier-grade NAT — which is exactly the address space a shared
+     * host's internal network sits in — and RFC 6890 IETF protocol assignments.
+     */
+    private function isInExtraReservedRange(string $address): bool
+    {
+        // ::ffff:a.b.c.d is the same destination as a.b.c.d, so it is judged as one.
+        $candidate = preg_replace('/^::ffff:/i', '', $address) ?? $address;
+
+        $packed = @inet_pton($candidate);
+        if ($packed === false || strlen($packed) !== 4) {
+            return false;
+        }
+
+        $value = unpack('N', $packed);
+        if ($value === false) {
+            return false;
+        }
+
+        foreach ([['100.64.0.0', 10], ['192.0.0.0', 24], ['198.18.0.0', 15]] as [$network, $bits]) {
+            $mask = -1 << (32 - $bits) & 0xFFFFFFFF;
+            if (($value[1] & $mask) === (ip2long($network) & $mask)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
