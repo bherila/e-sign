@@ -305,6 +305,9 @@ final readonly class SigningRequestCreation
             fields: $fields,
             documentBytes: static fn (): string => $bytes,
             useSigningOrder: ($settings['use_signing_order'] ?? true) !== false,
+            // The digest the anchors were resolved against, so the envelope's own send-time
+            // resolution can see the work is already done for these exact bytes.
+            documentSha256: (string) $revision->sha256,
         );
 
         return $this->envelopes->create(

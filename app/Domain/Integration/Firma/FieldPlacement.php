@@ -9,6 +9,7 @@ use App\Domain\Preparation\Documents\DocumentIntake;
 use App\Domain\Preparation\Geometry\FacadeCoordinateTranslator;
 use App\Domain\Preparation\Geometry\NativeRect;
 use App\Domain\Preparation\Geometry\PageGeometry;
+use App\Domain\Preparation\Schema\AnchorPlacementMode;
 use App\Domain\Preparation\Schema\CanonicalNumber;
 use App\Domain\Preparation\Schema\CoordinateSpaceDeclaration;
 use App\Domain\Preparation\Text\Anchor;
@@ -64,6 +65,14 @@ use Illuminate\Support\Str;
  * An anchor that matches nothing, or matches more than the caller allowed for, is an error.
  * A field placed at a default position because its anchor was not found is a field nobody
  * agreed to sign in that spot.
+ *
+ * Resolution happens here, on the way in, and the emitted field carries both halves of the
+ * result: the rectangle in `rect`, and the request plus its receipt in `anchor`. That receipt
+ * names the revision digest the text was located in, so the envelope's own send-time resolution
+ * recognises the work as already done against those exact bytes and does not repeat it — and, if
+ * the envelope were somehow pointed at different bytes, would notice. The offsets are converted
+ * to native points on the way through, because the stored anchor is a native-schema anchor and
+ * this profile's percentages stop at this boundary.
  */
 final readonly class FieldPlacement
 {
@@ -211,6 +220,11 @@ final readonly class FieldPlacement
      * @param  list<array<string, mixed>>  $fields  Validated request fields.
      * @param  Closure(): string  $documentBytes  Opens the PDF, lazily: only a request with
      *                                            at least one anchor pays for the parse.
+     * @param  string|null  $documentSha256  Digest of the review revision the fields are placed
+     *                                       on. Without it an anchored field still gets its
+     *                                       resolved rectangle, but no receipt, so the envelope
+     *                                       resolves the anchor again before sending rather than
+     *                                       trusting coordinates it cannot tie to any bytes.
      * @return array<string, mixed> Native field schema 1.0.
      *
      * @throws FirmaException
@@ -222,6 +236,7 @@ final readonly class FieldPlacement
         array $fields,
         Closure $documentBytes,
         bool $useSigningOrder = true,
+        ?string $documentSha256 = null,
     ): array {
         $runs = null;
         $ids = [];
@@ -240,9 +255,12 @@ final readonly class FieldPlacement
             $rect = $this->rect($page, $position, $index);
             $anchor = is_array($field['anchor'] ?? null) ? $field['anchor'] : null;
 
+            $resolved = null;
+
             if ($anchor !== null) {
                 $runs ??= $this->extract($documentBytes);
-                $rect = $this->anchoredRect($runs, $page, $anchor, $rect, $pageNumber, $index);
+                $resolved = $this->anchoredRect($runs, $page, $anchor, $rect, $pageNumber, $index);
+                $rect = $resolved->resolvedRect;
             }
 
             $id = self::identifier($field, $index, $ids);
@@ -274,11 +292,8 @@ final readonly class FieldPlacement
                 $definition['alias'] = self::normaliseVariableName($variableName);
             }
 
-            if ($anchor !== null) {
-                $definition['anchor'] = [
-                    'text' => (string) $anchor['text'],
-                    'occurrence' => self::occurrenceValue($anchor),
-                ];
+            if ($anchor !== null && $resolved instanceof ResolvedAnchor) {
+                $definition['anchor'] = self::nativeAnchor($anchor, $resolved, $documentSha256);
             }
 
             $placed[] = $definition;
@@ -453,6 +468,61 @@ final readonly class FieldPlacement
     }
 
     /**
+     * The native-schema anchor for a resolved facade anchor: the request, in native units, plus
+     * the receipt.
+     *
+     * `placement` is always `replace` because that is what this profile's anchor means — the
+     * caller's `position.x` and `position.y` are the placeholder the anchor overrides, and
+     * `position.width`/`position.height` are the size it never supplies. `required` is always
+     * true: the profile has no way to say an anchor may be absent, and inventing one here would
+     * be a compatibility extension nobody asked for.
+     *
+     * @param  array<string, mixed>  $anchor
+     * @return array<string, mixed>
+     */
+    private static function nativeAnchor(array $anchor, ResolvedAnchor $resolved, ?string $documentSha256): array
+    {
+        $request = $resolved->anchor;
+
+        $native = [
+            'text' => (string) $anchor['text'],
+            'occurrence' => self::occurrenceValue($anchor),
+            'placement' => AnchorPlacementMode::Replace->value,
+            'origin' => $request->origin->value,
+            'offset' => [
+                'dx' => CanonicalNumber::encode($request->offsetX),
+                'dy' => CanonicalNumber::encode($request->offsetY),
+            ],
+            'required' => true,
+        ];
+
+        if ($documentSha256 !== null) {
+            $native['resolved'] = [
+                'document_sha256' => $documentSha256,
+                'page' => $resolved->page,
+                'occurrence_index' => $resolved->occurrenceIndex,
+                'anchor_rect' => self::rectArray($resolved->anchorRect),
+                'rect' => self::rectArray($resolved->resolvedRect),
+            ];
+        }
+
+        return $native;
+    }
+
+    /**
+     * @return array{x: int|float, y: int|float, width: int|float, height: int|float}
+     */
+    private static function rectArray(NativeRect $rect): array
+    {
+        return [
+            'x' => CanonicalNumber::encode($rect->x),
+            'y' => CanonicalNumber::encode($rect->y),
+            'width' => CanonicalNumber::encode($rect->width),
+            'height' => CanonicalNumber::encode($rect->height),
+        ];
+    }
+
+    /**
      * @param  array<int, TextRun>  $runs
      * @param  array<string, mixed>  $anchor
      *
@@ -465,7 +535,7 @@ final readonly class FieldPlacement
         NativeRect $sized,
         int $pageNumber,
         int $index,
-    ): NativeRect {
+    ): ResolvedAnchor {
         $text = trim((string) ($anchor['text'] ?? ''));
 
         if ($text === '') {
@@ -492,7 +562,9 @@ final readonly class FieldPlacement
             origin: self::origin($anchor, $index),
         ), $index);
 
-        return self::assertOnPage($resolved->resolvedRect, $page, $index);
+        self::assertOnPage($resolved->resolvedRect, $page, $index);
+
+        return $resolved;
     }
 
     /**
