@@ -324,6 +324,8 @@ Do not market blanket legal enforceability on the strength of this software.
 - [`docs/security/release-gates.md`](security/release-gates.md) — every release gate mapped to
   the test or CI job that proves it, or an explicit "not yet proven".
 - [`docs/stage0/sealing.md`](stage0/sealing.md) — what the sealing path was measured to do.
+- [`docs/stage0/pades-profile.md`](stage0/pades-profile.md) — what profile DSS says the
+  artifacts actually reach, every warning it raises, and what neither validator proves.
 - [`docs/evidence/finalization.md`](evidence/finalization.md) — how an artifact is produced,
   validated, stored, and published, and what each digest covers.
 - [`docs/operations/seal-key-management.md`](operations/seal-key-management.md) — key custody,
