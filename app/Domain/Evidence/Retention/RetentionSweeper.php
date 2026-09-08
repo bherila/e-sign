@@ -224,30 +224,26 @@ final readonly class RetentionSweeper
     {
         $cutoff = $policy->abandonedDraftsCutoff($now);
 
-        // Every reference, read without a single Eloquent scope in the way. `envelopes` is
-        // read including soft-deleted rows on purpose: retention soft-deletes an envelope
-        // and removes its bytes only after the grace period, so a soft-deleted envelope is
-        // still protecting the revision it was built from.
-        $referenced = $this->db->table('envelopes')
-            ->whereNotNull('document_revision_id')
-            ->pluck('document_revision_id')
-            ->merge($this->db->table('template_versions')->pluck('document_revision_id'))
-            ->map(static fn (mixed $id): int => (int) $id)
-            ->unique()
-            ->all();
-
+        // "No revision of this document is named by an envelope, and none is named by a
+        // template version." Correlated subqueries rather than plucking every referenced
+        // revision id into PHP: on a mature deployment that list is the whole table, and an
+        // IN clause of that size is both slow and, past the engine's placeholder limit, an
+        // error at exactly the moment there is most to protect.
+        //
+        // `envelopes` is read through the query builder and therefore includes soft-deleted
+        // rows, deliberately: retention soft-deletes an envelope and removes its bytes only
+        // after the grace period, so a soft-deleted envelope is still protecting the
+        // revision it was built from (docs/BLOB_STORAGE.md, "soft-deleted rows still count").
         $candidates = $this->db->table('documents')
             ->where('created_at', '<', $cutoff)
-            ->whereNotExists(function ($query) use ($referenced): void {
-                $query->from('document_revisions')
-                    ->whereColumn('document_revisions.document_id', 'documents.id');
-
-                if ($referenced !== []) {
-                    $query->whereIn('document_revisions.id', $referenced);
-                } else {
-                    $query->whereRaw('1 = 0');
-                }
-            })
+            ->whereNotExists(fn ($query) => $query->from('document_revisions')
+                ->whereColumn('document_revisions.document_id', 'documents.id')
+                ->whereExists(fn ($inner) => $inner->from('envelopes')
+                    ->whereColumn('envelopes.document_revision_id', 'document_revisions.id')))
+            ->whereNotExists(fn ($query) => $query->from('document_revisions')
+                ->whereColumn('document_revisions.document_id', 'documents.id')
+                ->whereExists(fn ($inner) => $inner->from('template_versions')
+                    ->whereColumn('template_versions.document_revision_id', 'document_revisions.id')))
             ->orderBy('id')
             ->get(['id', 'public_id', 'title', 'original_disk', 'original_path']);
 
