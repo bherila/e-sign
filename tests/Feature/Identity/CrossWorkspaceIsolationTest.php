@@ -21,10 +21,15 @@ use Tests\TestCase;
  * every member-scoped lookup behaves as though B does not exist, so a probe cannot even
  * distinguish "forbidden" from "no such workspace".
  *
- * This is the seed of the isolation suite that issue #11 requires in CI. The remaining
- * surfaces named there — imported-provider aliases, JSON import, artifact downloads, and
- * queue jobs — do not exist yet; each one adds its cases here as it lands rather than
- * getting an isolation test of its own somewhere else.
+ * This is the seed of the isolation suite that issue #11 requires in CI. It covers the
+ * policy and the member-scoped lookups; a surface with its own HTTP routes asserts the same
+ * property over those routes next to the rest of its coverage, and lists itself here:
+ *
+ *  - documents, uploads and revision downloads:
+ *    tests/Feature/Preparation/DocumentHttpTest.php
+ *
+ * The remaining surfaces named in issue #11 — imported-provider aliases, JSON import, and
+ * queue jobs — do not exist yet.
  */
 class CrossWorkspaceIsolationTest extends TestCase
 {
