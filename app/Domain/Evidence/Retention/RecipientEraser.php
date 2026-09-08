@@ -8,6 +8,7 @@ use App\Domain\Evidence\Retention\Exceptions\LegalHoldActive;
 use App\Domain\Evidence\Retention\Exceptions\RetentionRefused;
 use App\Domain\Identity\Audit\AuditActor;
 use App\Domain\Identity\Audit\AuditRecorder;
+use App\Domain\Signing\Envelopes\EnvelopeState;
 use App\Domain\Signing\Models\EnvelopeRecipient;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\ConnectionInterface;
@@ -104,6 +105,21 @@ final readonly class RecipientEraser
      * @throws LegalHoldActive When the envelope is held.
      * @throws RetentionRefused When the reason is empty, or the recipient is already erased.
      */
+    /**
+     * Envelope states in which a recipient's contact data has stopped doing any work.
+     *
+     * `draft`, `sent`, `in_progress`, and `finalizing` are all excluded: in each of them the
+     * address is still how the agreement reaches the person, or is still being read into an
+     * artifact that has not been produced yet.
+     */
+    public const ERASABLE_STATES = [
+        EnvelopeState::Completed,
+        EnvelopeState::Cancelled,
+        EnvelopeState::Declined,
+        EnvelopeState::Expired,
+        EnvelopeState::FinalizationFailed,
+    ];
+
     public function erase(EnvelopeRecipient $recipient, string $reason, AuditActor $actor): array
     {
         $reason = trim($reason);
@@ -130,6 +146,25 @@ final readonly class RecipientEraser
 
         // A hold overrides erasure exactly as it overrides deletion.
         $this->legalHold->assertNotHeld($envelope);
+
+        // The whole justification for this operation — contact data has no evidential role
+        // *once the agreement is executed* — is conditional on a condition that was never
+        // tested (docs/security/review-2026-09.md finding B-7). Erasing a live envelope's
+        // recipient rewrites the address invitations and codes are sent to, so the signer
+        // becomes unreachable and the agreement hangs until expiry; and if the other parties
+        // finish, `FinalizationInput` reads the tombstone at render time and the sealed
+        // executed PDF names that party as "Erased recipient" under the service seal,
+        // permanently.
+        if (! in_array($envelope->state, self::ERASABLE_STATES, true)) {
+            throw new RetentionRefused(sprintf(
+                'Envelope %s is %s. A recipient can only be erased once the agreement has reached a '
+                .'terminal state (%s): erasing a live one makes the signer unreachable and can seal '
+                .'the tombstone into the executed document. Cancel or complete it first.',
+                $envelope->public_id,
+                $envelope->state->value,
+                implode(', ', array_map(static fn (EnvelopeState $s): string => $s->value, self::ERASABLE_STATES)),
+            ));
+        }
 
         $tombstone = self::tombstoneEmail($recipient->public_id);
 

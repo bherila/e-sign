@@ -56,6 +56,10 @@ class ApiIdempotency
             $request->getMethod(),
             $request->path(),
             (string) $request->getContent(),
+            // Part of the request, and part of what the Form Requests on this surface
+            // validate: `$request->all()` merges the query. Omitting it made two different
+            // calls share a fingerprint (docs/security/review-2026-09.md finding A-3).
+            (string) $request->getQueryString(),
         );
 
         $replay = $this->store->claim($credential, $key, $hash);

@@ -9,9 +9,12 @@ use App\Domain\Identity\Policies\WorkspacePolicy;
 use App\Listeners\UpdateLastLoginDate;
 use BWH\Auth\Contracts\AuthUserPolicy;
 use Illuminate\Auth\Events\Login;
+use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Http\Kernel;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use RuntimeException;
 use Spatie\Csp\AddCspHeaders;
@@ -45,6 +48,19 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Event::listen(Login::class, UpdateLastLoginDate::class);
+
+        // The one named limiter in the application. Everything else that needs a ceiling has
+        // one that is specific to it — GuestThrottle for the signing surface,
+        // AuthenticateServiceCredential's failure budget for the API — and this covers the
+        // route where a single request is expensive on purpose: document intake parses the
+        // uploaded PDF synchronously (docs/security/review-2026-09.md findings U-1, U-2).
+        //
+        // Keyed on the authenticated member, not the address, so an office behind one egress
+        // address is not one bucket. Generous enough that preparing a batch of agreements
+        // never meets it.
+        RateLimiter::for('document-uploads', static fn (Request $request): Limit => $request->user() !== null
+            ? Limit::perMinute(30)->by('document-uploads:'.$request->user()->getAuthIdentifier())
+            : Limit::perMinute(5)->by('document-uploads:'.$request->ip()));
 
         // Registered explicitly: policy auto-discovery looks for App\Policies\<Model>Policy
         // and never finds a policy that lives in a domain module.

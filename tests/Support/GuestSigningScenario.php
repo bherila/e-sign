@@ -51,6 +51,14 @@ final class GuestSigningScenario
     {
         Storage::fake('documents');
 
+        // The deployment's consent notice *is* the version these envelopes record. In a real
+        // installation both readings come from one `ESIGN_CONSENT_POLICY_VERSION`, so they
+        // agree; the fixture uses a distinct-looking string to prove the envelope's copy is a
+        // snapshot rather than a live read, and the guest surface now refuses an acceptance
+        // when the two disagree (docs/security/review-2026-09.md finding S-3). Saying so here
+        // keeps that refusal meaningful — a test that wants the mismatch sets it back.
+        config()->set('esign.signing.consent_policy_version', SigningFixtures::CONSENT_VERSION);
+
         $signing = SigningScenario::create()->bind();
         $envelope = $signing->sent($overrides);
 

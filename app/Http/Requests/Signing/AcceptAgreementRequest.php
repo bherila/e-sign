@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Requests\Signing;
 
 use App\Domain\Preparation\Schema\FieldDefinition;
+use App\Domain\Signing\Capture\ConsentPolicy;
 use App\Domain\Signing\Envelopes\AcceptanceRequest;
 use App\Domain\Signing\Models\EnvelopeFieldValue;
 use App\Domain\Signing\Sessions\GuestSigningContext;
@@ -73,6 +74,26 @@ class AcceptAgreementRequest extends FormRequest
     {
         $validator->after(function (Validator $validator): void {
             $context = app(GuestSigningContext::class);
+
+            // The state machine compares the *claimed* consent version against the envelope's
+            // snapshot, and both sides of that comparison are the snapshot — so it can only
+            // catch a client that lied. It cannot catch the case where the file on disk is a
+            // different version from the one the envelope records, because the text rendered
+            // never enters the check. The page has always warned about that and then let the
+            // signer through, producing an attestation naming a version whose wording nobody
+            // saw (docs/security/review-2026-09.md finding S-3). This is the refusal.
+            if (! app(ConsentPolicy::class)
+                ->forRecordedVersion($context->envelope->consent_policy_version)
+                ->matchesRecordedVersion()) {
+                $validator->errors()->add(
+                    'consent_version',
+                    'The consent notice on this installation is not the version this agreement '
+                    .'records. Ask the sender to confirm which applies before signing.',
+                );
+
+                return;
+            }
+
             $required = $this->requiredSignatureFieldIds($context);
 
             /** @var list<string> $claimed */

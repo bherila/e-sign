@@ -159,12 +159,20 @@ the address on the envelope and never to the address that asked for it.
   address or the client IP: issuance per destination address, issuance per client address,
   verification per client address.
 
-**A live code is readable by an operator.** The transactional outbox renders from a persisted
-context — that is what makes delivery survive a crash — so the code sits in
-`outbound_mails.context` until the row is pruned. This is stated rather than glossed: the check
-is aimed at somebody holding a forwarded link, not at the host administrator, and
-`docs/HANDOFF.md` section 8 already requires saying that a compromised host is outside what
-this evidence model defends against.
+**A queued code is readable by an operator, and only a queued one.** The transactional outbox
+renders from a persisted context — that is what makes delivery survive a crash — so the code
+has to sit in `outbound_mails.context` between the moment it is enqueued and the moment the
+message goes. `OutboundMail::markSentToProvider()` then drops it.
+
+That window is seconds under a queue worker and up to one cron interval on the shared-hosting
+profile. It used to be forever: `outbound_mails` has no pruner and `RecipientEraser` rewrites
+only the two name fields, so every code ever mailed stayed in the database and in every backup
+— while this page said "until the row is pruned"
+([`docs/security/review-2026-09.md`](../security/review-2026-09.md), finding D-4).
+
+What remains is stated rather than glossed: the check is aimed at somebody holding a forwarded
+link, not at the host administrator, and `docs/HANDOFF.md` section 8 already requires saying
+that a compromised host is outside what this evidence model defends against.
 
 
 ## The compatibility resolver
@@ -300,6 +308,14 @@ fall back to its published CDN, which is forbidden here above all pages.
 CSRF protection comes from the `web` group and a test asserts that every signing POST route
 gathers `PreventRequestForgery`.
 
+**The resolver's refusals are uniform, including its rate limits.** The per-destination-address
+issuance ceiling can only be reached by an address that *matched*, so surfacing it as a 429 made
+the endpoint an address-confirmation oracle: post a guessed address six times, and a 429 on the
+sixth meant the guess was right. The per-client ceiling is reported, because it is a fact about
+the caller; a refusal from the matched branch is swallowed and the neutral page returned, with
+the ceiling still enforced. See finding G-1 in
+[`docs/security/review-2026-09.md`](../security/review-2026-09.md).
+
 **Return destinations** are validated, never reflected. A `?return=` value is used only when its
 host appears in `signing.return_url_allowlist`, which is deployment configuration and empty by
 default. Everything else is *ignored* — no error, because a distinguishable rejection would turn
@@ -319,7 +335,7 @@ full landing-plus-start-plus-refusal sequence logs nothing at all.
 |---|---|---|
 | A mail scanner signs the agreement | No GET has a side effect; the assent is a CSRF-protected POST behind two tick boxes. | None known. |
 | A forwarded invitation is used by the wrong person | Optional mailbox OTP; reissuing revokes the forwarded credential. | With OTP off, possession of the link is the bar. That is the stated assurance class, not an accident. |
-| Enumerating recipients or envelopes | ULIDs; a 43-character token pattern refused at the router; one identical refusal page for every reason; rate limits per client address. | A determined attacker learns nothing from the refusal page but does learn a ULID exists if they guess one, which is 128 bits away. |
+| Enumerating recipients or envelopes | ULIDs; a 43-character token pattern refused at the router; one identical refusal page for every reason; rate limits per client address. | A determined attacker learns nothing from the refusal page but does learn a ULID exists if they guess one. A ULID is 48 bits of millisecond timestamp and **80 bits** of randomness, not 128 — the creation time of an envelope is often approximately known. 80 bits is still out of reach, and the correction matters because a threat model that rounds its own numbers up is not one to rely on. `GET /signing/{recipient}` carries no rate limit, so probing is free; that is an accepted residual, recorded as G-3 in [`docs/security/review-2026-09.md`](../security/review-2026-09.md). |
 | Guessing a token | 256 bits, plus a per-client start limiter. | None practical. |
 | Guessing an OTP | 20-bit space, but five attempts per challenge, burned on exhaustion, and rate-limited issuance. | A patient attacker who can request many codes gets many five-attempt windows; the per-address issuance limit is what bounds that. |
 | Replaying a session against another envelope | `RequireSigningSession` compares the session's envelope with the URL's. | None known. |

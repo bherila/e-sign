@@ -39,16 +39,33 @@ final class MailCopy
      *
      * Left alone on purpose: `<`, `>`, `&`, `"`, and `'` are already turned into entities by
      * Blade before CommonMark sees them, which is what kills raw HTML and `<autolink>`
-     * syntax. `#`, `!`, `-`, `+`, and leading digits can change block formatting at worst,
-     * and escaping them would put visible backslashes into ordinary prose — Laravel renders
-     * the plain-text alternative from the same Blade view *without* a Markdown pass, so
-     * every escape added here is a backslash a human reads.
+     * syntax. `!` and the rest of ordinary punctuation stay readable, because Laravel renders
+     * the plain-text alternative from the same Blade view *without* a Markdown pass, so every
+     * escape added here is a backslash a human reads.
+     *
+     * Block markers are handled separately, by {@see neutralizeBlockStarts()}, and only where
+     * they begin a line. "Can change block formatting at worst" understated it: a decline
+     * reason is typed by an external signer, is rendered inside a `> ` blockquote, and may
+     * contain newlines, so `Wrong signatory.\n\n# Your agreement was suspended\n\nCall …`
+     * escaped the quote and forged an H1 in a notice the sender receives from their own
+     * agreement service (docs/security/review-2026-09.md finding D-6). No link can be
+     * injected either way; a forged heading is a phishing frame, which is enough.
      *
      * Bare URLs are not links: Laravel's mail Markdown environment loads only the CommonMark
      * core and table extensions, with no autolink extension, so `https://evil.test` in a
      * reason renders as text. That is asserted in MailableRenderingTest rather than assumed.
      */
     private const MARKDOWN_METACHARACTERS = ['\\', '[', ']', '`', '*', '_', '~', '|'];
+
+    /**
+     * Line-leading markers that open a block, matched only at the start of a line.
+     *
+     * `#` heading, `>` blockquote, `-`/`+` bullet and setext underline, `=` setext underline,
+     * `1.`/`1)` ordered list. Escaping them anywhere would put backslashes into every ordinary
+     * sentence containing a hyphen; escaping them only where CommonMark would read them as a
+     * block start leaves prose alone.
+     */
+    private const BLOCK_START_PATTERN = '/^(\s*)(?:([#>+=-])|(\d{1,9})([.)]))/m';
 
     public readonly string $recipientName;
 
@@ -110,6 +127,27 @@ final class MailCopy
             $text = str_replace($character, '\\'.$character, $text);
         }
 
-        return $text;
+        return self::neutralizeBlockStarts($text);
+    }
+
+    /**
+     * Stop a line inside a quoted field from starting a new block.
+     *
+     * A backslash before the marker is CommonMark's own escape, so the character renders as
+     * itself and the line stays part of the paragraph — and the blockquote — it was put in.
+     *
+     * An ordered list is escaped on its *delimiter*, not its digits: CommonMark only honours
+     * a backslash before ASCII punctuation, so `\1.` would render the backslash literally
+     * while `1\.` both suppresses the list and reads as typed.
+     */
+    private static function neutralizeBlockStarts(string $text): string
+    {
+        return preg_replace_callback(
+            self::BLOCK_START_PATTERN,
+            static fn (array $m): string => ($m[2] ?? '') !== ''
+                ? $m[1].'\\'.$m[2]
+                : $m[1].$m[3].'\\'.$m[4],
+            $text,
+        ) ?? $text;
     }
 }

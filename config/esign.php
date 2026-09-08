@@ -440,6 +440,49 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Native API (Stage 5, issue #41)
+    |--------------------------------------------------------------------------
+    |
+    | Failed service-credential authentications a single client address may
+    | make in one minute before the surface stops answering it.
+    |
+    | Failures only. A working integration never reaches this ceiling, because
+    | a successful authentication is not counted, so the limit can be low
+    | enough to matter without a legitimate caller's throughput depending on
+    | it. What it bounds is an unauthenticated caller hammering the surface:
+    | each attempt costs a query and a warning log line, and nothing else in
+    | the stack says no (docs/security/review-2026-09.md finding A-1).
+    |
+    | It is not what stops a secret being guessed — 43 characters from a
+    | 36-character alphabet does that — and it is not a substitute for a rate
+    | limit at the edge. Set to 0 to switch it off where an edge proxy already
+    | owns this.
+    |
+    */
+
+    'api' => [
+        'auth_failures_per_minute' => (int) env('ESIGN_API_AUTH_FAILURES_PER_MINUTE', 30),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Response security headers (Stage 5, issue #41)
+    |--------------------------------------------------------------------------
+    |
+    | `Strict-Transport-Security` max-age, in seconds, emitted by
+    | App\Http\Middleware\SecurityHeaders on requests that arrived over TLS.
+    | Zero switches the header off, which is the right setting where a reverse
+    | proxy already owns it. `includeSubDomains` is deliberately not offered
+    | here; see the middleware's docblock.
+    |
+    */
+
+    'security' => [
+        'hsts_max_age' => (int) env('ESIGN_HSTS_MAX_AGE', 31_536_000),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Visual field editor (Stage 2, issue #22)
     |--------------------------------------------------------------------------
     |

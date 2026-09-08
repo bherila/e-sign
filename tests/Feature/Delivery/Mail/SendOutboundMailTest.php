@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Tests\Feature\Delivery\Mail;
 
 use App\Domain\Delivery\Mail\Jobs\SendOutboundMail;
+use App\Domain\Delivery\Mail\MailContext;
 use App\Domain\Delivery\Mail\MailErrorRedactor;
 use App\Domain\Delivery\Mail\MailEventSource;
+use App\Domain\Delivery\Mail\MailKind;
 use App\Domain\Delivery\Mail\MailState;
 use App\Domain\Delivery\Mail\Models\OutboundMail;
 use App\Domain\Delivery\Mail\NonDeliveringMailerException;
@@ -14,10 +16,12 @@ use App\Domain\Delivery\Mail\OutboundMailSender;
 use App\Domain\Delivery\Mail\ProductionMailerGuard;
 use App\Domain\Evidence\Retention\RestoreDrill;
 use App\Mail\InvitationMail;
+use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Mail\Factory as MailFactory;
 use Illuminate\Contracts\Mail\Mailer;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Mail\Transport\ArrayTransport;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Symfony\Component\Mailer\Exception\TransportException;
 use Symfony\Component\Mailer\SentMessage;
@@ -69,6 +73,77 @@ class SendOutboundMailTest extends TestCase
 
         // `sent_to_provider` is not delivery, and the state itself has to say so.
         $this->assertFalse($mail->state->meansMailboxAccepted());
+    }
+
+    /**
+     * docs/security/review-2026-09.md finding D-4.
+     *
+     * The outbox renders from a persisted context, so a live one-time code has to sit in
+     * `outbound_mails.context` between enqueue and send. It did not have to stay there
+     * afterwards, and it did: the table has no pruner, `RecipientEraser` rewrites only the
+     * two name fields, and the module's own documentation said the exposure lasted "for the
+     * ten minutes it is worth anything". Every code ever mailed was in the database, and in
+     * every backup, indefinitely.
+     */
+    public function test_a_one_time_code_does_not_outlive_the_message_that_carried_it(): void
+    {
+        config()->set('mail.default', 'array');
+
+        $mail = OutboundMail::factory()->create([
+            'kind' => MailKind::Otp,
+            'subject' => 'Your code for "Mutual Nondisclosure Agreement"',
+            'context' => (new MailContext(
+                recipientName: 'Avery Counterparty',
+                agreementTitle: 'Mutual Nondisclosure Agreement',
+                expiresAt: CarbonImmutable::now()->addMinutes(10),
+                otpCode: '493028',
+            ))->toArray(),
+        ]);
+
+        // Before: it has to be there, or the worker cannot render the message.
+        $this->assertSame('493028', $mail->context['otp_code']);
+
+        $this->app->make(OutboundMailSender::class)->send($mail);
+
+        $mail->refresh();
+
+        $this->assertSame(MailState::SentToProvider, $mail->state);
+        $this->assertNull($mail->context['otp_code']);
+
+        // Read past the cast too: the column itself no longer holds the digits.
+        $stored = (string) DB::table('outbound_mails')->where('id', $mail->getKey())->value('context');
+        $this->assertStringNotContainsString('493028', $stored);
+
+        // Everything else the row is for survives, so the audit trail still says what was sent.
+        $this->assertSame('Avery Counterparty', $mail->context['recipient_name']);
+        $this->assertSame('Mutual Nondisclosure Agreement', $mail->context['agreement_title']);
+    }
+
+    public function test_a_code_survives_a_failed_attempt_so_the_retry_can_still_render(): void
+    {
+        $mail = OutboundMail::factory()->create([
+            'kind' => MailKind::Otp,
+            'context' => (new MailContext(
+                recipientName: 'Avery Counterparty',
+                agreementTitle: 'Mutual Nondisclosure Agreement',
+                otpCode: '493028',
+            ))->toArray(),
+        ]);
+
+        $mailer = \Mockery::mock(Mailer::class);
+        $mailer->shouldReceive('send')->andThrow(new TransportException('Connection refused.'));
+        $factory = \Mockery::mock(MailFactory::class);
+        $factory->shouldReceive('mailer')->andReturn($mailer);
+        $this->app->instance(MailFactory::class, $factory);
+
+        try {
+            $this->app->make(OutboundMailSender::class)->send($mail);
+        } catch (TransportException) {
+            // Expected: the queue owns the retry.
+        }
+
+        $this->assertSame('493028', $mail->refresh()->context['otp_code']);
+        $this->assertSame(MailState::Queued, $mail->state);
     }
 
     public function test_the_message_that_goes_out_is_the_kind_and_recipient_on_the_row(): void

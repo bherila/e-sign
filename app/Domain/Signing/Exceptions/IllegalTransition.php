@@ -62,6 +62,25 @@ final class IllegalTransition extends SigningException
         );
     }
 
+    /**
+     * The clock says this envelope is over, whatever the state column still says.
+     *
+     * `ExpireCommand` runs hourly, so `expires_at` passing and `state` becoming `expired`
+     * are up to an hour apart — unbounded if the scheduler is broken. Reading the state
+     * alone let a recipient sign inside that gap, which is a signature on an agreement whose
+     * sender was told it had closed (docs/security/review-2026-09.md finding S-4). The sweep
+     * still owns the transition and the event; this only refuses to add to an envelope the
+     * sweep is going to close.
+     */
+    public static function envelopeExpired(CarbonImmutable $expiresAt): self
+    {
+        return new self(
+            'This envelope expired at '.$expiresAt->toIso8601String().'.',
+            'accept',
+            'expired',
+        );
+    }
+
     public function code(): string
     {
         return 'illegal_transition';

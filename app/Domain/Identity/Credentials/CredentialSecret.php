@@ -78,8 +78,11 @@ final readonly class CredentialSecret
      */
     public static function prefixFrom(string $presented): ?string
     {
+        // `D` so `$` means end-of-subject and not "before an optional trailing newline".
+        // Without it `esk_…_…\n` yields a prefix; harmless, because the digest is taken over
+        // the untrimmed string and fails closed, but a shape check should mean its shape.
         $pattern = sprintf(
-            '/^(%s_[a-z0-9]{%d})_[a-z0-9]{%d}$/',
+            '/^(%s_[a-z0-9]{%d})_[a-z0-9]{%d}$/D',
             preg_quote(self::PREFIX_MARKER, '/'),
             self::PREFIX_CHARS,
             self::SECRET_CHARS,
@@ -91,6 +94,21 @@ final readonly class CredentialSecret
     public static function digest(string $salt, string $presented): string
     {
         return hash('sha256', $salt.':'.$presented);
+    }
+
+    /**
+     * The work a verification costs, performed against nothing, for the path where no row
+     * was found.
+     *
+     * An unknown prefix and a wrong secret already return byte-identical answers; without
+     * this they do not take the same time, because only the second reaches a digest and a
+     * `hash_equals`. The result is discarded — the point is the cost, not the answer.
+     */
+    public static function burnVerification(string $presented): void
+    {
+        $salt = str_repeat('0', 32);
+
+        hash_equals(self::digest($salt, $salt), self::digest($salt, $presented));
     }
 
     private static function randomString(int $length): string

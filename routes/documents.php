@@ -33,7 +33,16 @@ Route::middleware(['web', 'auth'])
     ->whereUlid(['workspace', 'document', 'revision'])
     ->name('documents.')
     ->group(function (): void {
+        // Throttled, and it is the only route here that is. Preflight parses the uploaded
+        // PDF synchronously inside the request, and the parser's decompression ceiling is
+        // per stream rather than aggregate — so a small file with enough streams can spend
+        // the whole memory limit before any application ceiling is consulted
+        // (docs/security/review-2026-09.md findings U-1 and U-2, both open). Bounding how
+        // often one member can trigger that is not the fix; it is what keeps the residual to
+        // an authenticated workspace member and a countable number of attempts until the
+        // parser grows an aggregate budget.
         Route::post('/documents', [DocumentController::class, 'store'])
+            ->middleware('throttle:document-uploads')
             ->name('store');
 
         Route::get('/documents/{document}', [DocumentController::class, 'show'])

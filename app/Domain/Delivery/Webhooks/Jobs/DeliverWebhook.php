@@ -88,7 +88,16 @@ final class DeliverWebhook implements ShouldQueue
         } catch (DestinationRefusedException $refusal) {
             // Configuration, not weather: retrying cannot make the destination
             // acceptable, so the streak advances immediately.
-            $this->settle($delivery, DeliveryState::Failed, error: $refusal->getMessage());
+            //
+            // Through the redactor like every other stored string, even though this message
+            // interpolates only a filtered host, a scheme, and a resolved address. Uniformity
+            // is the point: it is the one path that skipped the control-character strip and
+            // the length cap (docs/security/review-2026-09.md finding D-8).
+            $this->settle($delivery, DeliveryState::Failed, error: $redactor->redact(
+                $refusal->getMessage(),
+                $secrets,
+                (int) $config['response_excerpt_bytes'],
+            ));
             $dispatcher->registerFailure($endpoint);
 
             return;

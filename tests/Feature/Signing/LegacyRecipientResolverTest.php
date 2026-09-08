@@ -15,6 +15,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\Support\GuestSigningScenario;
 use Tests\Support\InteractsWithSigningSession;
+use Tests\Support\ReadsMailedOtpCodes;
 use Tests\TestCase;
 
 /**
@@ -30,6 +31,7 @@ use Tests\TestCase;
 class LegacyRecipientResolverTest extends TestCase
 {
     use InteractsWithSigningSession;
+    use ReadsMailedOtpCodes;
     use RefreshDatabase;
 
     public function test_the_identifier_reaches_a_form_that_reveals_nothing(): void
@@ -181,6 +183,50 @@ class LegacyRecipientResolverTest extends TestCase
         $response->assertHeader('Retry-After');
     }
 
+    /**
+     * docs/security/review-2026-09.md finding G-1.
+     *
+     * The per-destination-address issuance ceiling can only be reached by an address that
+     * matched, so surfacing it as a 429 made this endpoint the address oracle its entire
+     * design exists to prevent: post a guessed address until the ceiling, and a 429 means
+     * the guess was right while a 200 means it was wrong. The ceiling is still enforced —
+     * no challenge, no mail — and the page is the same either way.
+     */
+    public function test_exhausting_the_per_address_ceiling_does_not_confirm_the_address(): void
+    {
+        config()->set('esign.signing.otp.per_address_per_hour', 2);
+        // High enough that the per-client ceiling, which is reported and should be, is not
+        // what either sequence below trips.
+        config()->set('esign.signing.otp.per_ip_per_hour', 100);
+
+        $scenario = GuestSigningScenario::sent();
+        $recipient = $scenario->recipient();
+
+        $right = $this->probe($recipient->public_id, $recipient->email, 3);
+        $wrong = $this->probe($recipient->public_id, 'not.the.signer@example.test', 3);
+
+        $this->assertSame($wrong, $right, 'A correct address must not be distinguishable by status.');
+        $this->assertSame([200, 200, 200], $right);
+
+        // The ceiling itself still bites: two codes went out, not three.
+        $this->assertSame(2, SigningOtpChallenge::query()->count());
+        $this->assertSame(2, OutboundMail::query()->where('kind', MailKind::Otp->value)->count());
+    }
+
+    /**
+     * @return list<int>
+     */
+    private function probe(string $recipientPublicId, string $email, int $times): array
+    {
+        $statuses = [];
+
+        for ($i = 0; $i < $times; $i++) {
+            $statuses[] = $this->post('/signing/'.$recipientPublicId, ['email' => $email])->getStatusCode();
+        }
+
+        return $statuses;
+    }
+
     public function test_a_recipient_who_cannot_sign_gets_no_code(): void
     {
         $scenario = GuestSigningScenario::sent();
@@ -199,11 +245,6 @@ class LegacyRecipientResolverTest extends TestCase
 
     private function mailedCode(): string
     {
-        $mail = OutboundMail::query()
-            ->where('kind', MailKind::Otp->value)
-            ->orderByDesc('id')
-            ->firstOrFail();
-
-        return (string) ($mail->context['otp_code'] ?? '');
+        return $this->mailedOtpCode();
     }
 }

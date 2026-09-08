@@ -70,6 +70,12 @@ final class DestinationPolicyTest extends TestCase
             'teredo' => ['https://[2001:0:1:2:3:4:5:6]/inbox', '/non-public address/'],
             'discard-only' => ['https://[100::1]/inbox', '/non-public address/'],
             'ietf protocol assignments' => ['https://192.0.0.170/inbox', '/non-public address/'],
+            // docs/security/review-2026-09.md finding D-1. The sibling of the IPv4-*mapped*
+            // prefix PHP already treats as reserved; behind a SIIT/NAT64 translator this is
+            // 127.0.0.1, and it passed the whole policy.
+            'ipv4-translated loopback' => ['https://[::ffff:0:7f00:1]/inbox', '/non-public address/'],
+            'ipv4-translated rfc 1918' => ['https://[::ffff:0:a00:1]/inbox', '/non-public address/'],
+            'multicast' => ['https://224.0.0.1/inbox', '/non-public address/'],
             'benchmarking space' => ['https://198.19.1.1/inbox', '/non-public address/'],
             'credentials in the url' => ['https://user:pass@203.0.113.10/inbox', '/must not carry credentials/'],
             'a non-http scheme' => ['gopher://203.0.113.10/inbox', '/must use http or https/'],

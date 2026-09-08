@@ -7,6 +7,7 @@ namespace Tests\Feature\Preparation;
 use App\Domain\Identity\Enums\WorkspaceRole;
 use App\Domain\Identity\Models\Workspace;
 use App\Domain\Preparation\Documents\DocumentIntake;
+use App\Domain\Preparation\Documents\DocumentStatus;
 use App\Domain\Preparation\Documents\Models\Document;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -318,6 +319,71 @@ class DocumentHttpTest extends TestCase
         $this->actingAs($outsider)
             ->get($this->documentUrl($document).'/revisions/'.$revision->public_id.'/download', self::JSON)
             ->assertNotFound();
+    }
+
+    /**
+     * docs/security/review-2026-09.md finding U-5.
+     *
+     * The original is stored before the accept/reject decision, deliberately, so a rejected
+     * upload can be examined afterwards — and the 422 hands the uploader the document and
+     * revision ids. So the uploader got the exact inline URL for bytes preflight had just
+     * called unsafe, and any workspace member with `View` would render them inline from this
+     * application's own origin. The attachment route still serves them, which is what
+     * examining a rejected file actually needs.
+     */
+    public function test_a_rejected_original_is_never_rendered_inline(): void
+    {
+        $this->actingAs($this->sender)->post(
+            $this->uploadUrl(),
+            ['file' => DocumentWorkspace::upload('javascript-action')],
+            self::JSON,
+        )->assertStatus(422);
+
+        $document = Document::query()->sole();
+        $this->assertSame(DocumentStatus::PreflightFailed, $document->status);
+
+        $revision = $document->revisions()->sole();
+        $base = $this->documentUrl($document).'/revisions/'.$revision->public_id;
+
+        $this->actingAs($this->sender)->get($base.'/view')->assertNotFound();
+
+        $download = $this->actingAs($this->sender)->get($base.'/download');
+        $download->assertOk();
+        $this->assertStringStartsWith(
+            'attachment;',
+            (string) $download->headers->get('Content-Disposition'),
+        );
+    }
+
+    /**
+     * docs/security/review-2026-09.md findings U-1 and U-2, which are open: the preflight
+     * parser's decompression ceiling is per stream rather than aggregate, and `max_objects`
+     * is checked after the parse. Both are reachable from one synchronous request. Until the
+     * parser grows an aggregate budget, this ceiling is what bounds how often one member can
+     * trigger it.
+     */
+    public function test_uploading_is_rate_limited_per_member(): void
+    {
+        config()->set('esign.documents.max_bytes', 2048);
+
+        $refused = null;
+
+        for ($attempt = 0; $attempt < 40; $attempt++) {
+            $response = $this->actingAs($this->sender)->post(
+                $this->uploadUrl(),
+                ['file' => DocumentWorkspace::uploadOfBytes('not a pdf', 'nda.pdf')],
+                self::JSON,
+            );
+
+            if ($response->getStatusCode() === 429) {
+                $refused = $response;
+
+                break;
+            }
+        }
+
+        $this->assertNotNull($refused, 'The upload route must have a ceiling.');
+        $refused->assertHeader('Retry-After');
     }
 
     // ---------------------------------------------------------------- helpers

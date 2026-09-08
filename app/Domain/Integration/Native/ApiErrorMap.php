@@ -155,6 +155,7 @@ final class ApiErrorMap
             ErrorCode::InsufficientScope => 'This API credential is not granted the scope this endpoint requires.',
             ErrorCode::NotFound => 'No resource with that id exists in this workspace.',
             ErrorCode::MethodNotAllowed => 'That HTTP method is not allowed on this endpoint.',
+            ErrorCode::TooManyRequests => 'Too many failed authentication attempts. Try again shortly.',
             default => 'The request could not be completed.',
         };
     }
@@ -168,6 +169,7 @@ final class ApiErrorMap
             Response::HTTP_METHOD_NOT_ALLOWED => ErrorCode::MethodNotAllowed,
             Response::HTTP_CONFLICT => ErrorCode::Conflict,
             Response::HTTP_UNPROCESSABLE_ENTITY => ErrorCode::ValidationFailed,
+            Response::HTTP_TOO_MANY_REQUESTS => ErrorCode::TooManyRequests,
             Response::HTTP_NOT_IMPLEMENTED => ErrorCode::Unsupported,
             default => ErrorCode::InternalError,
         };
@@ -181,6 +183,7 @@ final class ApiErrorMap
             Response::HTTP_NOT_FOUND => ErrorCode::NotFound,
             Response::HTTP_METHOD_NOT_ALLOWED => ErrorCode::MethodNotAllowed,
             Response::HTTP_CONFLICT => ErrorCode::Conflict,
+            Response::HTTP_TOO_MANY_REQUESTS => ErrorCode::TooManyRequests,
             Response::HTTP_NOT_IMPLEMENTED => ErrorCode::Unsupported,
             default => null,
         };

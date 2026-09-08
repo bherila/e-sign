@@ -15,6 +15,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Support\GuestSigningScenario;
 use Tests\Support\InteractsWithSigningSession;
+use Tests\Support\ReadsMailedOtpCodes;
 use Tests\TestCase;
 
 /**
@@ -28,6 +29,7 @@ use Tests\TestCase;
 class GuestSigningOtpTest extends TestCase
 {
     use InteractsWithSigningSession;
+    use ReadsMailedOtpCodes;
     use RefreshDatabase;
 
     public function test_no_code_is_asked_for_when_the_deployment_does_not_require_one(): void
@@ -258,12 +260,7 @@ class GuestSigningOtpTest extends TestCase
      */
     private function mailedCode(): string
     {
-        $mail = OutboundMail::query()
-            ->where('kind', MailKind::Otp->value)
-            ->orderByDesc('id')
-            ->firstOrFail();
-
-        return (string) ($mail->context['otp_code'] ?? '');
+        return $this->mailedOtpCode();
     }
 
     /** A code of the right shape that is certainly not the one that was sent. */

@@ -60,9 +60,18 @@ final readonly class SealMaterialAssurancePolicyCheck implements AssurancePolicy
             $this->sealer->preflight($level);
         } catch (SealingException $exception) {
             return $exception->getMessage();
-        } catch (\Throwable $exception) {
+        } catch (\Throwable) {
             // Never null on uncertainty: an unknown answer is an unavailable one.
-            return 'The configured seal material could not be checked: '.$exception->getMessage();
+            //
+            // And never the message. The typed SealingException messages above are written to
+            // be path-free and are safe to forward — this branch is for whatever was not
+            // anticipated, whose message could be an `ErrorException` naming the seal key's
+            // path, and it reaches an `envelopes:write` caller through
+            // SendPreconditionsFailed's `problems` array
+            // (docs/security/review-2026-09.md finding E-5). The operator sees the real
+            // reason in `esign:seal:status`, which is where a key path belongs.
+            return 'The configured seal material could not be checked. Run esign:seal:status on the '
+                .'deployment for the reason.';
         }
 
         return null;

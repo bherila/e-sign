@@ -72,9 +72,19 @@ final class SignatureImage
      */
     public function reencode(string $submitted): string
     {
-        [$declared, $binary] = $this->decodeDataUrl($submitted);
-
         $maxBytes = $this->maxBytes();
+
+        // Measured before anything decodes it. Base64 costs four characters per three bytes,
+        // so `maxBytes * 2` is comfortably above any submission that could pass the check
+        // below and still refuses one that could not. Without it a caller can spend the whole
+        // request body — 64 MB under the shipped `public/.user.ini` — on a value whose ceiling
+        // is 200 KB, and the process pays for a regular expression, a capture group, a
+        // whitespace strip, and a base64 decode of all of it before finding that out.
+        if (strlen($submitted) > $maxBytes * 2) {
+            throw SignatureImageRejected::tooManyBytes(strlen($submitted), $maxBytes);
+        }
+
+        [$declared, $binary] = $this->decodeDataUrl($submitted);
 
         if (strlen($binary) > $maxBytes) {
             throw SignatureImageRejected::tooManyBytes(strlen($binary), $maxBytes);

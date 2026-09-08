@@ -25,7 +25,7 @@ class DeclinedMail extends OutboundMailable
 
     public function subjectLine(): string
     {
-        return sprintf('%s declined to sign "%s"', (string) $this->context->actorName, $this->title());
+        return sprintf('%s declined to sign "%s"', $this->subjectPart($this->context->actorName), $this->title());
     }
 
     protected function markdownView(): string

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Delivery\Mail;
 
 use Carbon\CarbonImmutable;
+use Illuminate\Container\Container;
 use InvalidArgumentException;
 
 /**
@@ -170,8 +171,21 @@ final class MailContext
             throw new InvalidArgumentException('A mail action URL must be absolute; a mail client has no base URL to resolve against.');
         }
 
-        if (! in_array(strtolower($parts['scheme']), ['http', 'https'], true)) {
+        $scheme = strtolower($parts['scheme']);
+
+        if (! in_array($scheme, ['http', 'https'], true)) {
             throw new InvalidArgumentException('A mail action URL must be http or https.');
+        }
+
+        // `SigningUrlMinter` has always documented this as one of three invariants this class
+        // enforces; it enforced the other two (docs/security/review-2026-09.md finding X-11).
+        // A credential-bearing invitation crossing plaintext HTTP is the token on the wire,
+        // and there is no HSTS to stop the first navigation. Local development over
+        // `http://localhost` still works, because the rule is scoped to production.
+        if ($scheme !== 'https' && self::isProduction()) {
+            throw new InvalidArgumentException(
+                'A mail action URL must be https in production; it carries a bearer credential.',
+            );
         }
 
         if (isset($parts['user']) || isset($parts['pass'])) {
@@ -191,6 +205,22 @@ final class MailContext
                 throw new InvalidArgumentException('A mail action URL carries at most one query parameter, so a forwarded message exposes one opaque token rather than a set.');
             }
         }
+    }
+
+    /**
+     * Whether this is a production deployment, asked without depending on one.
+     *
+     * This class is a plain data object with a pure unit test and no application behind it,
+     * so `app()` is not available to it. Reading through the container only when a
+     * configuration repository is actually bound keeps the rule real where it matters and
+     * inert where there is nothing to be production about.
+     */
+    private static function isProduction(): bool
+    {
+        $container = Container::getInstance();
+
+        return $container->bound('config')
+            && $container->make('config')->get('app.env') === 'production';
     }
 
     /**

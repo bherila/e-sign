@@ -13,6 +13,7 @@ use App\Domain\Evidence\Retention\Exceptions\RetentionRefused;
 use App\Domain\Evidence\Retention\RecipientEraser;
 use App\Domain\Identity\Audit\AuditActor;
 use App\Domain\Identity\Audit\AuditEvent;
+use App\Domain\Signing\Envelopes\EnvelopeState;
 use App\Domain\Signing\Models\RecipientAttestation;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
@@ -187,6 +188,53 @@ class RecipientErasureTest extends TestCase
 
         $this->expectException(RetentionRefused::class);
         $eraser->erase($recipient->refresh(), 'Erasure request', AuditActor::console('test'));
+    }
+
+    /**
+     * docs/security/review-2026-09.md finding B-7.
+     *
+     * The operation's justification is that contact data has no evidential role *once the
+     * agreement is executed*. Nothing tested that condition. Erasing a live envelope's
+     * recipient rewrites the address invitations and one-time codes go to, so the signer
+     * becomes unreachable and the agreement hangs until expiry — and if the other parties
+     * finish, `FinalizationInput` reads the tombstone at render time and the sealed executed
+     * PDF names that party as "Erased recipient", permanently, under the service seal.
+     */
+    public function test_a_recipient_of_a_live_envelope_cannot_be_erased(): void
+    {
+        $scenario = RetentionScenario::finalized();
+        $envelope = $scenario->envelope->refresh();
+        $recipient = $envelope->recipients()->firstOrFail();
+        $original = $recipient->email;
+
+        // Same rows, wound back to a state the agreement can still move out of.
+        $envelope->forceFill(['state' => EnvelopeState::InProgress->value])->save();
+
+        try {
+            app(RecipientEraser::class)->erase($recipient, 'Article 17 request', AuditActor::console('test'));
+            $this->fail('A live agreement still needs to be able to reach its signer.');
+        } catch (RetentionRefused $refusal) {
+            $this->assertStringContainsString('terminal state', $refusal->getMessage());
+        }
+
+        $this->assertSame($original, $recipient->refresh()->email);
+        $this->assertSame(0, AuditEvent::query()->where('action', 'privacy.recipient.erased')->count());
+    }
+
+    /** Every terminal state is erasable, including the unhappy ones. */
+    public function test_a_cancelled_or_expired_agreement_can_still_have_its_recipient_erased(): void
+    {
+        foreach ([EnvelopeState::Cancelled, EnvelopeState::Expired] as $state) {
+            $scenario = RetentionScenario::finalized();
+            $envelope = $scenario->envelope->refresh();
+            $envelope->forceFill(['state' => $state->value])->save();
+
+            $recipient = $envelope->recipients()->firstOrFail();
+
+            app(RecipientEraser::class)->erase($recipient, 'Article 17 request', AuditActor::console('test'));
+
+            $this->assertStringContainsString('@erased.invalid', $recipient->refresh()->email);
+        }
     }
 
     public function test_the_command_erases_and_says_what_it_kept(): void

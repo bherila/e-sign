@@ -46,7 +46,12 @@ export function ConsentPanel({ payload, reviewed, ready, blockedReason }: Consen
   const intentId = useId();
   const reasonId = useId();
 
-  const canSubmit = ready && consentAccepted && intentConfirmed;
+  // The notice on disk has to be the version this agreement records. When it is not, the
+  // banner below already says so, and the button is disabled rather than offering to bind
+  // somebody to wording under a version name it is not — the server refuses it too
+  // (docs/security/review-2026-09.md finding S-3).
+  const consentVersionAgrees = payload.consent.matches_recorded_version;
+  const canSubmit = ready && consentVersionAgrees && consentAccepted && intentConfirmed;
 
   return (
     <section className="mt-10 border-t border-black/10 pt-8 dark:border-white/10">

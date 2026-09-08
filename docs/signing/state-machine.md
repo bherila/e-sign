@@ -203,7 +203,22 @@ The order of checks in `accept()` is deliberate:
    unimplementable. Same session and same material digest returns the existing attestation,
    publishes nothing, and reports `replayed`.
 2. **Version compare-and-swap**, which decides races.
-3. **Consent**, **eligibility**, **required fields**, then the **reviewed material digest**.
+3. **Expiry**, read from the clock and not from the state column. `ExpireCommand` runs hourly,
+   so `expires_at` passing and the state becoming `expired` are up to an hour apart — and
+   unbounded if the scheduler has stopped. Checking the state alone let somebody sign inside
+   that gap ([`docs/security/review-2026-09.md`](../security/review-2026-09.md), finding S-4).
+   The sweep still owns the transition and its event; this only refuses to add to an envelope
+   the sweep is going to close.
+4. **Consent**, **eligibility**, **required fields**, then the **reviewed material digest**.
+
+**A required field is complete when it holds a value somebody supplied, not when it holds a
+row.** `null` is nothing, `false` is a refusal rather than an answer, and a string that trims to
+empty is a blank box. Counting rows meant a required checkbox — which `FieldMateriality`
+describes as *the term being accepted* — could be accepted unticked by posting `false` before
+signing, and the only code that knew otherwise was the browser's own `hasValue()`
+([`docs/security/review-2026-09.md`](../security/review-2026-09.md), findings S-1 and S-2). The
+rule lives here rather than in an HTTP middleware because this state machine is also reachable
+from a job and a console command.
 
 `prev_attestation_sha256` chains each acceptance to the previous one on the same envelope.
 The chain shows the sequence has not been edited by something that did not also recompute it.

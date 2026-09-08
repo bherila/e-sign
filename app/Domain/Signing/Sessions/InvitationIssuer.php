@@ -187,13 +187,36 @@ final class InvitationIssuer
         return true;
     }
 
-    /** The absolute URL a given plaintext token addresses. One definition, used everywhere. */
+    /**
+     * The absolute URL a given plaintext token addresses. One definition, used everywhere.
+     *
+     * Rooted at `APP_URL`, not at whatever the current request's `Host` header said. There is
+     * no `TrustHosts` in this application, so any `Host` is accepted; with
+     * `QUEUE_CONNECTION=sync` the mail-scheduling job runs inline in the request that sent the
+     * envelope, and the URL generator's root is then `$request->getSchemeAndHttpHost()`. That
+     * put an attacker-chosen host into a mailed invitation carrying a live 43-character token
+     * (docs/security/review-2026-09.md finding X-4). Under the documented
+     * `QUEUE_CONNECTION=database` a worker roots the generator at `APP_URL` already, so this
+     * makes the safe case the only case rather than the usual one.
+     */
     public function urlFor(Envelope $envelope, #[SensitiveParameter] string $token): string
     {
-        return $this->url->route('signing.landing', [
+        $root = rtrim((string) $this->config->get('app.url', ''), '/');
+
+        $path = $this->url->route('signing.landing', [
             'envelope' => $envelope->public_id,
             'token' => $token,
-        ], absolute: true);
+        ], absolute: false);
+
+        if ($root === '') {
+            // No configured origin is a deployment error, not something to paper over with
+            // the request's own idea of where it is.
+            throw new InvalidArgumentException(
+                'app.url is empty, so an invitation URL cannot be built. Set APP_URL.',
+            );
+        }
+
+        return $root.$path;
     }
 
     private function mint(

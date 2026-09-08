@@ -1,6 +1,10 @@
 # BWH eSign — implementation handoff
 
 **Status:** Proposed implementation specification, not an implemented or certified product.
+What the built pipeline actually claims, and what it refuses to claim, is stated in
+[`docs/assurance.md`](assurance.md); the gate-by-gate proof status is in
+[`docs/security/release-gates.md`](security/release-gates.md) and the adversarial review of the
+merged code is [`docs/security/review-2026-09.md`](security/review-2026-09.md).
 **Prepared:** 2026-09-08 UTC.
 **Working repository name:** `bherila/e-sign`.
 **Application license:** MIT for original application code; dependencies retain their own licenses.

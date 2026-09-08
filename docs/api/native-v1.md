@@ -52,6 +52,19 @@ rotated, never recovered.
 `GET /api/v1/me` is the first call to make: it tells you which workspace you are in, which you
 cannot otherwise discover, and which scopes you hold.
 
+**Failed authentications are counted, successful ones are not.** A client address that presents
+an unusable credential more than `ESIGN_API_AUTH_FAILURES_PER_MINUTE` times (30) in a minute is
+answered `429 too_many_requests` with `Retry-After` until the window passes. A working
+integration never meets this: authenticating correctly costs nothing against the budget, however
+often you call. It exists because nothing else on this surface limited anything, and each failed
+attempt cost a query and a log line
+([docs/security/review-2026-09.md](../security/review-2026-09.md), finding A-1). Set the value to
+`0` where an edge proxy already owns the ceiling.
+
+There is deliberately **no** overall request limit on this API. Choosing one without knowing an
+integration's polling volume is an outage waiting for a busy afternoon; rate limiting the whole
+surface belongs at the edge, where the operator can see the traffic.
+
 ### Scopes
 
 | Scope | Endpoints |
@@ -109,6 +122,7 @@ human reading a log, and `details` appears only when there is something structur
 | `template_state` | 422 | A template, version, or document is not usable for this call |
 | `destination_refused` | 422 | A webhook URL the outbound policy will not call |
 | `unknown_event_name` | 422 | An event name that is neither in the profile nor prefixed `esign.` |
+| `too_many_requests` | 429 | Too many **failed** authentications from this client address in the last minute; `Retry-After` says how long |
 | `unsupported` | 501 | Declared here and not implemented in this build — never a successful no-op |
 | `internal_error` | 500 | Something unanticipated; the detail is in the server's log, not in your body |
 
@@ -145,8 +159,17 @@ Two details worth knowing:
 - **Only successful responses are replayed.** A failure releases the key, so a request you fix
   and retry under the same key is a real attempt. Replaying a transient 500 would make it
   permanent, and replaying a 422 would freeze a validation error you have since fixed.
-- **The request digest ignores JSON object key order.** A client that serialises its map
-  differently on the retry still replays rather than being told it reused the key.
+- **The request digest covers the method, the path, the query string, and the body.** The query
+  string is part of it because every endpoint here validates `$request->all()`, which merges the
+  query — so `?grace_hours=24` and `?grace_hours=0` are two different requests and must not
+  share an answer. They did, until
+  [docs/security/review-2026-09.md](../security/review-2026-09.md) finding A-3.
+- **The digest ignores JSON object key order, and query parameter order.** A client that
+  serialises its map or its query differently on the retry still replays rather than being told
+  it reused the key.
+- **A recorded body is encrypted at rest.** Two endpoints return a webhook signing secret, so a
+  cached copy in cleartext would have contradicted "only ciphertext is stored" one table over
+  (finding A-2).
 
 Keys are scoped to the **credential**, not the workspace: two integrations sharing a tenant
 generate keys independently, and a collision between them must not make one replay the other's
@@ -343,7 +366,9 @@ the present rather than the event. The bodies are documented in
 ### Webhook endpoints
 
 The secret is returned **once**, in the response to `POST` and to `rotate-secret`. Only
-ciphertext is stored and there is no route that returns it again.
+ciphertext is stored and there is no route that returns it again. If you sent an
+`Idempotency-Key` with that call, replaying it within 24 hours returns the same body — which is
+the point of the header, and why that recorded body is encrypted at rest like the secret itself.
 
 `DELETE` **retires** an endpoint: it is disabled, receives nothing further, and comes back with
 `enabled: false`. The row is kept because delivery history references it, and a delivery record
@@ -352,7 +377,10 @@ an erasure that does not happen.
 
 Rotation keeps the previous secret verifying for a grace window, during which both secrets sign
 every attempt, so a receiver can be reconfigured without dropping an event. `grace_hours: 0`
-cuts over immediately — the right value when you are rotating *because* a secret leaked.
+cuts over immediately — the right value when you are rotating *because* a secret leaked. Send a
+**fresh** `Idempotency-Key` for that call, or none: reusing the key from an earlier rotation with
+a different `grace_hours` is now a `422 idempotency_key_reused` rather than a replay that looks
+like a rotation and is not one.
 
 ---
 

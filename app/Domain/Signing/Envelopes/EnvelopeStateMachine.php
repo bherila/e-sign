@@ -403,6 +403,15 @@ final readonly class EnvelopeStateMachine
 
             $from = $this->assertLegal('accept', $locked);
 
+            // The state column is not the only thing that closes an envelope. `expire()` is
+            // applied by an hourly sweep, so `expires_at` passing and the state moving are up
+            // to an hour apart; reading only the state let somebody sign inside that gap
+            // (docs/security/review-2026-09.md finding S-4). Checked here, under the same
+            // lock as everything else, so a sweep committing concurrently cannot slip past.
+            if ($locked->expires_at !== null && $locked->expires_at->lessThanOrEqualTo(CarbonImmutable::now())) {
+                throw IllegalTransition::envelopeExpired($locked->expires_at);
+            }
+
             if ($request->consentPolicyVersion !== $locked->consent_policy_version) {
                 throw new ConsentMismatch($request->consentPolicyVersion, $locked->consent_policy_version);
             }
@@ -1116,17 +1125,55 @@ final readonly class EnvelopeStateMachine
     }
 
     /**
+     * The fields that hold a value somebody actually supplied.
+     *
+     * A row is not an answer. `false` is a legitimate stored value for a checkbox and an
+     * empty string is a legitimate stored value for text, so counting rows made "required"
+     * mean "the client sent this key once" — and a required tick box beside a term, which
+     * {@see FieldMateriality} describes as *the term being accepted*, could be accepted
+     * unticked by posting `{"values":{"buyer_ack": false}}` before signing
+     * (docs/security/review-2026-09.md finding S-1).
+     *
+     * The rule is the client's, moved to where it is authoritative: `hasValue()` in
+     * `resources/js/signing/fieldEntryReducer.ts` has always said a `false` and a blank
+     * string are not supplied. It was the only place that said it.
+     *
      * @return array<string, true>
      */
     private function storedFieldIds(Envelope $locked): array
     {
-        /** @var list<string> $ids */
-        $ids = EnvelopeFieldValue::query()
-            ->where('envelope_id', $locked->getKey())
-            ->pluck('schema_field_id')
-            ->all();
+        $supplied = [];
 
-        return array_fill_keys($ids, true);
+        /** @var iterable<EnvelopeFieldValue> $rows */
+        $rows = EnvelopeFieldValue::query()
+            ->where('envelope_id', $locked->getKey())
+            ->get(['schema_field_id', 'value']);
+
+        foreach ($rows as $row) {
+            if (self::countsAsSupplied($row->value)) {
+                $supplied[(string) $row->schema_field_id] = true;
+            }
+        }
+
+        return $supplied;
+    }
+
+    /**
+     * Whether a stored value answers a required field.
+     *
+     * `null` is nothing. `false` is a refusal, not an answer. A string of whitespace is a
+     * blank box that happens to contain spaces — `TrimStrings` catches that on an HTTP
+     * request today, but the domain must not depend on an HTTP middleware for an invariant
+     * a queue job or a console command can also reach. Everything else — a number, a
+     * `true`, a data URL, an array — is a value.
+     */
+    private static function countsAsSupplied(mixed $value): bool
+    {
+        if ($value === null || $value === false) {
+            return false;
+        }
+
+        return ! is_string($value) || trim($value) !== '';
     }
 
     /** The recipient a field belongs to, as a row rather than an id: the guards need its state. */

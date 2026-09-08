@@ -145,7 +145,38 @@ class OutboundMail extends Model
         $this->mailer = $mailer;
         $this->message_id = $messageId;
         $this->last_error = null;
+        $this->forgetOneTimeCode();
         $this->moveTo(MailState::SentToProvider);
+    }
+
+    /**
+     * Drop the one-time code from the persisted context once the message has gone.
+     *
+     * The outbox renders from a persisted context — that is what makes delivery survive a
+     * crash — so a live code has to sit in this column between enqueue and send. What it did
+     * *not* have to do is sit there afterwards. `outbound_mails` has no pruner, and
+     * `RecipientEraser` rewrites only the two name fields, so every code ever mailed was
+     * readable in the database and in every backup, indefinitely — while the module's own
+     * documentation said "for the ten minutes it is worth anything" and "until that row is
+     * pruned" (docs/security/review-2026-09.md finding D-4).
+     *
+     * Dropped on the way out rather than on a timer, because the code is needed for exactly
+     * as long as a render might still happen. A retry before a successful send still has it;
+     * `resend()` mints a fresh row from a fresh context. What remains is the residual the
+     * threat model actually names: a code is readable while the message is queued, which is
+     * seconds to a cron interval, and an operator reading the database during that window is
+     * the host-administrator case that is out of scope for this evidence model.
+     */
+    private function forgetOneTimeCode(): void
+    {
+        $context = $this->context;
+
+        if (! is_array($context) || ($context['otp_code'] ?? null) === null) {
+            return;
+        }
+
+        $context['otp_code'] = null;
+        $this->context = $context;
     }
 
     /**
