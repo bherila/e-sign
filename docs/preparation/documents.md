@@ -166,6 +166,8 @@ is wrong and what to do about it. The classes, from the Stage 0 fixture matrix:
 | `launch_action` | Asks a reader to run an external program. |
 | `unparseable` | Anything that cannot be classified is refused, never passed through. |
 | `size_limit_exceeded`, `object_limit_exceeded`, `invalid_page_geometry` | Resource ceilings from `config('esign.documents')`. The page limit surfaces as `invalid_page_geometry` because the page tree reader stops there. |
+| `decompression_limit_exceeded` | A compressed stream expands past what one stream, or the whole document, is allowed to produce. See the limits table below. |
+| `time_budget_exceeded`, `memory_budget_exceeded` | The backstops. Preflight ran longer, or grew further, than one document is allowed to. |
 
 ### Why a rejected upload is still retained
 
@@ -191,18 +193,79 @@ The costs are real and are accepted explicitly:
 
 `config/esign.php` → `documents`, all overridable per deployment:
 
-| Setting | Default | Enforced by |
-|---|---|---|
-| `max_bytes` | 32 MiB | Form Request (`max:` in KB) **and** the preflight parser |
-| `max_pages` | 500 | Preflight page tree reader |
-| `max_objects` | 100,000 | Preflight object graph |
-| `max_decoded_stream_bytes` | 32 MiB | Preflight, per decoded stream |
-| `allowed_mimetypes` | `application/pdf` | Form Request, against the sniffed type |
+| Setting | Default | Enforced by | What it rejects |
+|---|---|---|---|
+| `max_bytes` | 32 MiB | Form Request (`max:` in KB) **and** the preflight parser | An upload larger than the ceiling, before it is parsed. `size_limit_exceeded`. |
+| `max_pages` | 500 | Preflight page tree reader | A page tree with more pages than the ceiling. Surfaces as `invalid_page_geometry`. |
+| `max_objects` | 100,000 | Preflight, **while the document is read** | A document that declares or materializes more indirect objects than the ceiling. `object_limit_exceeded`. |
+| `max_decoded_stream_bytes` | 32 MiB | Preflight, per decoded stream | One stream that inflates past the ceiling. `decompression_limit_exceeded`. |
+| `max_decompressed_bytes` | 256 MiB | Preflight, aggregated over the document | Every decoded stream in one document added up. `decompression_limit_exceeded`. |
+| `preflight_time_budget_seconds` | 30 | Preflight, between units of work | Backstop. `time_budget_exceeded`. |
+| `preflight_memory_budget_bytes` | 256 MiB | Preflight, between units of work | Backstop. `memory_budget_exceeded`. |
+| `allowed_mimetypes` | `application/pdf` | Form Request, against the sniffed type | Anything that does not sniff as a PDF. |
 
-Object-graph recursion depth is fixed at 32 in the parser and is not configurable.
-Decompression is bounded per stream by `max_decoded_stream_bytes`. The defaults come from
-the measured cost table in [docs/stage0/pdf-import.md](../stage0/pdf-import.md) and are
-expected to move once there is a corpus of real uploads.
+### How the decompression ceilings relate
+
+**The aggregate one is the control.** A per-stream ceiling bounds one stream and nothing
+else, so sixteen streams each just under 32 MiB are ~500 KB on the wire and ~500 MB
+retained — a small upload that exhausts a 512 MB `memory_limit` synchronously inside a web
+request. That was findings U-1 and U-2 in
+[docs/security/review-2026-09.md](../security/review-2026-09.md), and
+`max_decompressed_bytes` is what closes it: the running total is charged as each stream is
+decoded, and the remaining budget is handed to the filter layer as its output cap, so an
+over-budget stream is refused by zlib rather than inflated and then measured.
+
+`max_decompressed_bytes` defaults to **8× `max_bytes`**. The multiple has to be large
+enough that no legitimate document reaches it — Flate content streams expand by roughly an
+order of magnitude, and DCT/JPX image payloads are handed back untouched — and small enough
+that the whole budget still fits inside the 512 MB `memory_limit` the shipped `php.ini`
+sets. 20× would be 640 MiB and could never bind before the process died, which is the
+failure the ceiling exists to prevent.
+
+**The time and memory budgets are backstops, not controls.** They exist for the shapes the
+byte and object budgets do not model: pathological tokenizer input, a filter chain that is
+slow rather than large, an amplification inside the parser library that never reaches this
+application's counters. Set them generously and tune the byte and object budgets instead —
+a symptom makes a poor gate, because memory usage depends on everything else the request
+has already done and a wall clock rejects a legitimate document on a loaded host. Either
+can be switched off with `0`, which leaves the byte and object budgets in force.
+
+### Tuning
+
+Raise a ceiling with the matching `ESIGN_DOCUMENTS_*` variable in `.env`; every value is
+read through `config('esign.documents')` and resolved once in
+`App\Providers\PreparationServiceProvider`, so nothing has to be changed in two places.
+Two relationships are worth keeping when you do:
+
+- keep `max_decompressed_bytes` **above** `max_decoded_stream_bytes`, or the per-stream
+  ceiling can never bind and only the aggregate message is ever produced;
+- keep `max_decompressed_bytes` comfortably **below** the process `memory_limit`. The
+  budget bounds what preflight retains, not what the rest of the request has already
+  allocated.
+
+Object-graph recursion depth is not configurable: the hazard walk fixes its recursion depth
+at 32 and the parser refuses object nesting past 256. The other defaults come from the
+measured cost table in [docs/stage0/pdf-import.md](../stage0/pdf-import.md) and are expected
+to move once there is a corpus of real uploads.
+
+### The bomb corpus
+
+`tests/Fixtures/pdf/bombs/`, generated by `php tests/Fixtures/pdf/generate-bombs.php`, is
+five synthetic documents that each cost far more to parse than to store:
+
+| Fixture | On disk | What it proves |
+|---|---|---|
+| `single-stream-bomb` | ~13 KB | One Flate stream inflating to 12 MiB is refused without being materialized. |
+| `many-small-streams-bomb` | ~18 KB | 16 streams of 1 MiB each: every one is under any sane per-stream ceiling, and only the aggregate budget refuses the 16 MiB total. This is U-1 stated as a fixture. |
+| `deep-nesting-bomb` | ~1 KB | 400 levels of nested arrays fail closed inside the parser rather than recursing until the stack decides. |
+| `object-count-bomb` | ~0.5 KB | A cross-reference stream declaring 5,000,000 entries in 20 bytes is refused while the cross-reference data is read, not after the entries are built. This is U-2. |
+| `large-legitimate-control` | ~69 KB | 40 pages of ordinary contract prose, ~1.6 MiB decoded, is still accepted. A budget that rejects this one is set wrong. |
+
+`tests/Feature/Preparation/PdfPreflightLimitsTest.php` runs them against a deliberately
+small profile — a 4 MiB aggregate budget against a 2 MiB per-stream ceiling — because
+proving the mechanism at 256 MiB would mean inflating 256 MiB inside a paratest worker whose
+own `memory_limit` is 128 MB, to learn what a 4 MiB budget already shows. The shipped numbers are pinned separately in
+`DocumentIntakeTest::test_the_shipped_ceilings_are_the_documented_ones`.
 
 ## Authorization
 
