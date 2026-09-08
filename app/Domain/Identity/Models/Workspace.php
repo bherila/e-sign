@@ -36,6 +36,13 @@ class Workspace extends Model
         'slug',
     ];
 
+    /**
+     * Per-user membership lookups already resolved on this instance.
+     *
+     * @var array<int|string, WorkspaceMembership|null>
+     */
+    protected array $resolvedMemberships = [];
+
     protected static function booted(): void
     {
         static::creating(function (self $workspace): void {
@@ -66,22 +73,58 @@ class Workspace extends Model
      */
     public function members(): BelongsToMany
     {
+        // using() matters: without it the pivot is a generic Pivot with no
+        // casts, so `$member->pivot->role` came back a raw string while the
+        // identical-looking `$membership->role` was a WorkspaceRole. Comparing
+        // the string to the enum is silently false, and calling ->can() on it
+        // is a fatal — a trap that only shows up at the call site.
         return $this->belongsToMany(User::class, 'workspace_memberships')
+            ->using(WorkspaceMembership::class)
             ->withPivot('role')
             ->withTimestamps();
     }
 
+    /**
+     * This person's membership row, or null when they have none.
+     *
+     * Resolved once per user for the lifetime of this instance, so a template
+     * asking `@can('update')` and then `@can('delete')` over a list of
+     * workspaces does not issue two queries per row.
+     *
+     * The cache is per-instance and is not invalidated by a membership written
+     * through some other object; re-read the workspace after granting access.
+     */
     public function membershipFor(User $user): ?WorkspaceMembership
     {
         if (! $user->exists) {
             return null;
         }
 
-        if ($this->relationLoaded('memberships')) {
-            return $this->memberships->firstWhere('user_id', $user->getKey());
+        $userId = $user->getKey();
+
+        if (array_key_exists($userId, $this->resolvedMemberships)) {
+            return $this->resolvedMemberships[$userId];
         }
 
-        return $this->memberships()->where('user_id', $user->getKey())->first();
+        if ($this->relationLoaded('memberships')) {
+            $loaded = $this->memberships->firstWhere('user_id', $userId);
+
+            // A hit in a loaded relation is always genuine, because an eager
+            // load can only ever return a subset of the rows — never an extra
+            // one. A miss is not conclusive: `with(['memberships' => fn ($q) =>
+            // $q->where('role', 'owner')])`, which is what a workspace index
+            // does to display owners, leaves every other member looking like a
+            // non-member. That made $user->can('view', $workspace) false on a
+            // workspace the person is actually in, so a miss falls through to a
+            // query instead of being believed.
+            if ($loaded instanceof WorkspaceMembership) {
+                return $this->resolvedMemberships[$userId] = $loaded;
+            }
+        }
+
+        return $this->resolvedMemberships[$userId] = $this->memberships()
+            ->where('user_id', $userId)
+            ->first();
     }
 
     public function roleFor(User $user): ?WorkspaceRole
