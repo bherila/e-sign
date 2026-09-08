@@ -271,6 +271,13 @@ no text. **This blocks nothing in Stage 0 but must be resolved before any text i
 into a PDF** (assembly, signature appearance, completion report). It is a packaging question
 for the Preparation module, not a sealing one.
 
+*Resolved for Stage 3* (issue #28) by `App\Domain\Preparation\TcPdf\CoreFontMetrics` and
+`resources/fonts/courier.json`. Courier is fixed pitch — every glyph advances 600/1000 em —
+so the committed metrics file states one property of the face rather than a transcribed
+table, and the produced PDF carries only the standard `/BaseFont /Courier` declaration with
+no embedded font program. Helvetica and Times remain unavailable for the same reason they
+always were: their widths can only be transcribed, not derived.
+
 **A validator's document-modification analysis is not a substitute for the byte-range rule.**
 An earlier version of the incremental-update fixture appended a revision containing one
 unreferenced object. pyHanko classed it as *"All modifications relate to signature

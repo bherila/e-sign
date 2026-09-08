@@ -6,7 +6,10 @@ namespace App\Domain\Preparation\TcPdf;
 
 use App\Domain\Preparation\Assembly\AssembledDocument;
 use App\Domain\Preparation\Assembly\AssemblyException;
+use App\Domain\Preparation\Assembly\OverlayImage;
 use App\Domain\Preparation\Assembly\OverlayRectangle;
+use App\Domain\Preparation\Assembly\OverlayText;
+use App\Domain\Preparation\Assembly\PageOverlay;
 use App\Domain\Preparation\Assembly\UnsupportedSourceException;
 use App\Domain\Preparation\Contracts\PdfAssembler;
 use App\Domain\Preparation\Contracts\PdfPreflight;
@@ -18,10 +21,11 @@ use Com\Tecnick\Pdf\Exception;
 use Com\Tecnick\Pdf\Import\ImportException;
 use Com\Tecnick\Pdf\Import\ImportUnsupportedFeatureException;
 use Com\Tecnick\Pdf\Tcpdf;
+use Throwable;
 
 /**
  * Imports every page of a source PDF as a form XObject and writes a new document with
- * overlay rectangles placed in native coordinates.
+ * overlays placed in native coordinates.
  *
  * Two engine behaviours are compensated for here, both documented in
  * docs/stage0/pdf-import.md rather than hidden:
@@ -40,25 +44,39 @@ use Com\Tecnick\Pdf\Tcpdf;
  *
  * /UserUnit is *not* carried through by the engine and is not reconstructed here; the
  * loss is reported by preflight instead.
+ *
+ * ## Appended documents
+ *
+ * `assemble()` also takes whole PDFs to append after the source's pages. They are imported
+ * the same way and numbered after it, so the completion report the Evidence module renders
+ * is a page of the executed document rather than a second file stapled to it in a viewer.
+ * Each appended document goes through preflight too: an unsafe document must not reach the
+ * importer by a different door.
  */
 final readonly class TcPdfAssembler implements PdfAssembler
 {
     /**
      * @param  PdfPreflight|null  $preflight  Runs before import and refuses anything it rejects.
      *                                        Pass null only to observe raw engine behaviour in tests.
+     * @param  string|null  $fontDirectory  Where the bundled text metrics live. Null resolves to
+     *                                      the repository's `resources/fonts`, which is what the
+     *                                      service provider passes explicitly.
      */
-    public function __construct(private ?PdfPreflight $preflight = new TcPdfPreflight) {}
+    public function __construct(
+        private ?PdfPreflight $preflight = new TcPdfPreflight,
+        private ?string $fontDirectory = null,
+    ) {}
 
     /**
-     * @param  array<int, OverlayRectangle>  $overlays
+     * @param  array<int, PageOverlay>  $overlays
+     * @param  array<int, string>  $appendedDocuments
      */
-    public function assemble(string $pdfBytes, array $overlays = []): AssembledDocument
+    public function assemble(string $pdfBytes, array $overlays = [], array $appendedDocuments = []): AssembledDocument
     {
-        if ($this->preflight instanceof PdfPreflight) {
-            $report = $this->preflight->inspect($pdfBytes);
-            if (! $report->isAccepted()) {
-                throw new UnsupportedSourceException($report->rejectionMessage());
-            }
+        $this->assertAcceptable($pdfBytes);
+
+        foreach ($appendedDocuments as $appended) {
+            $this->assertAcceptable($appended);
         }
 
         $startedAt = microtime(true);
@@ -70,46 +88,29 @@ final readonly class TcPdfAssembler implements PdfAssembler
             throw new AssemblyException('The source document does not contain any pages.');
         }
 
-        /** @var array<int, array<int, OverlayRectangle>> $byPage */
+        /** @var array<int, array<int, PageOverlay>> $byPage */
         $byPage = [];
         foreach ($overlays as $overlay) {
-            $byPage[$overlay->page][] = $overlay;
+            $byPage[$overlay->pageNumber()][] = $overlay;
+        }
+
+        if ($this->needsText($overlays)) {
+            CoreFontMetrics::install($this->fontDirectory ?? dirname(__DIR__, 4).'/resources/fonts');
         }
 
         $pdf = new Tcpdf('pt', true, false, true);
 
         try {
-            $sourceId = $pdf->setImportSourceData($pdfBytes);
-            $pageCount = $pdf->getSourcePageCount($sourceId);
+            $written = 0;
 
-            for ($pageNumber = 1; $pageNumber <= $pageCount; $pageNumber++) {
-                $template = $pdf->importPage($sourceId, $pageNumber, [
-                    'box' => 'CropBox',
-                    'respectRotation' => true,
-                    'groupXObject' => true,
-                    'cache' => false,
-                ]);
-
-                $width = $template->getWidth();
-                $height = $template->getHeight();
-
-                $pdf->addPage([
-                    'format' => '',
-                    'width' => $width,
-                    'height' => $height,
-                    'orientation' => $width > $height ? 'L' : 'P',
-                ]);
-
-                [$dx, $dy] = $this->boxOriginCompensation($sourcePages[$pageNumber - 1] ?? null);
-                $pdf->useImportedPage($template, $dx, -$dy, $width, $height, ['keepAspectRatio' => false]);
-
-                foreach ($byPage[$pageNumber] ?? [] as $overlay) {
-                    $pdf->page->addContent($this->overlayContent($pdf, $overlay));
-                }
+            foreach ([[$pdfBytes, $sourcePages], ...$this->appendedWithGeometry($appendedDocuments)] as [$bytes, $geometry]) {
+                $written = $this->writePages($pdf, $bytes, $geometry, $byPage, $written);
             }
 
-            $bytes = $pdf->getOutPDFString();
+            $result = $pdf->getOutPDFString();
             $warnings = $pdf->getWarnings();
+        } catch (AssemblyException $exception) {
+            throw $exception;
         } catch (ImportUnsupportedFeatureException $exception) {
             throw new UnsupportedSourceException(
                 'The import engine refused this document: '.$exception->getMessage(),
@@ -123,13 +124,86 @@ final readonly class TcPdfAssembler implements PdfAssembler
         }
 
         return new AssembledDocument(
-            $bytes,
+            $result,
             $sourcePages,
-            $this->readGeometry($bytes),
+            $this->readGeometry($result),
             array_values($warnings),
             microtime(true) - $startedAt,
             max(0, memory_get_peak_usage(true) - $memoryBefore),
         );
+    }
+
+    /**
+     * @throws UnsupportedSourceException
+     */
+    private function assertAcceptable(string $pdfBytes): void
+    {
+        if (! $this->preflight instanceof PdfPreflight) {
+            return;
+        }
+
+        $report = $this->preflight->inspect($pdfBytes);
+
+        if (! $report->isAccepted()) {
+            throw new UnsupportedSourceException($report->rejectionMessage());
+        }
+    }
+
+    /**
+     * @param  array<int, string>  $appendedDocuments
+     * @return list<array{string, array<int, PageGeometry>}>
+     */
+    private function appendedWithGeometry(array $appendedDocuments): array
+    {
+        return array_values(array_map(
+            fn (string $bytes): array => [$bytes, $this->readGeometry($bytes)],
+            $appendedDocuments,
+        ));
+    }
+
+    /**
+     * Import one document's pages onto the end of the output, drawing the overlays that
+     * address them.
+     *
+     * @param  array<int, PageGeometry>  $geometry
+     * @param  array<int, array<int, PageOverlay>>  $byPage
+     * @param  int  $written  Output pages already written.
+     * @return int Output pages written after this document.
+     */
+    private function writePages(Tcpdf $pdf, string $bytes, array $geometry, array $byPage, int $written): int
+    {
+        $sourceId = $pdf->setImportSourceData($bytes);
+        $pageCount = $pdf->getSourcePageCount($sourceId);
+
+        for ($pageNumber = 1; $pageNumber <= $pageCount; $pageNumber++) {
+            $template = $pdf->importPage($sourceId, $pageNumber, [
+                'box' => 'CropBox',
+                'respectRotation' => true,
+                'groupXObject' => true,
+                'cache' => false,
+            ]);
+
+            $width = $template->getWidth();
+            $height = $template->getHeight();
+
+            $pdf->addPage([
+                'format' => '',
+                'width' => $width,
+                'height' => $height,
+                'orientation' => $width > $height ? 'L' : 'P',
+            ]);
+
+            [$dx, $dy] = $this->boxOriginCompensation($geometry[$pageNumber - 1] ?? null);
+            $pdf->useImportedPage($template, $dx, -$dy, $width, $height, ['keepAspectRatio' => false]);
+
+            $written++;
+
+            foreach ($byPage[$written] ?? [] as $overlay) {
+                $pdf->page->addContent($this->overlayContent($pdf, $overlay, $height));
+            }
+        }
+
+        return $written;
     }
 
     /**
@@ -163,30 +237,132 @@ final readonly class TcPdfAssembler implements PdfAssembler
     }
 
     /**
-     * Emit a stroked rectangle at a native coordinate on the current output page.
+     * Emit one overlay's content on the current output page.
      *
      * The output page has no /Rotate and a CropBox at the origin, so native (x, y) maps
-     * to user space (x, pageHeight - y). tc-lib-pdf's raw rectangle helper already
-     * measures y downwards from the top of the page, so the native values go in directly.
+     * to user space (x, pageHeight - y). tc-lib-pdf's raw helpers already measure y
+     * downwards from the top of the page, so the native values go in directly.
      */
-    private function overlayContent(Tcpdf $pdf, OverlayRectangle $overlay): string
+    private function overlayContent(Tcpdf $pdf, PageOverlay $overlay, float $pageHeight): string
     {
-        [$red, $green, $blue] = $overlay->strokeRgb;
-        $colour = sprintf(
-            '#%02X%02X%02X',
-            (int) round(max(0.0, min(1.0, $red)) * 255),
-            (int) round(max(0.0, min(1.0, $green)) * 255),
-            (int) round(max(0.0, min(1.0, $blue)) * 255),
-        );
+        return match (true) {
+            $overlay instanceof OverlayRectangle => $this->rectangleContent($pdf, $overlay),
+            $overlay instanceof OverlayText => $this->textContent($pdf, $overlay),
+            $overlay instanceof OverlayImage => $this->imageContent($pdf, $overlay, $pageHeight),
+            default => throw new AssemblyException(
+                'Unsupported overlay type '.$overlay::class.'. An overlay that cannot be drawn is '
+                .'refused rather than silently omitted from the document.',
+            ),
+        };
+    }
 
+    private function rectangleContent(Tcpdf $pdf, OverlayRectangle $overlay): string
+    {
         return 'q'."\n".$pdf->graph->getBasicRect(
             $overlay->rect->x,
             $overlay->rect->y,
             $overlay->rect->width,
             $overlay->rect->height,
             'S',
-            ['lineWidth' => $overlay->lineWidth, 'lineColor' => $colour],
+            ['lineWidth' => $overlay->lineWidth, 'lineColor' => $this->hexColour($overlay->strokeRgb)],
         )."\nQ\n";
+    }
+
+    /**
+     * Draw one line of text with its baseline inside the overlay's rectangle.
+     *
+     * With no explicit baseline the cap-height box is centred vertically, which puts a
+     * single-line field value where a reader expects it inside the box the sender drew.
+     */
+    private function textContent(Tcpdf $pdf, OverlayText $overlay): string
+    {
+        if ($overlay->text === '') {
+            return '';
+        }
+
+        $pdf->font->insert($pdf->pon, CoreFontMetrics::FAMILY, '', $overlay->fontSize);
+
+        $baseline = $overlay->baselineOffset
+            ?? (($overlay->rect->height + ($overlay->fontSize * CoreFontMetrics::CAP_HEIGHT_RATIO)) / 2);
+
+        [$red, $green, $blue] = $overlay->fillRgb;
+
+        return 'q'."\n"
+            .sprintf('%F %F %F rg', $this->clamp($red), $this->clamp($green), $this->clamp($blue))."\n"
+            .$pdf->getTextLine($overlay->text, $overlay->rect->x, $overlay->rect->y + $baseline)
+            ."\nQ\n";
+    }
+
+    /**
+     * Place an image inside the overlay's rectangle, fitted and centred.
+     *
+     * The aspect ratio is preserved: a signature stretched to a field's proportions is not
+     * the mark the person drew.
+     */
+    private function imageContent(Tcpdf $pdf, OverlayImage $overlay, float $pageHeight): string
+    {
+        $size = @getimagesizefromstring($overlay->bytes);
+
+        if ($size === false || $size[0] < 1 || $size[1] < 1) {
+            throw new AssemblyException(
+                'An image overlay carried bytes that are not a readable raster image, so the mark '
+                .'could not be drawn. The document is refused rather than published without it.',
+            );
+        }
+
+        $scale = min($overlay->rect->width / $size[0], $overlay->rect->height / $size[1]);
+        $width = $size[0] * $scale;
+        $height = $size[1] * $scale;
+
+        try {
+            $imageId = $pdf->image->add('@'.$overlay->bytes);
+        } catch (Throwable $exception) {
+            throw new AssemblyException(
+                'An image overlay could not be embedded: '.$exception->getMessage(),
+                previous: $exception,
+            );
+        }
+
+        return $pdf->image->getSetImage(
+            $imageId,
+            $overlay->rect->x + (($overlay->rect->width - $width) / 2),
+            $overlay->rect->y + (($overlay->rect->height - $height) / 2),
+            $width,
+            $height,
+            $pageHeight,
+        );
+    }
+
+    /**
+     * @param  array<int, PageOverlay>  $overlays
+     */
+    private function needsText(array $overlays): bool
+    {
+        foreach ($overlays as $overlay) {
+            if ($overlay instanceof OverlayText) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  array{float, float, float}  $rgb
+     */
+    private function hexColour(array $rgb): string
+    {
+        return sprintf(
+            '#%02X%02X%02X',
+            (int) round($this->clamp($rgb[0]) * 255),
+            (int) round($this->clamp($rgb[1]) * 255),
+            (int) round($this->clamp($rgb[2]) * 255),
+        );
+    }
+
+    private function clamp(float $component): float
+    {
+        return max(0.0, min(1.0, $component));
     }
 
     /**
@@ -201,7 +377,7 @@ final readonly class TcPdfAssembler implements PdfAssembler
                 static fn ($page): PageGeometry => $page->geometry,
                 (new PageTreeReader($graph))->pages(),
             );
-        } catch (\Throwable $exception) {
+        } catch (Throwable $exception) {
             throw new AssemblyException('Page geometry could not be read: '.$exception->getMessage(), previous: $exception);
         }
     }

@@ -52,9 +52,17 @@ class PreparationServiceProvider extends ServiceProvider
 
         // The assembler runs preflight again on its own input and refuses anything it
         // rejects, so an unsafe document cannot reach the importer by a different door.
+        //
+        // The font directory is passed in rather than discovered, because the PDF engine
+        // resolves it through a process-wide constant: naming it here keeps "where the
+        // bundled text metrics live" a wiring decision with one answer per deployment.
+        // See App\Domain\Preparation\TcPdf\CoreFontMetrics.
         $this->app->bind(
             PdfAssembler::class,
-            fn (Application $app): PdfAssembler => new TcPdfAssembler($app->make(PdfPreflight::class)),
+            fn (Application $app): PdfAssembler => new TcPdfAssembler(
+                $app->make(PdfPreflight::class),
+                $app->resourcePath('fonts'),
+            ),
         );
 
         $this->app->bind(PdfTextLocator::class, TcPdfTextLocator::class);

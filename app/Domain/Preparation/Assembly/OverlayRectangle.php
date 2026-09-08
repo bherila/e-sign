@@ -12,7 +12,7 @@ use App\Domain\Preparation\Geometry\NativeRect;
  * Stage 0 uses this as the probe for import geometry: a field appearance is placed
  * the same way, so if the rectangle lands correctly a signature box will too.
  */
-final readonly class OverlayRectangle
+final readonly class OverlayRectangle implements PageOverlay
 {
     /**
      * @param  int  $page  1-based page number in the source document.
@@ -28,5 +28,15 @@ final readonly class OverlayRectangle
         if ($page < 1) {
             throw new \InvalidArgumentException('Overlay page numbers are 1-based.');
         }
+    }
+
+    public function pageNumber(): int
+    {
+        return $this->page;
+    }
+
+    public function rectangle(): NativeRect
+    {
+        return $this->rect;
     }
 }
