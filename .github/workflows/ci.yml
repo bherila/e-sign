@@ -242,7 +242,13 @@ jobs:
           # paratest process (root can CREATE DATABASE), so --parallel is safe with a persistent
           # engine, not just SQLite in-memory. Tests\Support\TestDatabaseGuard is what lets
           # SafeTestCase accept this connection at all.
-          php artisan test --configuration=phpunit.ci-db.xml --parallel
+          #
+          # --parallel must come before --configuration: Collision's artisan test command
+          # doesn't declare --configuration in its own option definition and relies on Symfony
+          # Console silently ignoring the unrecognized flag, but that ignoring aborts option
+          # parsing at the point it's hit — anything after it on the command line is dropped.
+          # Put --parallel first so it is bound before parsing reaches --configuration.
+          php artisan test --parallel --configuration=phpunit.ci-db.xml
 
   licenses:
     name: License inventory and SBOM
