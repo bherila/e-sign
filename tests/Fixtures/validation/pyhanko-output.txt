@@ -1,0 +1,325 @@
+pyHanko 0.37.0 (CLI 0.5.0)
+openssl OpenSSL 3.6.4
+trust anchor: tests/Fixtures/crypto/root.test.crt
+validated at: 2026-09-08T07:19:29Z
+
+OK       sealed-b-b.pdf — expected valid, pyHanko exit 0 (fixture-only)
+         PAdES B-B, sealed by the fixture leaf under the fixture root.
+--- pyHanko output ---
+         =========
+         Field 1: 
+         =========
+         
+         
+         Signer info
+         -----------
+         Certificate subject: "Common Name: BWH eSign TEST SEAL - NOT FOR USE, Organization: BWH eSign TEST FIXTURES"
+         Certificate SHA1 fingerprint: c354c1860de96c7dd0d2072f564597bbfbd1bfb5
+         Certificate SHA256 fingerprint: eefbd478f7fcbe57c24562697be4f0c55073b9f76eec23b74339d63ff2b9be7a
+         Trust anchor: "Common Name: BWH eSign TEST SEAL ROOT - NOT FOR USE, Organization: BWH eSign TEST FIXTURES"
+         The signer's certificate is trusted.
+         
+         
+         Integrity
+         ---------
+         The signature is cryptographically sound.
+         
+         The digest algorithm used was 'sha256'.
+         The signature mechanism used was 'rsassa_pkcs1v15'.
+         
+         
+         Signing time
+         ------------
+         Signing time as reported by signer: 2026-09-08T07:19:28+00:00
+         
+         
+         Modifications
+         -------------
+         The signature covers the entire file.
+         
+         
+         Bottom line
+         -----------
+         The signature is judged VALID.
+
+OK       negative-modified-content.pdf — expected invalid, pyHanko exit 1 (fixture-only)
+         Page geometry changed inside the signed byte range, same file length.
+--- pyHanko output ---
+         =========
+         Field 1: 
+         =========
+         
+         
+         Signer info
+         -----------
+         Certificate subject: "Common Name: BWH eSign TEST SEAL - NOT FOR USE, Organization: BWH eSign TEST FIXTURES"
+         Certificate SHA1 fingerprint: c354c1860de96c7dd0d2072f564597bbfbd1bfb5
+         Certificate SHA256 fingerprint: eefbd478f7fcbe57c24562697be4f0c55073b9f76eec23b74339d63ff2b9be7a
+         Trust anchor: "Common Name: BWH eSign TEST SEAL ROOT - NOT FOR USE, Organization: BWH eSign TEST FIXTURES"
+         The signer's certificate is untrusted.
+         
+         
+         Integrity
+         ---------
+         The signature is cryptographically unsound.
+         
+         The digest algorithm used was 'sha256'.
+         The signature mechanism used was 'rsassa_pkcs1v15'.
+         
+         
+         Signing time
+         ------------
+         Signing time as reported by signer: 2026-09-08T07:19:28+00:00
+         
+         
+         Modifications
+         -------------
+         The signature covers the entire file.
+         
+         
+         Bottom line
+         -----------
+         The signature is judged INVALID.
+         
+         
+         Error: Validation failed
+
+OK       negative-truncated.pdf — expected invalid, pyHanko exit 1 (fixture-only)
+         Tail removed, so the /ByteRange over-claims the file.
+--- pyHanko output ---
+         2026-09-08 00:19:30,376 - cli - ERROR - Failed to read PDF file: EOF marker not found
+         Error: Failed to read PDF file: EOF marker not found
+
+OK       negative-incremental-update.pdf — expected invalid, pyHanko exit 1 (fixture-only)
+         An unexpected revision appended, redefining the page object.
+--- pyHanko output ---
+         2026-09-08 00:19:30,771 - pyhanko.sign.diff_analysis.policies - WARNING - Error in diff operation between revision 0 and 1
+         =========
+         Field 1: 
+         =========
+         
+         
+         Signer info
+         -----------
+         Certificate subject: "Common Name: BWH eSign TEST SEAL - NOT FOR USE, Organization: BWH eSign TEST FIXTURES"
+         Certificate SHA1 fingerprint: c354c1860de96c7dd0d2072f564597bbfbd1bfb5
+         Certificate SHA256 fingerprint: eefbd478f7fcbe57c24562697be4f0c55073b9f76eec23b74339d63ff2b9be7a
+         Trust anchor: "Common Name: BWH eSign TEST SEAL ROOT - NOT FOR USE, Organization: BWH eSign TEST FIXTURES"
+         The signer's certificate is trusted.
+         
+         
+         Integrity
+         ---------
+         The signature is cryptographically sound.
+         
+         The digest algorithm used was 'sha256'.
+         The signature mechanism used was 'rsassa_pkcs1v15'.
+         
+         
+         Signing time
+         ------------
+         Signing time as reported by signer: 2026-09-08T07:19:28+00:00
+         
+         
+         Modifications
+         -------------
+         The signature does not cover the entire file.
+         Some modifications may be illegitimate, and they appear to be incompatible with the current document modification policy.
+         
+         
+         Bottom line
+         -----------
+         The signature is judged INVALID.
+         
+         
+         Error: Validation failed
+
+OK       negative-forged-cms.pdf — expected invalid, pyHanko exit 1 (fixture-only)
+         The CMS of another sealed document spliced into /Contents.
+--- pyHanko output ---
+         =========
+         Field 1: 
+         =========
+         
+         
+         Signer info
+         -----------
+         Certificate subject: "Common Name: BWH eSign TEST SEAL - NOT FOR USE, Organization: BWH eSign TEST FIXTURES"
+         Certificate SHA1 fingerprint: c354c1860de96c7dd0d2072f564597bbfbd1bfb5
+         Certificate SHA256 fingerprint: eefbd478f7fcbe57c24562697be4f0c55073b9f76eec23b74339d63ff2b9be7a
+         Trust anchor: "Common Name: BWH eSign TEST SEAL ROOT - NOT FOR USE, Organization: BWH eSign TEST FIXTURES"
+         The signer's certificate is untrusted.
+         
+         
+         Integrity
+         ---------
+         The signature is cryptographically unsound.
+         
+         The digest algorithm used was 'sha256'.
+         The signature mechanism used was 'rsassa_pkcs1v15'.
+         
+         
+         Signing time
+         ------------
+         Signing time as reported by signer: 2026-09-08T07:19:28+00:00
+         
+         
+         Modifications
+         -------------
+         The signature covers the entire file.
+         
+         
+         Bottom line
+         -----------
+         The signature is judged INVALID.
+         
+         
+         Error: Validation failed
+
+OK       negative-untrusted-signer.pdf — expected invalid, pyHanko exit 1 (fixture-only)
+         Cryptographically sound but sealed with a key outside the trusted root.
+--- pyHanko output ---
+         2026-09-08 00:19:31,527 - pyhanko.sign.validation.generic_cms - WARNING - Validation error [cert context: Common Name: BWH eSign TEST SEAL UNTRUSTED - NOT FOR USE, Organization: BWH eSign TEST FIXTURES]: The X.509 certificate provided is self-signed - "Common Name: BWH eSign TEST SEAL UNTRUSTED - NOT FOR USE, Organization: BWH eSign TEST FIXTURES"
+         =========
+         Field 1: 
+         =========
+         
+         
+         Signer info
+         -----------
+         Certificate subject: "Common Name: BWH eSign TEST SEAL UNTRUSTED - NOT FOR USE, Organization: BWH eSign TEST FIXTURES"
+         Certificate SHA1 fingerprint: f87a8311c657b59e9c58b399864aee70e7fd532f
+         Certificate SHA256 fingerprint: 1045540d038f321adc9fc73172d7307ab48d22f06404252d2a8078107831a571
+         Trust anchor: "No path to trust anchor found."
+         The signer's certificate is untrusted.
+         
+         
+         Integrity
+         ---------
+         The signature is cryptographically sound.
+         
+         The digest algorithm used was 'sha256'.
+         The signature mechanism used was 'rsassa_pkcs1v15'.
+         
+         
+         Signing time
+         ------------
+         Signing time as reported by signer: 2026-09-08T07:19:28+00:00
+         
+         
+         Modifications
+         -------------
+         The signature covers the entire file.
+         
+         
+         Bottom line
+         -----------
+         The signature is judged INVALID.
+         
+         
+         Error: Validation failed
+
+OK       sealed-b-t.pdf — expected valid, pyHanko exit 0 (fixture-plus-system)
+         PAdES B-T. The TSA certificate chains to a publicly trusted root, so the timestamp is trusted as well as sound.
+--- pyHanko output ---
+         2026-09-08 00:19:31,901 - cli - WARNING - The configured trust roots are being combined with the operating system's trust list. This fallback is deprecated and will be removed in a future release, when the behaviour of '--trust-replace' becomes the default.
+         =========
+         Field 1: 
+         =========
+         
+         
+         Signer info
+         -----------
+         Certificate subject: "Common Name: BWH eSign TEST SEAL - NOT FOR USE, Organization: BWH eSign TEST FIXTURES"
+         Certificate SHA1 fingerprint: c354c1860de96c7dd0d2072f564597bbfbd1bfb5
+         Certificate SHA256 fingerprint: eefbd478f7fcbe57c24562697be4f0c55073b9f76eec23b74339d63ff2b9be7a
+         Trust anchor: "Common Name: BWH eSign TEST SEAL ROOT - NOT FOR USE, Organization: BWH eSign TEST FIXTURES"
+         The signer's certificate is trusted.
+         
+         
+         Integrity
+         ---------
+         The signature is cryptographically sound.
+         
+         The digest algorithm used was 'sha256'.
+         The signature mechanism used was 'rsassa_pkcs1v15'.
+         
+         
+         Signing time
+         ------------
+         Signing time as reported by signer: 2026-09-08T07:19:28+00:00
+         
+         Signature timestamp token: 2026-09-08T07:19:28+00:00
+         The token is guaranteed to be newer than the signature.
+         This timestamp is backed by a time stamping authority.
+         The timestamp token is cryptographically sound.
+         TSA certificate subject: "Common Name: DigiCert SHA256 RSA4096 Timestamp Responder 2026 1; Organization: DigiCert, Inc.; Country: US"
+         TSA certificate SHA1 fingerprint: 51d9abda034973d84f4266aca48248e6b369c439
+         TSA certificate SHA256 fingerprint: 2da09da7f4131f9fe72db6c5e6e9c9656755af043f1ea742cc0d2120e141ebfc
+         TSA cert trust anchor: "Common Name: DigiCert Trusted Root G4, Organizational Unit: www.digicert.com, Organization: DigiCert Inc, Country: US"
+         The TSA certificate is trusted.
+         
+         
+         Modifications
+         -------------
+         The signature covers the entire file.
+         
+         
+         Bottom line
+         -----------
+         The signature is judged VALID.
+
+OK       sealed-b-t-untrusted-tsa.pdf — expected invalid, pyHanko exit 1 (fixture-only)
+         PAdES B-T with a cryptographically sound timestamp from an authority whose root is trusted nowhere: judged invalid on TSA trust alone.
+--- pyHanko output ---
+         2026-09-08 00:19:32,567 - pyhanko.sign.validation.generic_cms - WARNING - Failed to build path for State/Province: Bayern, Country: DE, Locality: Wuerzburg, Email Address: busilezas@mailbox.org, Common Name: www.freetsa.org, 2.5.4.13: This certificate digitally signs documents and time stamp requests made using the freetsa.org online services, Organizational Unit: TSA, Organization: Free TSA
+         =========
+         Field 1: 
+         =========
+         
+         
+         Signer info
+         -----------
+         Certificate subject: "Common Name: BWH eSign TEST SEAL - NOT FOR USE, Organization: BWH eSign TEST FIXTURES"
+         Certificate SHA1 fingerprint: c354c1860de96c7dd0d2072f564597bbfbd1bfb5
+         Certificate SHA256 fingerprint: eefbd478f7fcbe57c24562697be4f0c55073b9f76eec23b74339d63ff2b9be7a
+         Trust anchor: "Common Name: BWH eSign TEST SEAL ROOT - NOT FOR USE, Organization: BWH eSign TEST FIXTURES"
+         The signer's certificate is trusted.
+         
+         
+         Integrity
+         ---------
+         The signature is cryptographically sound.
+         
+         The digest algorithm used was 'sha256'.
+         The signature mechanism used was 'rsassa_pkcs1v15'.
+         
+         
+         Signing time
+         ------------
+         Signing time as reported by signer: 2026-09-08T07:19:28+00:00
+         
+         Signature timestamp token: 2026-09-08T07:19:29+00:00
+         The token is guaranteed to be newer than the signature.
+         This timestamp is backed by a time stamping authority.
+         The timestamp token is cryptographically sound.
+         TSA certificate subject: "State/Province: Bayern, Country: DE, Locality: Wuerzburg, Email Address: busilezas@mailbox.org, Common Name: www.freetsa.org, 2.5.4.13: This certificate digitally signs documents and time stamp requests made using the freetsa.org online services, Organizational Unit: TSA, Organization: Free TSA"
+         TSA certificate SHA1 fingerprint: 481fd53c534d384180c0286519a036f988544766
+         TSA certificate SHA256 fingerprint: 32e841a95cc1164101ffde41298ef2fc75c1c4372ef095e88a6bbd47dfb191fc
+         TSA cert trust anchor: "No path to trust anchor found."
+         The TSA certificate is untrusted.
+         
+         
+         Modifications
+         -------------
+         The signature covers the entire file.
+         
+         
+         Bottom line
+         -----------
+         The signature is judged INVALID.
+         
+         
+         Error: Validation failed
+
+Checked 8 artifact(s); 0 did not reach the required outcome.
