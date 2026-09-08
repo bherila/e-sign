@@ -59,8 +59,8 @@ return new class extends Migration
             // vocabulary, and SigningVerification maps one onto the other in one place.
             $table->string('verification_method', 32);
 
-            $table->timestamp('started_at');
-            $table->timestamp('expires_at');
+            $table->dateTime('started_at');
+            $table->dateTime('expires_at');
             $table->timestamp('last_seen_at')->nullable();
             $table->timestamp('ended_at')->nullable();
             $table->string('ended_reason', 32)->nullable();
