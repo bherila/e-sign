@@ -51,6 +51,7 @@ use RuntimeException;
  * @property string $field_schema_sha256
  * @property array<string, mixed> $render_settings
  * @property string $consent_policy_version
+ * @property bool|null $require_otp
  * @property AssuranceLevel $assurance_level
  * @property SigningMode $signing_mode
  * @property EnvelopeState $state
@@ -96,6 +97,12 @@ class Envelope extends Model
         'field_schema_sha256',
         'render_settings',
         'consent_policy_version',
+        // Nullable, and null means "inherit the workspace, then the deployment default"
+        // rather than false. Deliberately not a snapshot column: how a guest was let in is
+        // not part of what they agreed to, and the check actually applied is recorded on the
+        // attestation as its verification_method. See
+        // App\Domain\Signing\Sessions\OtpRequirement.
+        'require_otp',
         'assurance_level',
         'signing_mode',
         'state',
@@ -116,6 +123,7 @@ class Envelope extends Model
             'signing_mode' => SigningMode::class,
             'state' => EnvelopeState::class,
             'version' => 'integer',
+            'require_otp' => 'boolean',
             'expiration_hours' => 'integer',
             'sent_at' => 'immutable_datetime',
             'completed_at' => 'immutable_datetime',

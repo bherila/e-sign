@@ -28,8 +28,13 @@ jobs:
           pnpm run build
           pnpm run test
 
+      # Mirror ci.yml: the suite expects an application .env to exist (the environment probe
+      # checks for it), and paratest gives the same parallelism the PR checks use.
+      - name: Prepare Laravel environment
+        run: cp .env.example .env && php artisan key:generate --no-interaction --force
+
       - name: Run PHPUnit
-        run: vendor/bin/phpunit --configuration phpunit.xml
+        run: php artisan test --parallel
 
   deploy:
     runs-on: ubuntu-24.04-arm

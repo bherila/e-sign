@@ -156,13 +156,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        engine: [mysql, mariadb]
+        # `engine` names the job; `driver` is the Laravel connection. MariaDB 10.6 is what the
+        # shared-hosting instance runs and it is stricter about NOT NULL TIMESTAMP defaults than
+        # 11.4, so both MariaDB releases are exercised.
         include:
-          - engine: mysql
+          - engine: mysql-8.4
+            driver: mysql
             image: mysql:8.4
             health_cmd: mysqladmin ping --silent
-          - engine: mariadb
+          - engine: mariadb-11.4
+            driver: mariadb
             image: mariadb:11.4
+            health_cmd: healthcheck.sh --connect --innodb_initialized
+          - engine: mariadb-10.6
+            driver: mariadb
+            image: mariadb:10.6
             health_cmd: healthcheck.sh --connect --innodb_initialized
     services:
       database:
@@ -182,13 +190,13 @@ jobs:
           --health-retries=10
 
     env:
-      DB_CONNECTION: ${{ matrix.engine }}
+      DB_CONNECTION: ${{ matrix.driver }}
       DB_HOST: 127.0.0.1
       DB_PORT: 3306
       DB_DATABASE: esign_ci_test
       DB_USERNAME: root
       DB_PASSWORD: root
-      ESIGN_TEST_DB_ENGINE: ${{ matrix.engine }}
+      ESIGN_TEST_DB_ENGINE: ${{ matrix.driver }}
 
     steps:
       - uses: actions/checkout@v7
@@ -231,7 +239,7 @@ jobs:
           # environment, so this job overrides them in a generated copy instead of weakening the
           # committed defaults.
           sed \
-            -e 's#<env name="DB_CONNECTION" value="sqlite"/>#<env name="DB_CONNECTION" value="${{ matrix.engine }}"/>#' \
+            -e 's#<env name="DB_CONNECTION" value="sqlite"/>#<env name="DB_CONNECTION" value="${{ matrix.driver }}"/>#' \
             -e 's#<env name="DB_DATABASE" value=":memory:"/>#<env name="DB_DATABASE" value="esign_ci_test"/>#' \
             phpunit.xml > phpunit.ci-db.xml
 

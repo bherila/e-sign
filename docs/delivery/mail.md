@@ -1,7 +1,7 @@
 # Outbound mail
 
 Every transactional message BWH eSign sends — invitation, reminder, decline, cancellation,
-completion, operator failure notice — goes through the outbox in
+completion, guest sign-in code, operator failure notice — goes through the outbox in
 `app/Domain/Delivery/Mail`. Nothing calls `Mail::send()` directly.
 
 The reason is a single question that has to be answerable months later: *was this person
@@ -116,6 +116,7 @@ from the same source and the two cannot drift.
 | `cancelled` | every recipient who was invited, including those who already signed | no |
 | `expired` | every recipient who was invited, and the sender | no |
 | `completed` | every party | a download URL, optional |
+| `otp` | a guest starting a signing session | **never** — see below |
 | `admin_failure` | the workspace's owners | no |
 
 `expired` is separate from `cancelled` rather than reusing it. An expiry is the clock
@@ -126,9 +127,21 @@ Who receives each one, and when, is `docs/delivery/envelope-events.md`. The shor
 mail is scheduled after the transition commits, never inside it, and a recipient who has
 never been invited is never told about an agreement they were not shown.
 
+`otp` is the exception to that paragraph: nothing in the envelope lifecycle sends one. It is
+issued by `App\Domain\Signing\Sessions\OtpChallenges` when a guest asks to start a signing
+session on an envelope that requires a mailed code.
+
 No images, no remote stylesheets, no third-party assets, no tracking pixels. A message that
 fetches nothing renders identically in a client with remote content blocked, and cannot
 report when it was read.
+
+`otp` is the only template that carries a credential in its *text*, and the only one that
+must never carry a link at all: a code and a one-click URL in the same message would let one
+forwarded mail satisfy both halves of the check the code exists to separate. It follows that
+the code is stored — the outbox renders from a persisted context, which is what makes delivery
+survive a crash — so a live code sits in `outbound_mails.context` for the ten minutes it is
+worth anything. `docs/signing/guest-access.md` states that limit rather than implying the code
+is a secret from the operator.
 
 The completion mail does **not** attach the executed PDF. That is a decision, not an
 unfinished feature: mail is not a place to put an executed instrument that has to stay

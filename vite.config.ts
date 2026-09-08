@@ -77,6 +77,7 @@ export default defineConfig({
                 'resources/js/sign-in.tsx',
                 'resources/js/dashboard.tsx',
                 'resources/js/editor.tsx',
+                'resources/js/signing.tsx',
             ],
       refresh: true,
     }),

@@ -38,6 +38,8 @@ package-lock.json
 /public/vendor
 /public/hot
 /public/storage
+# scripts/build-release.sh output: the cPanel release bundle and its checksum.
+/dist
 /storage/*.key
 /storage/pail
 /vendor

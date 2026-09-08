@@ -9,7 +9,7 @@ use App\Domain\Delivery\Events\Console\ExpireCommand;
 use App\Domain\Delivery\Events\Console\RemindCommand;
 use App\Domain\Delivery\Events\DeliveryEnvelopeEventSink;
 use App\Domain\Delivery\Events\DownloadUrlMinter;
-use App\Domain\Delivery\Events\PlaceholderSigningUrlMinter;
+use App\Domain\Delivery\Events\InvitationSigningUrlMinter;
 use App\Domain\Delivery\Events\SigningUrlMinter;
 use App\Domain\Delivery\Events\UnconfiguredDownloadUrlMinter;
 use App\Domain\Delivery\Mail\Console\MailBacklogCommand;
@@ -20,6 +20,7 @@ use App\Domain\Delivery\Outbound\DestinationAllowlist;
 use App\Domain\Delivery\Outbound\DestinationPolicy;
 use App\Domain\Delivery\Outbound\HostResolver;
 use App\Domain\Delivery\Outbound\SystemHostResolver;
+use App\Domain\Delivery\Queue\Console\WorkBoundedCommand;
 use App\Domain\Delivery\Webhooks\Console\BacklogCommand;
 use App\Domain\Delivery\Webhooks\Console\EndpointCreateCommand;
 use App\Domain\Delivery\Webhooks\Console\EndpointDisableCommand;
@@ -89,15 +90,12 @@ final class DeliveryServiceProvider extends ServiceProvider
         $this->app->bind(SnsMessageVerifier::class, RejectingSnsMessageVerifier::class);
 
         /*
-         * Invitations fail loudly until guest access binds a real minter.
-         *
-         * PlaceholderSigningUrlMinter throws rather than returning a plausible link, so an
-         * install that starts sending envelopes before issue #36 lands gets a failed job it
-         * can see instead of a mailbox full of dead links it cannot recall. The download
-         * minter is the opposite and returns null, because a completion notice without a
-         * link is still true (App\Mail\CompletedMail).
+         * Signing links are one-shot invitations issued by the Signing module. Every mint
+         * revokes the recipient's previous live link, so a reminder always carries a working
+         * one and the earlier one is dead. Any failure surfaces as SigningUrlUnavailable and
+         * the scheduling job fails visibly; nothing is ever sent with a placeholder link.
          */
-        $this->app->bind(SigningUrlMinter::class, PlaceholderSigningUrlMinter::class);
+        $this->app->bind(SigningUrlMinter::class, InvitationSigningUrlMinter::class);
         $this->app->bind(DownloadUrlMinter::class, UnconfiguredDownloadUrlMinter::class);
     }
 
@@ -133,6 +131,7 @@ final class DeliveryServiceProvider extends ServiceProvider
                 MailBacklogCommand::class,
                 RemindCommand::class,
                 ExpireCommand::class,
+                WorkBoundedCommand::class,
             ]);
         }
     }
