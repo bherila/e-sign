@@ -12,6 +12,8 @@ export default defineConfig({
                 'resources/js/app.jsx',
                 'resources/js/home.tsx',
                 'resources/js/navbar.tsx',
+                'resources/js/sign-in.tsx',
+                'resources/js/dashboard.tsx',
             ],
       refresh: true,
     }),
