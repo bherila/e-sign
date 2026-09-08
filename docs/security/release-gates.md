@@ -12,9 +12,9 @@ A gate that is upheld by careful code and no assertion is **not proven**, and is
 however good the code is — that distinction is the whole point of the document. Where a gate is
 partly proven, the table says which part.
 
-**State of the union.** Of fifteen gates: **six proven**, **six partly proven**, **three not
-yet proven**. Nothing here should be read as a claim that this product is ready for a first
-production use; `docs/HANDOFF.md`'s status line and `docs/assurance.md` say what it is.
+**State of the union.** Of fifteen gates: **seven proven** (1, 3, 4, 5, 6, 7, 10), **six partly
+proven** (8, 9, 11, 12, 14, 15), **two not yet proven** (2 PAdES profile, 13 migration).
+Nothing here should be read as a claim that this product is ready for a first production use; `docs/HANDOFF.md`'s status line and `docs/assurance.md` say what it is.
 
 ---
 
