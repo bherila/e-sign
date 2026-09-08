@@ -50,6 +50,19 @@ composer dev
 Development and tests use SQLite; tests run in-memory and refuse any other driver. Do not run
 migrations unless you mean to: `php artisan migrate --database=sqlite --no-interaction`.
 
+There is no seeded account and no default password. With no OAuth client configured the
+application runs in standalone mode; create the first account and give it a workspace:
+
+```bash
+php artisan esign:create-user --name="Ada Lovelace" --email="ada@example.com"
+php artisan esign:bootstrap-owner --user="ada@example.com" --workspace="acme"
+```
+
+Signing in is not the same as having access to anything: nobody becomes an administrator by
+logging in, and `esign:bootstrap-owner` is the only thing that grants the first owner. See
+[docs/operations/bootstrap.md](docs/operations/bootstrap.md), which covers both this and the
+single sign-on shape.
+
 Validation:
 
 ```bash
@@ -77,7 +90,9 @@ invite, sign, seal, download, validate, deliver a verified webhook, recover from
 interruption):
 
 - **Docker**: one image in web, worker, and scheduler roles behind an existing reverse proxy;
-  signing keys mounted only into the worker role. See [DOCKER.md](DOCKER.md); the consumer's
+  signing keys mounted only into the worker role. See [DOCKER.md](DOCKER.md) for the image itself
+  and [docs/operations/deploy-docker.md](docs/operations/deploy-docker.md) for the consumer
+  pipeline's release/rollback steps and the env-file/key-directory contracts; the consumer's
   compose stack has an `esign` profile that runs this image beside it.
 - **cPanel / shared hosting**: prebuilt assets, `public/` as document root, cron-driven bounded
   queue work with a database lease. `.github/workflows/deploy.yml` is the rsync path and is off

@@ -77,6 +77,17 @@ final class HttpTimestampAuthorityTest extends TestCase
                 'https://[::ffff:100.64.1.2]/tsr',
                 '/non-public address/',
             ],
+            // IPv6 transition mechanisms carry an embedded IPv4 address, so a
+            // v6 literal can name a v4 destination the v4 checks refuse. Before
+            // these prefixes were listed, the first two reached loopback and
+            // RFC 1918 through the whole policy.
+            'nat64-mapped loopback' => ['https://[64:ff9b::7f00:1]/tsr', '/non-public address/'],
+            'nat64-mapped rfc 1918' => ['https://[64:ff9b::a00:1]/tsr', '/non-public address/'],
+            'nat64 local-use prefix' => ['https://[64:ff9b:1::1]/tsr', '/non-public address/'],
+            '6to4 encapsulating loopback' => ['https://[2002:7f00:1::1]/tsr', '/non-public address/'],
+            '6to4 relay anycast' => ['https://192.88.99.1/tsr', '/non-public address/'],
+            'teredo' => ['https://[2001:0:1:2:3:4:5:6]/tsr', '/non-public address/'],
+            'discard-only' => ['https://[100::1]/tsr', '/non-public address/'],
             'a host that does not resolve' => [
                 'https://tsa.invalid/tsr',
                 '/does not resolve|non-public address/',
@@ -84,13 +95,36 @@ final class HttpTimestampAuthorityTest extends TestCase
         ];
     }
 
-    public function test_a_public_ipv6_literal_passes_the_policy(): void
+    /**
+     * The extra-range list must not over-reach.
+     *
+     * The addresses here sit immediately outside a refused prefix, or inside a
+     * /32 that merely shares a first hextet with Teredo. A policy that refused
+     * any of them would break ordinary public authorities.
+     */
+    #[DataProvider('allowedDestinations')]
+    public function test_it_allows_a_public_destination(string $url): void
     {
-        // RFC 3849 documentation space: a global-scope address the policy has no
-        // reason to refuse, so the extra-range check must not over-reach.
-        (new HttpTimestampAuthority('https://[2001:db8::1]/tsr'))->assertUsable();
+        (new HttpTimestampAuthority($url))->assertUsable();
 
-        $this->assertTrue(true);
+        $this->expectNotToPerformAssertions();
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function allowedDestinations(): array
+    {
+        return [
+            'documentation ipv4' => ['https://203.0.113.10/tsr'],
+            'documentation ipv6' => ['https://[2001:db8::1]/tsr'],
+            'a global-scope ipv6 address' => ['https://[2606:4700::1]/tsr'],
+            'one below carrier-grade nat' => ['https://100.63.255.255/tsr'],
+            'one above carrier-grade nat' => ['https://100.128.0.0/tsr'],
+            'one above the ietf protocol block' => ['https://192.0.1.0/tsr'],
+            'one above benchmarking space' => ['https://198.20.0.0/tsr'],
+            'one above the 6to4 relay block' => ['https://192.88.100.0/tsr'],
+        ];
     }
 
     public function test_plaintext_http_is_accepted_only_with_the_explicit_opt_in(): void

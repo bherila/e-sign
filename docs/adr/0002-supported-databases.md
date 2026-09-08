@@ -1,6 +1,8 @@
 # 0002. Support MySQL 8 and MariaDB, tested in CI
 
-**Status:** accepted, 2026-09-07 (owner decision)
+**Status:** accepted, 2026-09-07 (owner decision). The CI matrix exists: the `database` job in
+`.github/workflows/ci.yml` runs migrations and the feature suite against MySQL 8.4 and MariaDB
+11.4 service containers on every backend-touching change.
 
 ## Context
 

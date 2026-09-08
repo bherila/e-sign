@@ -17,8 +17,9 @@ use App\Domain\Evidence\Sealing\Exceptions\TimestampAuthorityUnreachableExceptio
  * an SSRF primitive reachable from a queue worker. It refuses anything but
  * HTTP(S), refuses plaintext HTTP unless the operator opted in, refuses
  * credentials in the URL, refuses a host that resolves to a loopback,
- * private, link-local, or otherwise reserved address, and pins the connection
- * to the address it validated so a second DNS answer cannot move the target.
+ * private, link-local, carrier-grade-NAT, IPv6-transition, or otherwise
+ * reserved address, and pins the connection to the addresses it validated so
+ * neither a second DNS answer nor an unresolved record can move the target.
  * Redirects are never followed, since only the first hop is checked.
  */
 final class HttpTimestampAuthority implements TimestampAuthority
@@ -191,11 +192,19 @@ final class HttpTimestampAuthority implements TimestampAuthority
     }
 
     /**
-     * Resolve a host and require every answer to be a public address.
+     * Resolve a host and require every answer received to be a public address.
      *
-     * Every answer, not just the one that would be used: a host that resolves
-     * to both a public and an internal address is refused outright rather than
+     * Every answer, not just the one that would be used: a host resolving to
+     * both a public and an internal address is refused outright rather than
      * left to connection ordering.
+     *
+     * "Received" is the exact guarantee. An AAAA lookup that fails rather than
+     * returning nothing — SERVFAIL, a timeout, a resolver that refuses the
+     * query type — is indistinguishable from "no AAAA record" through
+     * dns_get_record(), and is treated as the latter, because refusing on it
+     * would make sealing fail on any network whose resolver filters AAAA. The
+     * connection is pinned to the addresses that were checked, so an
+     * unvalidated record cannot be reached even if one existed.
      *
      * @throws TimestampAuthorityDestinationException
      */
@@ -276,9 +285,17 @@ final class HttpTimestampAuthority implements TimestampAuthority
      * public internet.
      *
      * `FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE` covers RFC 1918,
-     * loopback, link-local, IPv6 ULA, and IPv4-mapped IPv6, but it lets through
-     * RFC 6598 carrier-grade NAT — which is exactly the address space a shared
-     * host's internal network sits in — and RFC 6890 IETF protocol assignments.
+     * loopback, link-local, IPv6 unique-local, and IPv4-mapped IPv6. It lets
+     * through several ranges that still reach somewhere other than the public
+     * internet, and two of those are transition mechanisms that carry an
+     * embedded IPv4 address — so a v6 literal can name a v4 destination the v4
+     * checks would have refused. Measured, not assumed: before this list,
+     * `http://[64:ff9b::7f00:1]/` (NAT64-mapped 127.0.0.1) and
+     * `http://[2002:7f00:1::1]/` (6to4-encapsulated 127.0.0.1) both passed the
+     * whole policy.
+     *
+     * A timestamp authority is never inside any of these, so each prefix is
+     * refused whole rather than decoded and re-checked.
      */
     private function isInExtraReservedRange(string $address): bool
     {
@@ -286,18 +303,56 @@ final class HttpTimestampAuthority implements TimestampAuthority
         $candidate = preg_replace('/^::ffff:/i', '', $address) ?? $address;
 
         $packed = @inet_pton($candidate);
-        if ($packed === false || strlen($packed) !== 4) {
+        if ($packed === false) {
             return false;
         }
 
-        $value = unpack('N', $packed);
-        if ($value === false) {
-            return false;
+        if (strlen($packed) === 4) {
+            return $this->isInAnyPrefix($packed, [
+                ['100.64.0.0', 10],   // RFC 6598 carrier-grade NAT
+                ['192.0.0.0', 24],    // RFC 6890 IETF protocol assignments
+                ['192.88.99.0', 24],  // RFC 7526 6to4 relay anycast
+                ['198.18.0.0', 15],   // RFC 2544 benchmarking
+            ]);
         }
 
-        foreach ([['100.64.0.0', 10], ['192.0.0.0', 24], ['198.18.0.0', 15]] as [$network, $bits]) {
-            $mask = -1 << (32 - $bits) & 0xFFFFFFFF;
-            if (($value[1] & $mask) === (ip2long($network) & $mask)) {
+        return $this->isInAnyPrefix($packed, [
+            ['64:ff9b::', 96],    // RFC 6052 NAT64 well-known prefix
+            ['64:ff9b:1::', 48],  // RFC 8215 NAT64 local-use prefix
+            ['2002::', 16],       // RFC 3056 6to4
+            ['2001::', 32],       // RFC 4380 Teredo
+            ['100::', 64],        // RFC 6666 discard-only
+        ]);
+    }
+
+    /**
+     * Whether a packed address falls in any of the given prefixes.
+     *
+     * Compared byte-wise on the packed form, so one routine serves both address
+     * families and neither needs 128-bit arithmetic.
+     *
+     * @param  list<array{string, int}>  $prefixes  Network address and prefix length.
+     */
+    private function isInAnyPrefix(string $packed, array $prefixes): bool
+    {
+        foreach ($prefixes as [$network, $bits]) {
+            $networkPacked = @inet_pton($network);
+            if ($networkPacked === false || strlen($networkPacked) !== strlen($packed)) {
+                continue;
+            }
+
+            $wholeBytes = intdiv($bits, 8);
+            if (substr($packed, 0, $wholeBytes) !== substr($networkPacked, 0, $wholeBytes)) {
+                continue;
+            }
+
+            $remainingBits = $bits % 8;
+            if ($remainingBits === 0) {
+                return true;
+            }
+
+            $mask = 0xFF << (8 - $remainingBits) & 0xFF;
+            if ((ord($packed[$wholeBytes]) & $mask) === (ord($networkPacked[$wholeBytes]) & $mask)) {
                 return true;
             }
         }

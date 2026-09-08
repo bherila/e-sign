@@ -10,6 +10,11 @@ set -eu
 ROLE="${1:-web}"
 [ $# -gt 0 ] && shift
 
+# .docker/scripts/healthcheck.sh reads this to decide what "healthy" means for the role running
+# in this container (nginx is only present for `web`; worker/scheduler are checked by process
+# liveness instead). Written before exec, so it is in place for the very first HEALTHCHECK tick.
+echo "$ROLE" > /tmp/esign-role
+
 if [ "${APP_ENV:-production}" = "production" ]; then
     php artisan config:cache
     php artisan route:cache

@@ -1,7 +1,5 @@
 <?php
 
-use Illuminate\Support\Str;
-
 return [
 
     /*
@@ -127,10 +125,10 @@ return [
     |
     */
 
-    'cookie' => env(
-        'SESSION_COOKIE',
-        Str::slug((string) env('APP_NAME', 'laravel')).'-session'
-    ),
+    // Pinned rather than derived from APP_NAME, so renaming the application cannot silently
+    // rename the cookie and sign everybody out, and so two deployments sharing a host stay
+    // distinguishable.
+    'cookie' => env('SESSION_COOKIE', 'esign_session'),
 
     /*
     |--------------------------------------------------------------------------
@@ -156,6 +154,9 @@ return [
     |
     */
 
+    // Keep this null. The session cookie is host-only: it is never shared with the identity
+    // provider or with a sibling application, and single sign-on is the OAuth redirect, not a
+    // shared parent-domain cookie (docs/HANDOFF.md section 5).
     'domain' => env('SESSION_DOMAIN'),
 
     /*
@@ -169,7 +170,11 @@ return [
     |
     */
 
-    'secure' => env('SESSION_SECURE_COOKIE'),
+    // On by default in production. A session cookie without Secure is one plaintext request
+    // away from being read off the wire, and the failure is invisible - everything still
+    // works - so it must not be something a deployment has to remember to set. Off elsewhere
+    // so local development over http still has a session.
+    'secure' => (bool) env('SESSION_SECURE_COOKIE', env('APP_ENV') === 'production'),
 
     /*
     |--------------------------------------------------------------------------

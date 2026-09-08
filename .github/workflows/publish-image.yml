@@ -71,6 +71,17 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.arch }}
           cache-to: type=gha,scope=${{ matrix.arch }},mode=max
           provenance: false
+          # Applied to the image config at build time (takes precedence over the Dockerfile's
+          # own static LABEL fallback, which only fires for a local `docker build`). Revision and
+          # version are real here: the exact commit, and the release tag when this run is a
+          # release, else the commit again.
+          labels: |
+            org.opencontainers.image.title=BWH eSign
+            org.opencontainers.image.description=Self-hosted PDF agreement preparation, e-signing, PAdES sealing, and evidence retention
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=MIT AND LGPL-3.0-or-later
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.event.release.tag_name || github.sha }}
           secrets: |
             composer_auth={"github-oauth":{"github.com":"${{ secrets.GITHUB_TOKEN }}"}}
 
@@ -93,6 +104,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Labels are set at build time in the `build` job (docker/build-push-action's `labels:`
+      # input becomes part of each per-arch image's config); `imagetools create` below only
+      # combines existing per-arch manifests by reference and cannot add labels to them, so this
+      # step computes tags only.
       - name: Compute tags
         id: meta
         uses: docker/metadata-action@v5
@@ -104,10 +119,6 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ github.event_name == 'release' }}
-          labels: |
-            org.opencontainers.image.title=BWH eSign
-            org.opencontainers.image.licenses=MIT AND LGPL-3.0-or-later
-            org.opencontainers.image.description=Self-hosted PDF agreement preparation, e-signing, PAdES sealing, and evidence retention
 
       - name: Create and push manifest
         run: |
@@ -134,3 +145,72 @@ jobs:
           package-type: container
           min-versions-to-keep: 30
           ignore-versions: '^(latest|main|v?\d+\.\d+(\.\d+)?)$'
+
+  sbom:
+    # No embedded SBOM attestation: the per-arch native build + push-by-digest + `imagetools
+    # create` manifest assembly above does not cleanly carry attestation manifests through the
+    # merge (see DOCKER.md "SBOM"). Instead, this regenerates the same CycloneDX inventory the
+    # CI `licenses` job produces, for the exact commit this run publishes, and attaches it where
+    # a consumer of this image can find it: the GitHub Release on a release, and a workflow
+    # artifact on every push. This *is* the image's SBOM.
+    name: License inventory and SBOM
+    needs: manifest
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: dom, curl, libxml, mbstring, zip
+          coverage: none
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install production dependencies
+        timeout-minutes: 4
+        run: |
+          composer install --no-interaction --prefer-dist --no-dev --no-scripts &
+          composer_pid=$!
+          pnpm install --frozen-lockfile --prod --ignore-scripts &
+          pnpm_pid=$!
+          wait "$composer_pid"; composer_status=$?
+          wait "$pnpm_pid"; pnpm_status=$?
+          test "$composer_status" -eq 0 -a "$pnpm_status" -eq 0
+
+      - name: Collect license inventories and build the SBOM
+        run: |
+          mkdir -p build/licenses
+          composer licenses --format=json --no-interaction > build/licenses/composer-licenses.json
+          pnpm licenses list --json --prod > build/licenses/pnpm-licenses.json
+          php scripts/check-licenses.php \
+            --composer=build/licenses/composer-licenses.json \
+            --pnpm=build/licenses/pnpm-licenses.json \
+            --sbom=build/licenses/sbom.cdx.json
+
+      - name: Upload the SBOM as a workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: image-sbom
+          path: build/licenses/sbom.cdx.json
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Attach the SBOM to the GitHub Release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" build/licenses/sbom.cdx.json \
+            --repo "${{ github.repository }}" --clobber

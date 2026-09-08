@@ -1,0 +1,76 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Domain\Preparation\Schema;
+
+/**
+ * Stable machine-readable reasons a field document is rejected.
+ *
+ * These codes are part of the API surface: the editor maps them to messages next to the
+ * offending field, and the native API returns them verbatim. The TypeScript mirror in
+ * `resources/js/schema/fieldSchema.ts` carries the same set, and a test asserts the two agree.
+ * Renaming a code is a breaking change.
+ */
+enum ValidationCode: string
+{
+    /** A required property or whole section is absent: a partial import, never a default. */
+    case MissingProperty = 'missing_property';
+
+    /** A property the schema does not declare. Unknown properties are refused, not ignored. */
+    case UnknownProperty = 'unknown_property';
+
+    /** A property of the wrong JSON type (string where a number belongs, and so on). */
+    case InvalidType = 'invalid_type';
+
+    /** A string that does not match its declared format (identifier, variable name, length). */
+    case InvalidFormat = 'invalid_format';
+
+    /** An email address that is not usable as one. */
+    case InvalidEmail = 'invalid_email';
+
+    /** `recipients`, `signing_order`, or a signing stage is present but empty. */
+    case EmptyCollection = 'empty_collection';
+
+    /** `schema_version` is absent, malformed, or a version this importer does not implement. */
+    case SchemaVersionUnsupported = 'schema_version_unsupported';
+
+    /** `coordinate_space` declares a convention this version does not implement. */
+    case UnsupportedCoordinateSpace = 'unsupported_coordinate_space';
+
+    /** A field `type` outside the declared capability list. */
+    case UnsupportedFieldType = 'unsupported_field_type';
+
+    /** Two recipients or two fields share an id. */
+    case DuplicateId = 'duplicate_id';
+
+    /** Two fields share a template alias. */
+    case DuplicateAlias = 'duplicate_alias';
+
+    /** A `recipient_id`, or an id in `signing_order`, names a recipient that does not exist. */
+    case UnknownRecipient = 'unknown_recipient';
+
+    /** A declared recipient appears in no signing stage, so they would never be asked to sign. */
+    case RecipientNotInSigningOrder = 'recipient_not_in_signing_order';
+
+    /** A recipient appears in more than one signing stage, or twice in one. */
+    case RecipientDuplicatedInSigningOrder = 'recipient_duplicated_in_signing_order';
+
+    /** `page` is below 1, or beyond the page count of the document being validated against. */
+    case PageOutOfRange = 'page_out_of_range';
+
+    /** A coordinate is NaN or infinite. */
+    case CoordinateNotFinite = 'coordinate_not_finite';
+
+    /** `rect.x` or `rect.y` is negative, which is outside the page by construction. */
+    case CoordinateNegative = 'coordinate_negative';
+
+    /** `rect.width` or `rect.height` is zero or negative: not a placeable field. */
+    case DimensionNotPositive = 'dimension_not_positive';
+
+    /** The rectangle extends past the edge of the page it is placed on. */
+    case RectOutOfPage = 'rect_out_of_page';
+
+    /** A `prefill.variable` that the supplied variable set cannot resolve. */
+    case UnresolvedPrefillVariable = 'unresolved_prefill_variable';
+}

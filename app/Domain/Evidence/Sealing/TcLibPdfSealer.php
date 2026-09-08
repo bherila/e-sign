@@ -92,6 +92,22 @@ final class TcLibPdfSealer implements PdfSealer
             );
         }
 
+        // The evidence record is about to name a key id. Check that the
+        // certificate the CMS actually verified against is the one that key id
+        // refers to, so the record cannot attribute an artifact to material
+        // that did not seal it. This is not trust-chain validation, which stays
+        // out of scope; it is an identity check between two values already in
+        // hand.
+        if (
+            $material->certificateFingerprint !== ''
+            && $report->signerFingerprint !== $material->certificateFingerprint
+        ) {
+            throw new SealFailedException(
+                'The sealed artifact was signed by a certificate other than the configured seal material '.
+                '(key id "'.$material->keyId.'"). No artifact is published.'
+            );
+        }
+
         return new SealedArtifact(
             pdf: $sealed,
             level: $request->level,

@@ -3,6 +3,15 @@
 use App\Models\User;
 
 return [
+    // Package-owned API routes. Password reset, authenticated password change, and email
+    // two-factor stay enabled: they are the standalone mode's supporting flows, and the
+    // application owns the pages that call them.
+    //
+    // An SSO-only deployment should set 'password_resets', 'change_password', and
+    // 'two_factor' to false. Nothing in SSO mode can use a local password — there is no
+    // password login route, and the standalone controller refuses any user that has an
+    // identity binding — but an endpoint that sets a credential nobody needs is still an
+    // endpoint worth not having.
     'routes' => [
         'enabled' => true,
         'prefix' => 'api',
@@ -20,7 +29,9 @@ return [
         'base_url' => env('OAUTH_PROVIDER_URL', 'https://bherila.net'),
         'client_id' => env('OAUTH_CLIENT_ID'),
         'client_secret' => env('OAUTH_CLIENT_SECRET'),
-        'redirect_uri' => env('OAUTH_REDIRECT_URI', rtrim((string) env('APP_URL'), '/').'/oauth/callback'),
+        // Must match the route this application registers (routes/web.php) and the exact
+        // string registered at the provider.
+        'redirect_uri' => env('OAUTH_REDIRECT_URI', rtrim((string) env('APP_URL'), '/').'/auth/callback'),
         'scope' => env('OAUTH_SCOPE', 'identity:read'),
         'authorize_path' => '/oauth/authorize',
         'token_path' => '/oauth/token',
@@ -118,8 +129,12 @@ return [
     ],
 
     'audit' => [
-        // 'null' discards events (default); 'database' persists them to the audit table.
-        'driver' => env('BHERILA_AUTH_AUDIT_DRIVER', 'null'),
+        // 'null' discards events; 'database' persists them to the audit table. Enabled here
+        // because the login throttle below is backed by the same rows: with a null driver
+        // nothing is recorded, so nothing is ever counted and the lockout silently does
+        // nothing. Authentication events stay in this table; `esign_audit_events` is the
+        // application trail (docs/ARCHITECTURE.md).
+        'driver' => env('BHERILA_AUTH_AUDIT_DRIVER', 'database'),
         'table' => 'auth_audit_log',
         // Expose the package's read endpoints (own login history + admin list). Off by default.
         'routes_enabled' => env('BHERILA_AUTH_AUDIT_ROUTES', false),
@@ -135,8 +150,15 @@ return [
     ],
 
     'throttle' => [
-        // Opt-in brute-force lockout backed by auth_audit_log rows. Disabled by default.
-        'enabled' => env('BHERILA_AUTH_THROTTLE_ENABLED', false),
+        // Brute-force lockout backed by auth_audit_log rows, enforced by the standalone
+        // password login controller. On by default: a self-hosted installation exposing a
+        // password form on the public internet is the normal case, and a lockout that has
+        // to be switched on is a lockout most deployments will not have.
+        //
+        // Applications behind a proxy must configure Laravel's trusted proxies, or every
+        // request resolves to the proxy's address and the 'ip' half of the key groups every
+        // visitor together.
+        'enabled' => env('BHERILA_AUTH_THROTTLE_ENABLED', true),
         'max_attempts' => env('BHERILA_AUTH_THROTTLE_MAX_ATTEMPTS', 5),
         'decay_minutes' => env('BHERILA_AUTH_THROTTLE_DECAY_MINUTES', 15),
         // How failed attempts are grouped into a lockout key:
