@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Signing\Envelopes;
 
 use App\Domain\Preparation\Schema\FieldDefinition;
+use App\Domain\Preparation\Schema\FieldType;
 use App\Domain\Signing\Contracts\AssurancePolicyCheck;
 use App\Domain\Signing\Contracts\EnvelopeEventSink;
 use App\Domain\Signing\Exceptions\ConsentMismatch;
@@ -191,6 +192,8 @@ final readonly class EnvelopeStateMachine
                 $from = $this->assertLegal('freeze_for_parallel', $locked);
 
                 if ($locked->isContentFrozen()) {
+                    $this->syncBack($envelope, $locked);
+
                     return new TransitionResult($locked, $from, $from);
                 }
 
@@ -261,6 +264,7 @@ final readonly class EnvelopeStateMachine
 
                     $this->commitEnvelope($locked, $changes);
                 }
+
                 $this->syncBack($recipient, $lockedRecipient);
 
                 return new ValueSubmissionResult(
@@ -312,7 +316,7 @@ final readonly class EnvelopeStateMachine
                         throw FieldSubmissionRejected::serviceSupplied($fieldId);
                     }
 
-                    if (in_array($field->type->value, ['signature', 'initials'], true)) {
+                    if (in_array($field->type, [FieldType::Signature, FieldType::Initials], true)) {
                         throw FieldSubmissionRejected::requiresRecipient($fieldId);
                     }
 
