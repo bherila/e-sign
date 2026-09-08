@@ -13,7 +13,9 @@ file and fails the build on a license that is not allowed.
   and `pnpm licenses list --json --prod`.
 - **Checked by:** `scripts/check-licenses.php` (allowlist + per-package exceptions).
 - **Inventory date:** 2026-09-08.
-- **Counts:** 117 Composer production packages, 70 pnpm production packages.
+- **Counts:** 117 Composer production packages, 70 pnpm production packages. The pnpm table
+  below lists 72 rows because `immer` and `react-is` are each installed at two versions; the
+  count is of distinct packages, the table is of installed versions.
 
 Development-only dependencies (test runners, linters, build tooling) are excluded: they are
 not distributed in the Docker image or the cPanel bundle and carry no distribution
@@ -336,7 +338,7 @@ time and is not pinned here; nothing from it is distributed either.
 | `web-auth/webauthn-lib` | 5.3.8 | MIT |
 | `webmozart/assert` | 2.4.1 | MIT |
 
-## pnpm production dependencies (70)
+## pnpm production dependencies (70 packages, 72 installed versions)
 
 | Package | Version | License |
 |---|---|---|
