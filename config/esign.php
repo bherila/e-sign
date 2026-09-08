@@ -406,4 +406,94 @@ return [
 
     'oauth_provider' => env('OAUTH_PROVIDER', ''),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Guest signing access and capture (Stage 3, issues #25 and #26)
+    |--------------------------------------------------------------------------
+    |
+    | Recipients are not application users. They arrive holding one opaque
+    | invitation credential, exchange it for a scoped session in an explicit
+    | POST, and act only inside that session. Everything below is the
+    | deployment's half of that arrangement; the rules themselves live in
+    | App\Domain\Signing\Sessions and App\Domain\Signing\Capture, and the
+    | flow is described in docs/signing/guest-access.md.
+    |
+    */
+
+    'signing' => [
+
+        // How long an invitation credential stays usable, from the moment it is
+        // issued. Seven days by default: long enough to survive a weekend and an
+        // out-of-office, short enough that a forwarded mail from last quarter is
+        // not a signing credential. Reissuing revokes the previous one.
+        'invitation_ttl_hours' => (int) env('ESIGN_SIGNING_INVITATION_TTL_HOURS', 168),
+
+        // A signing session's lifetime, refreshed on each authorized request
+        // (a sliding window). Two hours is a long review of a long contract; it
+        // is not an ambient login, and nothing renews it after the browser is
+        // closed because the cookie is a session cookie.
+        'session_ttl_minutes' => (int) env('ESIGN_SIGNING_SESSION_TTL_MINUTES', 120),
+
+        // Deployment-wide default for mailbox OTP on top of the link. A
+        // workspace may turn it on for everything it sends, and one envelope may
+        // override both. Resolution is envelope, then workspace, then this.
+        //
+        // Off by default and honestly labelled: an emailed code demonstrates
+        // continued access to the same mailbox the link went to. It is a second
+        // check on the same factor, not a second factor, and it is never an
+        // eIDAS advanced or qualified signature (docs/HANDOFF.md section 9).
+        'require_otp' => filter_var(env('ESIGN_SIGNING_REQUIRE_OTP', false), FILTER_VALIDATE_BOOLEAN),
+
+        'otp' => [
+            'length' => 6,
+            'ttl_minutes' => (int) env('ESIGN_SIGNING_OTP_TTL_MINUTES', 10),
+
+            // Wrong codes tolerated before the challenge is burned and a new one
+            // has to be requested. Counted on the challenge, so guessing cannot
+            // be spread across parallel requests.
+            'max_attempts' => (int) env('ESIGN_SIGNING_OTP_MAX_ATTEMPTS', 5),
+
+            // Issuance limits, applied per destination address and per client
+            // address through Laravel's RateLimiter. The address limit stops a
+            // mailbox being used as a bullhorn; the IP limit stops one client
+            // enumerating recipients.
+            'per_address_per_hour' => (int) env('ESIGN_SIGNING_OTP_PER_ADDRESS_PER_HOUR', 5),
+            'per_ip_per_hour' => (int) env('ESIGN_SIGNING_OTP_PER_IP_PER_HOUR', 20),
+
+            // Verification attempts accepted from one client address per hour,
+            // independent of which challenge they are aimed at.
+            'verify_per_ip_per_hour' => (int) env('ESIGN_SIGNING_OTP_VERIFY_PER_IP_PER_HOUR', 30),
+        ],
+
+        // Attempts to exchange an invitation for a session, per client address
+        // per hour. A link that is being brute-forced is not a link anybody has.
+        'start_per_ip_per_hour' => (int) env('ESIGN_SIGNING_START_PER_IP_PER_HOUR', 30),
+
+        // The consent policy version the text in resources/views/signing/consent.md
+        // states. An envelope snapshots its own version at creation, and the
+        // attestation records that snapshot; this value only lets the signing page
+        // say whether the text it is showing is the text that version named. When
+        // the two differ the page says so rather than implying otherwise.
+        'consent_policy_version' => (string) env('ESIGN_CONSENT_POLICY_VERSION', '2026-09-01'),
+
+        // Captured signature and initials images. A submitted image is decoded
+        // with GD, measured, and re-encoded as a PNG before it is stored, so what
+        // ends up on the agreement is bytes this application produced. SVG, HTML,
+        // and remote URLs are refused outright rather than sanitized.
+        'max_signature_image_bytes' => (int) env('ESIGN_SIGNING_MAX_SIGNATURE_IMAGE_BYTES', 204_800),
+        'max_signature_image_width' => (int) env('ESIGN_SIGNING_MAX_SIGNATURE_IMAGE_WIDTH', 2_000),
+        'max_signature_image_height' => (int) env('ESIGN_SIGNING_MAX_SIGNATURE_IMAGE_HEIGHT', 800),
+
+        // Hosts a `?return=` destination may point at once signing finishes.
+        // Comma-separated hostnames, compared exactly and case-insensitively
+        // against the URL's host. Anything else is ignored — not rejected with an
+        // error the caller can probe, and never reflected back into a redirect.
+        // Empty means no return destination is ever honoured, which is the safe
+        // default for a deployment that has not thought about it.
+        'return_url_allowlist' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('ESIGN_SIGNING_RETURN_URL_ALLOWLIST', ''))
+        ))),
+    ],
+
 ];

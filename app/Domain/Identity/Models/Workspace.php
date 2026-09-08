@@ -23,6 +23,7 @@ use Illuminate\Support\Str;
  * @property string $public_id
  * @property string $name
  * @property string $slug
+ * @property bool|null $require_otp
  */
 class Workspace extends Model
 {
@@ -34,7 +35,23 @@ class Workspace extends Model
     protected $fillable = [
         'name',
         'slug',
+        // Whether guests signing this workspace's agreements must answer a mailed code as
+        // well as follow their invitation link. Null means "not decided here": the
+        // deployment default in config('esign.signing.require_otp') applies, and an
+        // individual envelope may still override both. See
+        // App\Domain\Signing\Sessions\OtpRequirement.
+        'require_otp',
     ];
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'require_otp' => 'boolean',
+        ];
+    }
 
     /**
      * Per-user membership lookups already resolved on this instance.
