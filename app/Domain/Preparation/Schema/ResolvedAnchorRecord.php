@@ -22,6 +22,12 @@ use InvalidArgumentException;
  * different revision is detectable rather than assumed, so an envelope built from another
  * revision resolves again at send instead of inheriting coordinates measured somewhere else.
  * After send nothing re-resolves at all (docs/preparation/anchors.md).
+ *
+ * A caller may submit one of these, and the validator checks it as strictly as anything else
+ * rather than refusing it: an envelope re-reads its own stored schema through the same importer
+ * on every request, so a receipt the service can write and not read back would be a document that
+ * stops importing. A forged receipt is not a privilege: it would let a sender place a field at
+ * coordinates of their choosing, which submitting a rectangle with no anchor already does.
  */
 final readonly class ResolvedAnchorRecord
 {

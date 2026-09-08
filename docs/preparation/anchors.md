@@ -164,6 +164,14 @@ rectangle: the editor, assembly, the signing page, and finalization all read `re
 them look at `anchor`. That is the property that keeps the rest of the system free of a second
 placement path.
 
+A caller *may* submit a `resolved` receipt of its own — the importer validates it like anything
+else, because an envelope re-reads its own stored schema through that same importer on every
+request, and a receipt the service can write but not read back would be a document that stops
+importing. A forged one buys nothing: it would let a sender put a field at coordinates of their
+choosing, which is exactly what submitting a rectangle with no anchor already does. Placement is
+the sender's to decide either way; what resolution guarantees is that an anchor which *is* honoured
+was honoured deterministically.
+
 ## When it fails
 
 Every failure names the field id, the anchor text, and what was actually found — as structured
