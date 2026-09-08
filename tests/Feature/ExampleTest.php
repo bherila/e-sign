@@ -27,14 +27,26 @@ class ExampleTest extends TestCase
     }
 
     /**
-     * Test that we are using SQLite in-memory database.
+     * Test that SafeTestCase is enforcing the database it's supposed to.
      *
-     * This test verifies our safety mechanism is working.
+     * By default that's SQLite in-memory. The one exception is the CI-only `database`
+     * workflow job, which opts SafeTestCase into a real engine via ESIGN_TEST_DB_ENGINE (see
+     * Tests\Support\TestDatabaseGuard); when that opt-in is active, this test confirms we
+     * landed on the disposable CI database it authorized, not just any non-SQLite connection.
      */
-    public function test_database_is_sqlite_in_memory(): void
+    public function test_database_matches_the_active_safe_test_case_policy(): void
     {
-        $this->assertEquals('sqlite', $this->getDatabaseDriver());
-        $this->assertEquals(':memory:', $this->getDatabaseName());
+        $ciEngine = env('ESIGN_TEST_DB_ENGINE');
+
+        if ($ciEngine === null) {
+            $this->assertEquals('sqlite', $this->getDatabaseDriver());
+            $this->assertEquals(':memory:', $this->getDatabaseName());
+
+            return;
+        }
+
+        $this->assertEquals($ciEngine, $this->getDatabaseDriver());
+        $this->assertStringStartsWith('esign_ci_test', $this->getDatabaseName());
     }
 
     /**
