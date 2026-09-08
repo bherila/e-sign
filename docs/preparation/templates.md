@@ -5,7 +5,8 @@ is frozen the moment it is published, so a later edit to the template cannot rea
 envelope that is already out for signature.
 
 Implements issue #21. Read with [documents.md](documents.md) for where the PDF revision comes
-from, [field-schema.md](field-schema.md) for the field vocabulary, and sections 6 and 7 of
+from, [field-schema.md](field-schema.md) for the field vocabulary, [editor.md](editor.md) for the
+visual editor that reads and writes a draft version's field set, and sections 6 and 7 of
 [docs/HANDOFF.md](../HANDOFF.md).
 
 | | |

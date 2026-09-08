@@ -42,6 +42,9 @@ use Tests\TestCase;
  *    presented to the version endpoint; alias uniqueness being per workspace rather than
  *    global is in tests/Feature/Preparation/TemplateLifecycleTest.php, because two tenants
  *    migrating from the same provider legitimately present the same provider template id.
+ *  - the visual field editor page: tests/Feature/Preparation/FieldEditorPageTest.php. It
+ *    covers the workspace, the template, and the version, over the one HTML route in the
+ *    application that renders somebody's field placement.
  *
  * The remaining surfaces named in issue #11 — JSON import, artifact downloads, and queue
  * jobs — do not exist yet, and each one adds its cases here as it lands rather than getting
