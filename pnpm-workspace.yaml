@@ -1,0 +1,7 @@
+overrides:
+  glob: ">=10.5.0"
+
+# Dependencies whose install scripts may run. Everything else is blocked (pnpm default).
+allowBuilds:
+  esbuild: true
+  unrs-resolver: true

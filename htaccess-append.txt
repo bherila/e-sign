@@ -1,0 +1,21 @@
+
+# Appended to public/.htaccess by .github/workflows/deploy.yml on every deploy.
+#
+# Two reasons this file exists rather than the handler just living on the server:
+#
+# 1. The deploy rsyncs `public` with --delete, which wipes any handler block cPanel or a
+#    human added to public/.htaccess directly. Re-appending at deploy time is what makes
+#    it survive.
+# 2. The cPanel account default is ea-php81. Without this block the site silently runs on
+#    PHP 8.1 while artisan (invoked in deploy.yml via the ea-php85 binary) runs 8.5 — a
+#    web/CLI split that produces failures only on the web path.
+#
+# Keep the version here in sync with the ea-phpXX binary in deploy.yml and with the
+# php-version in ci.yml. All three are currently 8.5.
+
+# php -- BEGIN cPanel-generated handler, do not edit
+# Set the “ea-php85” package as the default “PHP” programming language.
+<IfModule mime_module>
+  AddHandler application/x-httpd-ea-php85 .php .php8 .phtml
+</IfModule>
+# php -- END cPanel-generated handler, do not edit

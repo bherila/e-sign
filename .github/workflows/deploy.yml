@@ -1,0 +1,159 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+
+      - name: Install Composer (with dev)
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Build frontend and run tests
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+          pnpm run test
+
+      - name: Run PHPUnit
+        run: vendor/bin/phpunit --configuration phpunit.xml
+
+  deploy:
+    runs-on: ubuntu-24.04-arm
+    needs: test
+    environment: prod
+    if: ${{ vars.DEPLOY_ENABLED == 'true' }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+
+      - name: Install Composer (no dev)
+        run: composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Build frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+
+      - name: Append to .htaccess
+        run: cat htaccess-append.txt >> public/.htaccess
+
+      - name: Configure SSH
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      # DEPLOY DESTINATION AND WEBROOT
+      #
+      # This workflow used to rsync to a hardcoded ~/laravel/ and then rebuild the account
+      # webroot on every deploy:
+      #
+      #     cd ~ && rm -rf public_html && rm -rf web && ln -s laravel/public public_html
+      #
+      # That is only safe when the site being deployed IS the cPanel account's main domain.
+      # For a site deployed as a SUBDOMAIN on a shared account it is destructive: ~/public_html
+      # is the main domain's document root, so the step deletes that domain's content —
+      # including any redirect .htaccess and the .well-known/acme-challenge directory AutoSSL
+      # renews against — and then repoints the apex at the wrong app. The certificate failure
+      # surfaces silently, ~60 days later.
+      #
+      # The webroot symlink is now treated as one-time provisioning, not deploy-managed, and
+      # the destination comes from the DEPLOY_DIR repository variable so each site states its
+      # own Laravel root explicitly.
+
+      - name: Verify the deploy destination is set
+        run: |
+          # An unset DEPLOY_DIR would make the rsync destination "~/" — and this workflow
+          # runs `--delete`. Fail loudly instead.
+          if [ -z "${{ vars.DEPLOY_DIR }}" ]; then
+            echo "::error::DEPLOY_DIR repository variable is not set. Set it to this site's" \
+                 "Laravel root directory name (e.g. 'kath-laravel'), NOT 'public_html'."
+            exit 1
+          fi
+          case "${{ vars.DEPLOY_DIR }}" in
+            public_html|www|web|.|..|/*)
+              echo "::error::DEPLOY_DIR must not be '${{ vars.DEPLOY_DIR }}' — that is a webroot," \
+                   "not a Laravel root."
+              exit 1 ;;
+          esac
+
+      # RUNTIME STATE MUST SURVIVE --delete
+      #
+      # `storage/` is transferred, so without these excludes every deploy replaces the
+      # server's storage tree with the repository's empty skeleton: application logs are
+      # erased, and if the app uses the `file` session or cache driver, every signed-in
+      # user is logged out on each deploy. The trailing `/*` protects the contents while
+      # still letting rsync create the directory on a first deploy.
+      #
+      # `storage/app/*` also covers Laravel Passport's signing keys if this app ever
+      # becomes an OAuth client or provider. Passport writes them under `storage/` by
+      # default, and rotating them on deploy invalidates every live token — so pair this
+      # with `Passport::loadKeysFrom(storage_path('app/private/oauth'))` in a service
+      # provider rather than relying on the default location.
+      - name: Deploy with rsync
+        run: |
+          rsync -av --delete \
+            --exclude='.env' \
+            --exclude='/storage/app/*' \
+            --exclude='/storage/logs/*' \
+            --exclude='/storage/framework/sessions/*' \
+            --exclude='/storage/framework/cache/*' \
+            -e "ssh -o StrictHostKeyChecking=yes" \
+            app \
+            bootstrap \
+            config \
+            database \
+            public \
+            resources \
+            routes \
+            storage \
+            vendor \
+            artisan \
+            composer.json \
+            composer.lock \
+            ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }}:~/${{ vars.DEPLOY_DIR }}/
+
+      - name: Run artisan config clear/cache on server
+        run: |
+          ssh -o StrictHostKeyChecking=yes \
+            ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }} \
+            "cd ~/${{ vars.DEPLOY_DIR }} && /opt/cpanel/ea-php85/root/usr/bin/php artisan config:clear && /opt/cpanel/ea-php85/root/usr/bin/php artisan config:cache"
+
+      # Every step above can exit 0 while the deployed site returns 500 on every page —
+      # most commonly when the cPanel PHP handler in public/.htaccess is lost and the vhost
+      # falls back to the account default PHP version, which fails composer's platform
+      # check. Without this step the workflow reports a successful deploy and the breakage
+      # is visible only in the server's error_log. Requires APP_URL to be set as the
+      # SITE_URL repository variable.
+      - name: Verify production health
+        run: |
+          if [ -z "${{ vars.SITE_URL }}" ]; then
+            echo "::error::SITE_URL repository variable is not set, so the deploy cannot be" \
+                 "verified. Set it to this site's public URL (e.g. 'https://example.bherila.net')."
+            exit 1
+          fi
+          curl --fail --silent --show-error --retry 3 --retry-all-errors --max-time 20 \
+            "${{ vars.SITE_URL }}/up" > /dev/null
