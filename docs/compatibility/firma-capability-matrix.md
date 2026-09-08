@@ -25,7 +25,7 @@ than return a successful no-op (`AGENTS.md`, "Fail closed").
 
 | Status | Meaning here |
 |---|---|
-| **supported** | Implemented, and a fixture asserts the contract. Nothing qualifies yet. |
+| **supported** | Implemented, and a fixture or a test asserts the contract. Only outbound webhook delivery qualifies so far; its rows cite tests rather than captured fixtures, because the signature scheme and envelope are prose with no machine-readable document to capture. |
 | **unsupported** | Deliberately out of profile. Must return a clear error, never a no-op success. |
 | **intentionally different** | We already know the shipped behaviour will differ from upstream, and why. |
 | **unknown** | Shape captured, decision not yet made or not yet implemented. The Stage 0 default. |
@@ -153,6 +153,12 @@ The pinned OpenAPI document contains **no** `webhooks` object, no event payload 
 types `Webhook.events` as an unconstrained `array<string>` with no enum. Everything in this
 section is `(prose)` from `https://docs.firma.dev/guides/webhooks`.
 
+The outbox accepts exactly the names below plus our own, which are prefixed `esign.`;
+anything else is refused rather than recorded (`App\Domain\Delivery\Webhooks\WebhookEventName`,
+`tests/Unit/Delivery/WebhookEventNameTest.php`). The delivery machinery is implemented, but
+no caller records these events yet — envelopes do not exist — so the rows stay **unknown**
+until the transitions that emit them ship.
+
 | Event | Upstream shape (prose) | Status | Fixture | Notes |
 |---|---|---|---|---|
 | `signing_request.created` | Envelope below, `data.signing_request` | unknown | | |
@@ -174,19 +180,26 @@ section is `(prose)` from `https://docs.firma.dev/guides/webhooks`.
 
 ### Envelope and delivery
 
-| Surface | Upstream shape (prose) | Status | Fixture | Notes |
+Implemented in `app/Domain/Delivery/Webhooks` (issue #34). Contract and runbook:
+`docs/delivery/webhooks.md`.
+
+| Surface | Upstream shape (prose) | Status | Fixture / test | Notes |
 |---|---|---|---|---|
-| Payload envelope | `{id, type, created_at, company_id, workspace_id, data:{signing_request, recipients[], workspace}}` | unknown | | Event identity is `id`. The consumer's resolver reads `event_id` or falls back to a payload hash. See D13. |
-| `X-Firma-Signature` | `t=<unix seconds>,v1=<hex HMAC-SHA256>`; signed payload is `{timestamp}.{raw_json_body}`; hex digest; verify against the **raw** body | unknown | | Identical to `docs/HANDOFF.md` §11. Byte-exact raw body, constant-time compare. |
-| `X-Firma-Signature-Old` | Second signature under the previous secret, sent for a 7-day rotation grace period | unknown | | Rotation overlap is required; a fresh attempt gets a fresh `t` and signature while the logical event `id` is retained. |
-| `X-Firma-Event` | Event type string | unknown | | |
-| `X-Firma-Delivery` | Unique delivery-attempt ID | unknown | | Per-attempt identity, stored separately from logical event identity. |
-| Replay window | Docs show a 5-minute tolerance and call it "optional" | **intentionally different** | | Not optional for us. The inbox enforces the window (`docs/HANDOFF.md` §11). |
-| Retry schedule | Immediate, +5 min, +1 h; up to 3 attempts; 5 s endpoint timeout; any 2xx is success | **intentionally different** | | Ours is configurable, and the difference from the profile is recorded here rather than hidden. |
-| Auto-disable | After 50 consecutive failures | unknown | | Admins get a visible disabled-endpoint state and safe replay. |
-| Health fields | `Webhook`: `consecutive_failures`, `auto_disabled_at`, `enabled`. The prose additionally promises `last_failure_at` and `last_success_at`, which are **not** in the `Webhook` schema. See D14. | unknown | | |
-| Master switch | Delivery needs both the per-webhook `enabled` and a company/workspace master switch; `POST /webhooks/{id}/test` bypasses the master switch, so a passing test does not prove live delivery | **intentionally different** | | A silent global off-switch that suppresses events without logging a failure is an unsafe vendor behaviour we will not reproduce (`docs/HANDOFF.md` §10). |
-| Destination policy | Upstream requires HTTPS and a ≤5 s response | **intentionally different** | | We additionally validate resolved destinations, block metadata/internal targets, disable unsafe redirects, and guard against DNS rebinding; the internal consumer callback is permitted only by explicit administrator policy (`docs/HANDOFF.md` §11). |
+| Payload envelope | `{id, type, created_at, company_id, workspace_id, data:{signing_request, recipients[], workspace}}` | **intentionally different** | `tests/Feature/Delivery/Webhooks/OutboxWriterTest.php` | `id`, `type`, `created_at`, `workspace_id` and `data` are emitted verbatim. `company_id` is omitted: this product has no company above the workspace, and a null or invented value would be worse than its absence. Event identity is `id`; see D13. `created_at` is when the transition occurred, not when the attempt was made. |
+| `X-Firma-Signature` | `t=<unix seconds>,v1=<hex HMAC-SHA256>`; signed payload is `{timestamp}.{raw_json_body}`; hex digest; verify against the **raw** body | supported | `tests/Unit/Delivery/WebhookSignerTest.php`, `tests/Feature/Delivery/Webhooks/DeliverWebhookTest.php` | Byte-exact raw body: the envelope is encoded once when the event is recorded and every attempt sends those bytes unchanged. Tests verify with an independent `hash_hmac` computation, not by calling the signer twice. |
+| Rotation overlap | `X-Firma-Signature-Old`: a second signature under the previous secret, for a 7-day grace period | **intentionally different** | `DeliverWebhookTest::test_during_a_rotation_both_secrets_sign_the_same_attempt` | We emit **both** forms: `X-Firma-Signature` carries one `v1=` per live secret, current first (the Stripe convention), and `X-Firma-Signature-Old` is emitted alongside during the overlap. A receiver that loops over `v1=` entries and a receiver that reads only the documented old header both verify. Grace window is `ESIGN_WEBHOOK_ROTATION_GRACE_HOURS`, default 168 h. |
+| `X-Firma-Event` | Event type string | supported | `DeliverWebhookTest::test_the_identity_headers_name_the_event_the_attempt_and_the_type` | |
+| `X-Firma-Delivery` | Unique delivery-attempt ID | supported | idem | A ULID, one per attempt row, distinct from the logical event id on every retry and replay. |
+| `X-Esign-Event-Id` | **not upstream** — our documented extension | **intentionally different** | idem | The logical event id, stable across every retry and replay, in a header as well as in the envelope's `id`. Upstream offers no header carrying it, so a receiver must parse the body before it can deduplicate; this lets it decide from the headers. |
+| `X-Esign-Attempt` | **not upstream** — our documented extension | **intentionally different** | idem | The attempt number, 1-based. Lets a receiver log "this is the fourth try" without joining on our side's state. |
+| Replay window | Docs show a 5-minute tolerance and call it "optional" | **intentionally different** | `DeliverWebhookTest::test_the_signature_timestamp_is_fresh_at_the_moment_of_the_attempt` | Not optional for us. Each attempt is signed with a fresh `t`, so a retry two days later still lands inside a receiver's window, and the inbox enforces the window (`docs/HANDOFF.md` §11). |
+| Retry schedule | Immediate, +5 min, +1 h; up to 3 attempts; 5 s endpoint timeout; any 2xx is success | **intentionally different** | `tests/Unit/Delivery/RetryScheduleTest.php`, `DeliverWebhookTest` | Default 1 m, 5 m, 30 m, 2 h, 12 h, 24 h with ±10 % jitter — seven attempts over ~40 h — and every value is configurable. Any 2xx is success and the 5 s timeout is kept. 5xx, connection failures, timeouts, 408 and 429 retry; every other 4xx stops immediately, because repeating a request the receiver called malformed cannot help. |
+| Auto-disable | After 50 consecutive failures | **intentionally different** | `DeliverWebhookTest::test_enough_undeliverable_events_disable_the_endpoint_with_a_visible_reason` | Default 10 consecutive undeliverable events, configurable. The disabled state carries a reason an operator reads in `esign:webhook:endpoint:list`, is audited, and is cleared — along with the failure count — by `esign:webhook:endpoint:enable`. |
+| Health fields | `Webhook`: `consecutive_failures`, `auto_disabled_at`, `enabled`. The prose additionally promises `last_failure_at` and `last_success_at`, which are **not** in the `Webhook` schema. See D14. | **intentionally different** | `tests/Feature/Delivery/Webhooks/WebhookConsoleTest.php` | We keep `consecutive_failures` and a disabled state with a reason. Per-attempt history — timestamp, status, redacted response excerpt, redacted error, next attempt — lives in `webhook_deliveries`, which is strictly more than the two timestamps the prose promises. No HTTP `Webhook` resource is exposed yet; administration is artisan-only. |
+| Master switch | Delivery needs both the per-webhook `enabled` and a company/workspace master switch; `POST /webhooks/{id}/test` bypasses the master switch, so a passing test does not prove live delivery | **intentionally different** | | A silent global off-switch that suppresses events without logging a failure is an unsafe vendor behaviour we will not reproduce (`docs/HANDOFF.md` §10). There is one switch, per endpoint, and it is visible. |
+| Destination policy | Upstream requires HTTPS and a ≤5 s response | **intentionally different** | `tests/Unit/Delivery/DestinationPolicyTest.php`, `tests/Unit/Delivery/WebhookTransportOptionsTest.php` | We additionally validate every resolved address, block metadata/internal targets, refuse credentials in the URL, never follow a redirect, and pin the connection to the addresses we checked (DNS rebinding). The policy runs on every attempt, not once at creation. The internal consumer callback is permitted only by an administrator allowlist in deployment configuration, never by a caller-controlled flag (`docs/HANDOFF.md` §11). |
+| Duplicate suppression | Receivers are told to deduplicate on the event id | supported | `DeliverWebhookTest::test_a_replay_is_a_new_attempt_of_the_same_event` | Deduplication is the receiver's job; our side of the bargain is that the event id never changes across retries or replays, and neither do the body bytes. |
+| Delivery ordering | Not stated by the guide | **intentionally different** | `OutboxWriterTest::test_two_events_keep_the_order_in_which_they_occurred` | We make no ordering promise — a retry can reorder anything — and instead guarantee `created_at` reflects when the transition occurred, so a receiver can order and reject regressions itself. |
 
 ## Disagreements
 

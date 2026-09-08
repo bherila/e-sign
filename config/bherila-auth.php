@@ -2,31 +2,62 @@
 
 use App\Models\User;
 
+// The route-family toggles below must track App\Domain\Identity\Enums\AuthMode's decision,
+// but this file is `require`d by Illuminate\Foundation\Bootstrap\LoadConfiguration before the
+// application container exists and before this very array has been merged into the config
+// repository. That rules out calling AuthMode::current() here (it needs
+// config('esign.auth_mode'), and "esign.php" sorts after "bherila-auth.php" so it has not
+// loaded yet) and rules out OAuthClient::isConfigured() (it reads
+// config('bherila-auth.oauth_client.*') — this same array — before it exists in the
+// repository). So the auto/sso/local decision is duplicated here directly from env().
+// AuthMode::fromSetting() remains the source of truth at request time, including its
+// stricter validation: an unrecognised ESIGN_AUTH_MODE throws there, where here it only gates
+// route registration and falls back to the 'auto' behaviour instead.
+$esignAuthMode = strtolower(trim((string) env('ESIGN_AUTH_MODE', 'auto')));
+$oauthClientConfigured = trim((string) env('OAUTH_CLIENT_ID', '')) !== ''
+    && trim((string) env('OAUTH_PROVIDER_URL', '')) !== '';
+$resolvedSsoMode = match ($esignAuthMode) {
+    'local', 'standalone' => false,
+    'sso' => true,
+    default => $oauthClientConfigured,
+};
+
+// ESIGN_LOCAL_AUTH_ROUTES overrides the automatic choice: 'on' always registers the
+// standalone-mode route families below, 'off' always drops them, and 'auto' (default)
+// follows $resolvedSsoMode.
+$localAuthRoutesSetting = strtolower(trim((string) env('ESIGN_LOCAL_AUTH_ROUTES', 'auto')));
+$localAuthRoutesEnabled = match ($localAuthRoutesSetting) {
+    'on' => true,
+    'off' => false,
+    default => ! $resolvedSsoMode,
+};
+
 return [
-    // Package-owned API routes. Password reset, authenticated password change, and email
-    // two-factor stay enabled: they are the standalone mode's supporting flows, and the
-    // application owns the pages that call them.
-    //
-    // An SSO-only deployment should set 'password_resets', 'change_password', and
-    // 'two_factor' to false. Nothing in SSO mode can use a local password — there is no
-    // password login route, and the standalone controller refuses any user that has an
-    // identity binding — but an endpoint that sets a credential nobody needs is still an
-    // endpoint worth not having.
+    // Package-owned API routes. Password reset, authenticated password change, email
+    // two-factor, and passkeys are the standalone mode's supporting flows, and the
+    // application owns the pages that call them. Nothing in SSO mode can use a local
+    // password — there is no password login route, and the standalone controller refuses
+    // any user that has an identity binding — so these four route families follow the
+    // resolved auth mode automatically: enabled in standalone mode, disabled in SSO mode.
+    // Override with ESIGN_LOCAL_AUTH_ROUTES=on|off; default is auto.
     'routes' => [
         'enabled' => true,
         'prefix' => 'api',
         'middleware' => ['web'],
-        'passkeys' => true,
-        'password_resets' => true,
-        'change_password' => true,
-        'two_factor' => true,
+        'passkeys' => $localAuthRoutesEnabled,
+        'password_resets' => $localAuthRoutesEnabled,
+        'change_password' => $localAuthRoutesEnabled,
+        'two_factor' => $localAuthRoutesEnabled,
     ],
 
     'oauth_client' => [
         // Shared OAuth authorization-code + PKCE client mechanics. Applications still
         // own local user provisioning and authorization policy after identity resolution.
         'provider' => env('OAUTH_PROVIDER', 'bherila'),
-        'base_url' => env('OAUTH_PROVIDER_URL', 'https://bherila.net'),
+        // No fallback hostname: an unconfigured install must resolve to standalone mode
+        // (AuthMode::fromSetting()/OAuthClient::isConfigured()), not silently point at
+        // whichever provider happened to be this package's original operator.
+        'base_url' => env('OAUTH_PROVIDER_URL', ''),
         'client_id' => env('OAUTH_CLIENT_ID'),
         'client_secret' => env('OAUTH_CLIENT_SECRET'),
         // Must match the route this application registers (routes/web.php) and the exact

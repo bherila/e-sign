@@ -56,7 +56,7 @@ ESIGN_HEALTH_ALLOW_CIDRS=127.0.0.1/32,::1/128
 | `scheduler` | Heartbeat cache key refreshed within `esign.health.scheduler_warn_seconds` (default 180s) | Heartbeat older than that, within `esign.health.scheduler_fail_seconds` (default 600s) | Heartbeat older than that, or never recorded |
 | `storage` | Write, read-back, and delete of a small probe file on the default disk succeed | — | Any step fails |
 | `mail` | `mail.default` is a delivering transport, or the app is not in production | — | `mail.default` is `log` or `array` while `APP_ENV=production` |
-| `webhook_backlog` | Always, for now | — | — (placeholder; see below) |
+| `webhook_backlog` | No overdue delivery, and no disabled endpoint | Oldest overdue delivery exceeds `esign.delivery.webhooks.backlog_warn_seconds` (default 300s), or ≥1 endpoint is disabled | Oldest overdue delivery exceeds `esign.delivery.webhooks.backlog_fail_seconds` (default 1800s), or the outbox tables are unavailable |
 | `signing_material` | Certificate and private key paths are configured and readable, and the certificate expires more than `esign.health.cert_warn_days` (default 30) days out | Unset outside production, or the certificate expires within the warn window | Unset in production, unreadable, unparseable, or expired |
 | `tsa` | `ESIGN_TSA_URL` unset, or set and parses as `http`/`https` | — | Set but not a valid `http(s)` URL |
 
@@ -74,10 +74,14 @@ if the worst is a `warn`, `fail` if any probe `fail`s.
   well-formed. Actual TSA reachability is checked by the worker at signing time, where an
   unreachable TSA is a signing error, not a silent downgrade to a B-B signature — see
   `docs/HANDOFF.md` §9.
-- **`webhook_backlog` is a placeholder.** The Delivery module's webhook outbox table does not
-  exist yet (tracked in issue #34). Until it lands, this probe always reports `ok` with the
-  message "No outbox yet." — replace its implementation, not its shape, once the outbox table
-  exists.
+- **`webhook_backlog` measures overdue work, not scheduled work.** A retry deliberately
+  waiting twelve hours for a broken receiver is the retry schedule doing its job; counting it
+  as backlog would make a healthy instance with one bad endpoint look like a stalled queue.
+  Only deliveries whose `next_attempt_at` has passed count towards the age. A disabled
+  endpoint warns rather than fails: delivery to it has stopped and an operator needs to know,
+  but the instance is not unready. The message names no endpoint and no URL;
+  `php artisan esign:webhook:backlog` prints the same snapshot with more detail, and
+  `docs/delivery/webhooks.md` is the runbook.
 - **The scheduler heartbeat** is written by a task in `routes/console.php`
   (`Schedule::call(...)->everyMinute()`) that stores the current time under the cache key
   `App\Domain\Delivery\Health\SchedulerHeartbeat::CACHE_KEY`. If `scheduler` reports `fail`,

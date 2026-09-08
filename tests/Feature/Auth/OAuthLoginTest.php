@@ -344,6 +344,24 @@ class OAuthLoginTest extends TestCase
             ->assertMethodNotAllowed();
     }
 
+    /**
+     * Nothing in SSO mode can use a local password, so `config/bherila-auth.php` disables
+     * the package's password-reset, change-password, two-factor, and passkey route families
+     * along with it. Not disabled, not guarded — absent.
+     */
+    public function test_the_local_auth_route_families_do_not_exist(): void
+    {
+        $this->postJson('/api/auth/forgot-password', ['email' => 'someone@example.test'])
+            ->assertNotFound();
+        $this->postJson('/api/auth/reset-password', [])->assertNotFound();
+        $this->post('/api/change-password')->assertNotFound();
+        $this->postJson('/api/auth/two-factor/verify', [])->assertNotFound();
+        $this->postJson('/api/auth/two-factor/resend', [])->assertNotFound();
+        $this->getJson('/api/passkeys')->assertNotFound();
+        $this->postJson('/api/passkeys/register/options', [])->assertNotFound();
+        $this->postJson('/api/passkeys/auth/options', [])->assertNotFound();
+    }
+
     // ------------------------------------------------------------------ helpers
 
     /**
