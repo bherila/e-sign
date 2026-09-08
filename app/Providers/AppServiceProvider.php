@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Domain\Identity\Credentials\CurrentPrincipal;
 use App\Domain\Identity\Models\Workspace;
 use App\Domain\Identity\Policies\WorkspacePolicy;
 use App\Listeners\UpdateLastLoginDate;
@@ -23,7 +24,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // One principal per request and per queue job. Scoped rather than a singleton so a
+        // long-lived worker can never serve one caller's request with the credential bound
+        // by the previous one.
+        $this->app->scoped(CurrentPrincipal::class);
     }
 
     /**

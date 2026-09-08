@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Identity;
 
+use App\Domain\Identity\Audit\AuditActor;
+use App\Domain\Identity\Credentials\CurrentPrincipal;
+use App\Domain\Identity\Credentials\Scope;
+use App\Domain\Identity\Credentials\ServiceCredentialIssuer;
 use App\Domain\Identity\Enums\WorkspacePermission;
 use App\Domain\Identity\Enums\WorkspaceRole;
 use App\Domain\Identity\Models\Workspace;
@@ -21,10 +25,14 @@ use Tests\TestCase;
  * every member-scoped lookup behaves as though B does not exist, so a probe cannot even
  * distinguish "forbidden" from "no such workspace".
  *
- * This is the seed of the isolation suite that issue #11 requires in CI. The remaining
- * surfaces named there — imported-provider aliases, JSON import, artifact downloads, and
- * queue jobs — do not exist yet; each one adds its cases here as it lands rather than
- * getting an isolation test of its own somewhere else.
+ * This is the seed of the isolation suite that issue #11 requires in CI. Service
+ * credentials have landed and their cases are below; the remaining surfaces named there —
+ * imported-provider aliases, JSON import, artifact downloads, and queue jobs — do not exist
+ * yet, and each one adds its cases here as it lands rather than getting an isolation test of
+ * its own somewhere else. The HTTP half of the credential case (a request carrying a valid
+ * secret for another workspace's resource) is in
+ * tests/Feature/Identity/Credentials/ServiceCredentialAuthenticationTest.php, where the
+ * middleware and its probe routes already are.
  */
 class CrossWorkspaceIsolationTest extends TestCase
 {
@@ -173,6 +181,51 @@ class CrossWorkspaceIsolationTest extends TestCase
 
         $this->assertTrue($this->alphaOwner->can(WorkspacePermission::Delete->value, $this->alpha));
         $this->assertFalse($this->alphaOwner->can(WorkspacePermission::Delete->value, $this->beta->fresh()));
+    }
+
+    public function test_a_service_credential_reaches_only_its_own_workspace(): void
+    {
+        $issued = app(ServiceCredentialIssuer::class)->issue(
+            $this->alpha,
+            'consumer production',
+            [Scope::EnvelopesRead->value],
+            AuditActor::console('test'),
+        );
+
+        $principal = new CurrentPrincipal;
+        $principal->bind($issued->credential);
+
+        // Workspace first, identifier second. Beta's public id is correct and the query
+        // still finds nothing, so the caller cannot tell "forbidden" from "absent".
+        $this->assertNull(
+            Workspace::query()
+                ->whereKey($principal->workspaceIdOrFail())
+                ->where('public_id', $this->beta->public_id)
+                ->first(),
+        );
+
+        $this->assertSame(
+            'alpha',
+            Workspace::query()
+                ->whereKey($principal->workspaceIdOrFail())
+                ->where('public_id', $this->alpha->public_id)
+                ->first()?->slug,
+        );
+    }
+
+    public function test_issuing_a_service_credential_confers_no_membership_and_no_role(): void
+    {
+        app(ServiceCredentialIssuer::class)->issue(
+            $this->alpha,
+            'consumer production',
+            [Scope::EnvelopesRead->value],
+            AuditActor::console('test'),
+        );
+
+        // An API caller is a principal, not a person. Issuing one creates no membership row,
+        // so it can never widen anybody's abilities in either workspace.
+        $this->assertSame([$this->alphaOwner->getKey()], $this->alpha->memberships()->pluck('user_id')->all());
+        $this->assertSame([$this->betaOwner->getKey()], $this->beta->memberships()->pluck('user_id')->all());
     }
 
     private function memberOf(Workspace $workspace, WorkspaceRole $role): User
