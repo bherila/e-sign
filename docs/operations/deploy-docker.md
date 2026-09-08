@@ -97,6 +97,19 @@ independently of code deploys.
 | `AWS_SECRET_ACCESS_KEY` | **Secret.** |
 | `AWS_DEFAULT_REGION`, `AWS_BUCKET`, `AWS_ENDPOINT`, `AWS_USE_PATH_STYLE_ENDPOINT` | Per `docs/BLOB_STORAGE.md`. Garage/R2 have no Object Lock: this is not WORM or legal hold. |
 
+The bucket is one of the four things that need backing up, and it needs a different backup
+from the database. See [`backups.md`](backups.md).
+
+### Retention and the restore drill
+
+| Variable | Notes |
+|---|---|
+| `ESIGN_RETENTION_AUTH_LOGS_DAYS`, `ESIGN_RETENTION_ABANDONED_DRAFTS_DAYS` | Finite defaults (400, 90). Applied only when `esign:retention:run` is invoked. |
+| `ESIGN_RETENTION_EXECUTED_DOCUMENTS_DAYS` | **Leave blank.** Blank means executed agreements are never deleted automatically, which is the shipped default; setting it is a reviewed decision. See [`retention.md`](retention.md). |
+| `ESIGN_RETENTION_PURGE_GRACE_DAYS` | How long a soft-deleted envelope keeps its bytes (30). |
+| `ESIGN_BACKUP_MANIFEST_PATH` | Where `esign:backup:manifest` writes. |
+| `ESIGN_RESTORE_DRILL` | **Never `1` here.** Only in the throwaway environment a backup is restored into, where it also makes mail and webhook delivery refuse to send. |
+
 ### Mail
 
 | Variable | Notes |
