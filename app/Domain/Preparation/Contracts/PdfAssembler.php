@@ -6,7 +6,7 @@ namespace App\Domain\Preparation\Contracts;
 
 use App\Domain\Preparation\Assembly\AssembledDocument;
 use App\Domain\Preparation\Assembly\AssemblyException;
-use App\Domain\Preparation\Assembly\OverlayRectangle;
+use App\Domain\Preparation\Assembly\PageOverlay;
 
 /**
  * Imports a source PDF and writes a new document with additional marks on top.
@@ -20,9 +20,13 @@ use App\Domain\Preparation\Assembly\OverlayRectangle;
 interface PdfAssembler
 {
     /**
-     * @param  array<int, OverlayRectangle>  $overlays
+     * @param  array<int, PageOverlay>  $overlays  Marks to draw, positioned in native space.
+     * @param  array<int, string>  $appendedDocuments  Whole PDFs whose pages are appended after
+     *                                                 the source's, in the order given. Their
+     *                                                 pages are numbered after the source's, so
+     *                                                 an overlay can address them too.
      *
      * @throws AssemblyException When the source cannot be imported.
      */
-    public function assemble(string $pdfBytes, array $overlays = []): AssembledDocument;
+    public function assemble(string $pdfBytes, array $overlays = [], array $appendedDocuments = []): AssembledDocument;
 }

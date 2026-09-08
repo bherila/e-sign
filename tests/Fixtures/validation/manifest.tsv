@@ -13,5 +13,6 @@ negative-truncated.pdf	unreadable	fixture-only	Tail removed with the trailer, so
 negative-incremental-update.pdf	invalid	fixture-only	An unexpected revision appended, redefining the page object.
 negative-forged-cms.pdf	invalid	fixture-only	The CMS of another sealed document spliced into /Contents.
 negative-untrusted-signer.pdf	invalid	fixture-only	Cryptographically sound but sealed with a key outside the trusted root.
+finalized-executed.pdf	valid	fixture-only	The executed agreement produced by the staged finalization: reviewed revision, field values, appended completion report, sealed at PAdES B-B under the fixture root.
 sealed-b-t.pdf	valid	fixture-plus-system	PAdES B-T. The TSA certificate chains to a publicly trusted root, so the timestamp is trusted as well as sound.
 sealed-b-t-untrusted-tsa.pdf	invalid	fixture-only	PAdES B-T with a cryptographically sound timestamp from an authority whose root is trusted nowhere: judged invalid on TSA trust alone.

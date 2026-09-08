@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Support;
 
 use App\Domain\Identity\Models\Workspace;
+use App\Domain\Preparation\Documents\DocumentStorageKey;
 use App\Domain\Preparation\Documents\Models\Document;
 use App\Domain\Preparation\Documents\Models\DocumentRevision;
 use App\Domain\Preparation\Documents\RevisionKind;
@@ -20,6 +21,7 @@ use App\Domain\Signing\Fields\FieldMateriality;
 use App\Domain\Signing\Models\Envelope;
 use App\Domain\Signing\Models\EnvelopeRecipient;
 use App\Models\User;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 /**
@@ -46,21 +48,32 @@ final class SigningScenario
 
     public readonly RecordingEnvelopeEventSink $sink;
 
-    private function __construct(?FakeAssurancePolicyCheck $assurance, ?RecordingEnvelopeEventSink $sink)
-    {
+    private function __construct(
+        ?FakeAssurancePolicyCheck $assurance,
+        ?RecordingEnvelopeEventSink $sink,
+        ?string $revisionBytes,
+    ) {
         $this->workspace = Workspace::factory()->create();
         $this->user = User::factory()->create();
         $this->document = Document::factory()->for($this->workspace)->create();
-        $this->revision = $this->createReviewRevision();
+        $this->revision = $this->createReviewRevision($revisionBytes);
         $this->assurance = $assurance ?? FakeAssurancePolicyCheck::available();
         $this->sink = $sink ?? new RecordingEnvelopeEventSink;
     }
 
+    /**
+     * @param  string|null  $revisionBytes  Real PDF bytes to store behind the review revision.
+     *                                      Null keeps the row-only revision described above,
+     *                                      which is what a state-machine test wants; the
+     *                                      finalization suite passes a fixture because it
+     *                                      actually renders the document.
+     */
     public static function create(
         ?FakeAssurancePolicyCheck $assurance = null,
         ?RecordingEnvelopeEventSink $sink = null,
+        ?string $revisionBytes = null,
     ): self {
-        return new self($assurance, $sink);
+        return new self($assurance, $sink, $revisionBytes);
     }
 
     /**
@@ -216,18 +229,31 @@ final class SigningScenario
             ->firstOrFail();
     }
 
-    private function createReviewRevision(): DocumentRevision
+    private function createReviewRevision(?string $bytes): DocumentRevision
     {
-        $sha256 = hash('sha256', 'synthetic-review-revision-'.Str::ulid());
+        $sha256 = $bytes === null
+            ? hash('sha256', 'synthetic-review-revision-'.Str::ulid())
+            : hash('sha256', $bytes);
+
+        $path = DocumentStorageKey::for(
+            $this->workspace->public_id,
+            $this->document->public_id,
+            RevisionKind::Review,
+            $sha256,
+        )->value;
+
+        if ($bytes !== null) {
+            Storage::disk('documents')->put($path, $bytes);
+        }
 
         return DocumentRevision::query()->create([
             'document_id' => $this->document->getKey(),
             'kind' => RevisionKind::Review,
             'disk' => 'documents',
-            'path' => 'synthetic/'.$sha256.'.pdf',
+            'path' => $path,
             'sha256' => $sha256,
-            'bytes' => 2_048,
-            'page_count' => 2,
+            'bytes' => $bytes === null ? 2_048 : strlen($bytes),
+            'page_count' => $bytes === null ? 2 : null,
             'normalization' => ['applied' => false],
             'created_by' => $this->user->getKey(),
         ]);
