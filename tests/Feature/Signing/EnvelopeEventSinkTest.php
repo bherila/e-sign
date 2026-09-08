@@ -7,6 +7,7 @@ namespace Tests\Feature\Signing;
 use App\Domain\Delivery\Events\CompositeEnvelopeEventSink;
 use App\Domain\Delivery\Events\DeliveryEnvelopeEventSink;
 use App\Domain\Delivery\Webhooks\WebhookEventName;
+use App\Domain\Evidence\Finalization\FinalizationTrigger;
 use App\Domain\Identity\Audit\AuditEvent;
 use App\Domain\Signing\Contracts\EnvelopeEventSink;
 use App\Domain\Signing\Envelopes\AuditEnvelopeEventSink;
@@ -41,8 +42,11 @@ class EnvelopeEventSinkTest extends TestCase
         // as a delivery leaves no local history the moment an endpoint is disabled.
         $this->assertInstanceOf(CompositeEnvelopeEventSink::class, $sink);
 
+        // FinalizationTrigger is last, and it is the only member that is not a database
+        // write: it defers its dispatch to after the commit, so a throw from either sink in
+        // front of it aborts the transition before anything has been queued (issue #94).
         $this->assertSame(
-            [AuditEnvelopeEventSink::class, DeliveryEnvelopeEventSink::class],
+            [AuditEnvelopeEventSink::class, DeliveryEnvelopeEventSink::class, FinalizationTrigger::class],
             array_map(static fn (EnvelopeEventSink $member): string => $member::class, $sink->sinks()),
         );
     }

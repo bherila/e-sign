@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Domain\Delivery\Events\CompositeEnvelopeEventSink;
 use App\Domain\Delivery\Outbound\DestinationPolicy;
 use App\Domain\Delivery\Webhooks\TextRedactor;
 use App\Domain\Evidence\Contracts\ArtifactValidator;
@@ -14,8 +15,10 @@ use App\Domain\Evidence\Finalization\Artifacts\ArtifactStore;
 use App\Domain\Evidence\Finalization\Artifacts\DiskArtifactStore;
 use App\Domain\Evidence\Finalization\CompletionReportDocument;
 use App\Domain\Evidence\Finalization\Console\PruneStagingArtifactsCommand;
+use App\Domain\Evidence\Finalization\Console\ResumeCommand;
 use App\Domain\Evidence\Finalization\EnvelopeFinalizer;
 use App\Domain\Evidence\Finalization\ExecutedDocumentRenderer;
+use App\Domain\Evidence\Finalization\FinalizationTrigger;
 use App\Domain\Evidence\Retention\Console\EraseRecipientCommand;
 use App\Domain\Evidence\Retention\Console\PlaceLegalHoldCommand;
 use App\Domain\Evidence\Retention\Console\PurgeRetainedBlobsCommand;
@@ -32,6 +35,7 @@ use App\Domain\Evidence\Sealing\TcLibPdfArtifactValidator;
 use App\Domain\Evidence\Sealing\TcLibPdfSealer;
 use App\Domain\Preparation\Contracts\PdfAssembler;
 use App\Domain\Preparation\Documents\DocumentBlobStore;
+use App\Domain\Signing\Contracts\EnvelopeEventSink;
 use App\Domain\Signing\Envelopes\EnvelopeStateMachine;
 use Illuminate\Contracts\Config\Repository;
 use Illuminate\Contracts\Foundation\Application;
@@ -137,10 +141,37 @@ final class EvidenceServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        /*
+         * The last acceptance is what starts finalization (issue #94).
+         *
+         * Added to the composite the Delivery module composes rather than replacing it:
+         * `extend()` wraps whatever is bound whichever provider booted first, so this cannot
+         * silently drop the audit sink or the webhook outbox the way a second `bind()` of the
+         * whole list would the day either of them changes.
+         *
+         * Last in the order, deliberately. The two sinks in front of it are database writes
+         * inside the transition's transaction; a throw from either must abort the transition
+         * before anything has been queued. FinalizationTrigger is the only member that is not
+         * a database write, and it defers its one side effect to after the commit.
+         */
+        $this->app->extend(
+            EnvelopeEventSink::class,
+            static function (EnvelopeEventSink $sink, Application $app): EnvelopeEventSink {
+                $sinks = $sink instanceof CompositeEnvelopeEventSink ? $sink->sinks() : [$sink];
+                $sinks[] = $app->make(FinalizationTrigger::class);
+
+                return new CompositeEnvelopeEventSink(...$sinks);
+            },
+        );
+
         if ($this->app->runningInConsole()) {
             $this->commands([
                 SealStatusCommand::class,
                 PruneStagingArtifactsCommand::class,
+
+                // The five-minute sweep that re-dispatches a finalization whose queued job
+                // never ran (issue #94). Scheduled in routes/console.php.
+                ResumeCommand::class,
 
                 // Retention, legal hold, privacy, and the backup/restore drill (issue #40).
                 // Registered here, alongside the rest of the Evidence module, because
