@@ -7,3 +7,11 @@ allowBuilds:
   spotlight-noindex: true
   esbuild: false
   unrs-resolver: false
+
+# `pdfjs-dist` optionally depends on `@napi-rs/canvas` so that PDF.js can rasterise a page in
+# Node. This application renders PDFs in the browser and nowhere else — the production runtime
+# is PHP-only (AGENTS.md) and the image ships `public/build`, not `node_modules`. Installing it
+# would add a platform-specific native binary, and its per-architecture siblings to the lock
+# file, for a code path nothing here reaches.
+ignoredOptionalDependencies:
+  - "@napi-rs/canvas"

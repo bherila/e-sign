@@ -13,7 +13,7 @@ file and fails the build on a license that is not allowed.
   and `pnpm licenses list --json --prod`.
 - **Checked by:** `scripts/check-licenses.php` (allowlist + per-package exceptions).
 - **Inventory date:** 2026-09-08.
-- **Counts:** 116 Composer production packages, 71 pnpm production packages.
+- **Counts:** 116 Composer production packages, 70 pnpm production packages.
 
 Development-only dependencies (test runners, linters, build tooling) are excluded: they are
 not distributed in the Docker image or the cPanel bundle and carry no distribution
@@ -42,11 +42,11 @@ ever needed, revisit the plugin.
 
 | License | Composer | pnpm | Notes |
 |---|---|---|---|
-| MIT | 92 | 56 | |
+| MIT | 92 | 54 | |
 | LGPL-3.0-or-later | 14 | 0 | The `tecnickcom/tc-lib-*` PDF engine family — see below. |
 | ISC | 0 | 12 | |
 | BSD-3-Clause | 5 | 1 | |
-| Apache-2.0 | 3 | 1 | |
+| Apache-2.0 | 3 | 2 | `pdfjs-dist` joined `class-variance-authority` — see below. |
 | BSD-3-Clause OR GPL-2.0-only OR GPL-3.0-only | 2 | 0 | `nette/schema`, `nette/utils`. Disjunctive: **we take BSD-3-Clause** and no GPL obligation attaches. |
 | MIT AND ISC | 0 | 1 | `victory-vendor`. Conjunctive: both apply, both permissive. |
 
@@ -98,6 +98,32 @@ In summary:
 - **Honest labelling.** The library is LGPL. Do not describe it, or the application as a
   whole, as MIT-licensed.
 
+## Serving PDF.js locally
+
+`pdfjs-dist` (Apache-2.0) renders the document in the visual field editor and, later, on the
+signing pages. AGENTS.md forbids a third-party CDN on either surface, and PDF.js falls back to
+its published CDN for several resources unless it is told otherwise, so "served locally" is a
+set of explicit settings rather than a default:
+
+| Part | How it reaches the browser from this origin |
+|---|---|
+| The library | A normal ES module import, bundled by Vite into the editor's lazy chunk. |
+| The worker | `import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'`, emitted into `public/build` as an asset and assigned to `GlobalWorkerOptions.workerSrc`. |
+| `cmaps/`, `standard_fonts/`, `wasm/`, `iccs/` | Fetched by path at runtime, one file at a time, so no import exists for a bundler to follow. The plugin in `vite.config.ts` copies them to `public/vendor/pdfjs/` on every dev start and every build, and `pdfjs.ts` points `cMapUrl`, `standardFontDataUrl`, `wasmUrl` and `iccUrl` at that path. |
+
+The copies are generated, not committed (`/public/vendor` is in `.gitignore`), and
+`node_modules/pdfjs-dist/LICENSE` is copied alongside them so the licence travels with the
+distributed files. `wasm/` and `iccs/` carry their own upstream `LICENSE_*` files for JBIG2,
+OpenJPEG and QCMS, and `standard_fonts/` carries `LICENSE_FOXIT` and `LICENSE_LIBERATION` for
+the substituted fonts; all are copied verbatim.
+
+`pdfjs-dist` declares one optional dependency, `@napi-rs/canvas`, which lets PDF.js rasterise a
+page in Node. It is listed in `ignoredOptionalDependencies` in `pnpm-workspace.yaml` and is
+therefore **not** installed or distributed: rendering happens in the browser, the production
+runtime is PHP-only, and the image ships `public/build` rather than `node_modules`. Installing
+it would add a platform-specific native binary, and its per-architecture siblings to the lock
+file, for a code path nothing here reaches.
+
 ## Other notable terms
 
 | Package | License | Notes |
@@ -107,7 +133,7 @@ In summary:
 | `aws/aws-sdk-php`, `aws/aws-crt-php` | Apache-2.0 | S3-compatible blob storage client. Apache-2.0 requires the NOTICE file to travel with the distribution; it ships inside `vendor/aws/`. |
 | `nette/schema`, `nette/utils` | BSD-3-Clause OR GPL-2.0-only OR GPL-3.0-only | We take BSD-3-Clause. |
 | `victory-vendor` | MIT AND ISC | Transitive dependency of `recharts`. |
-| `pdfjs-dist` | Apache-2.0 | **Not yet a dependency.** Planned for the signing pages and, when added, must be served locally — never from a third-party CDN (`AGENTS.md`). It will appear in the table below once installed. |
+| `pdfjs-dist` | Apache-2.0 | The PDF renderer for the preparation and signing pages (issue #22). Served entirely from this origin — see [Serving PDF.js locally](#serving-pdfjs-locally). Apache-2.0 requires its `LICENSE` and any `NOTICE` to travel with the distribution; they ship inside the copied `public/vendor/pdfjs/` directories and in `node_modules/pdfjs-dist/LICENSE` in the source distribution. |
 
 Fonts used in signature rendering are not yet chosen. When they are, each font's license and
 attribution must be added to this file before the font is committed or bundled; a font does
@@ -241,7 +267,7 @@ license is published for it. See `tests/Fixtures/firma/SCHEMA.md`.
 | `web-auth/webauthn-lib` | 5.3.8 | MIT |
 | `webmozart/assert` | 2.4.1 | MIT |
 
-## pnpm production dependencies (71)
+## pnpm production dependencies (70)
 
 | Package | Version | License |
 |---|---|---|
@@ -298,6 +324,7 @@ license is published for it. See `tests/Fixtures/firma/SCHEMA.md`.
 | `loose-envify` | 1.4.0 | MIT |
 | `lucide-react` | 0.577.0 | ISC |
 | `object-assign` | 4.1.1 | MIT |
+| `pdfjs-dist` | 6.3.289 | Apache-2.0 |
 | `prop-types` | 15.8.1 | MIT |
 | `react` | 19.2.6 | MIT |
 | `react-day-picker` | 9.14.0 | MIT |
