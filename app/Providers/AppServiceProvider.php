@@ -2,10 +2,13 @@
 
 namespace App\Providers;
 
+use App\Domain\Identity\Models\Workspace;
+use App\Domain\Identity\Policies\WorkspacePolicy;
 use App\Listeners\UpdateLastLoginDate;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 use RuntimeException;
 use Spatie\Csp\AddCspHeaders;
@@ -29,6 +32,10 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Event::listen(Login::class, UpdateLastLoginDate::class);
+
+        // Registered explicitly: policy auto-discovery looks for App\Policies\<Model>Policy
+        // and never finds a policy that lives in a domain module.
+        Gate::policy(Workspace::class, WorkspacePolicy::class);
 
         // Register the Spatie CSP middleware globally if the HTTP kernel is available.
         if ($this->app->bound(Kernel::class)) {
