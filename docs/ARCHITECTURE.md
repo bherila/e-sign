@@ -71,7 +71,7 @@ be the only caller of anything:
 | | |
 |---|---|
 | Native API | `/api/v1` — `routes/api.php`, `app/Http/Controllers/Api/V1`, [docs/api/native-v1.md](api/native-v1.md) |
-| Firma facade | `/functions/v1/signing-request-api`, profile `firma-compat-v1` |
+| Firma facade | `/functions/v1/signing-request-api`, profile `firma-compat-v1` — `routes/compat-firma.php`, `app/Http/Controllers/Compat/Firma`, `app/Domain/Integration/Firma`, [docs/api/firma-compat-v1.md](api/firma-compat-v1.md) |
 | Shared services | `EnvelopeService`, `TemplateCatalog`, `EnvelopeValueReader`, `EnvelopeEventFeed`, `WebhookEndpointService`, `IdempotencyStore`, `ArtifactLocator` |
 
 **The facade calls those same services.** It translates shapes — status vocabularies,
