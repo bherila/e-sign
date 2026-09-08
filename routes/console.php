@@ -51,3 +51,23 @@ Schedule::command('esign:api:prune-idempotency-keys')
     ->hourly()
     ->withoutOverlapping()
     ->name('api:prune-idempotency-keys');
+
+/*
+ * Re-read every published artifact once a week and check it still matches its row
+ * (issue #40; docs/operations/retention.md).
+ *
+ * Weekly rather than daily because the work is proportional to the whole corpus — every
+ * artifact is streamed back and re-hashed, and the executed PDFs are re-validated on top —
+ * and the failure it exists to catch is slow: bit rot, a half-restored object store, an
+ * object replaced out of band. Sunday at 03:10 keeps it away from the hourly expiry pass
+ * and the daily reminder pass.
+ *
+ * The `artifact_integrity` readiness probe reads the row this records rather than doing the
+ * work itself, and warns once the last completed run is older than
+ * `esign.retention.verification_warn_days` (8, one day of slack past this schedule). So a
+ * verification that stops running is visible, not just one that fails.
+ */
+Schedule::command('esign:artifacts:verify')
+    ->weeklyOn(0, '03:10')
+    ->withoutOverlapping()
+    ->name('artifacts:verify');
