@@ -79,6 +79,23 @@ return [
             'transport' => 'array',
         ],
 
+        // Brevo transactional API via the Symfony bridge; DSN in services.brevo.dsn
+        // (MAILER_DSN=brevo+api://KEY@default). Registered in AppServiceProvider.
+        'brevo' => [
+            'transport' => 'brevo',
+        ],
+
+        // Production default for the shared-hosting profile: Brevo API first, the host's
+        // SMTP relay second. Never falls back to `log`; a logged mail is not a delivered mail.
+        'hybrid' => [
+            'transport' => 'failover',
+            'mailers' => [
+                'brevo',
+                'smtp',
+            ],
+            'retry_after' => 60,
+        ],
+
         'failover' => [
             'transport' => 'failover',
             'mailers' => [
