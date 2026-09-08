@@ -4,10 +4,15 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Evidence;
 
+use App\Domain\Evidence\Finalization\Artifacts\Artifact;
+use App\Domain\Evidence\Finalization\Artifacts\ArtifactKind;
 use App\Domain\Evidence\Sealing\AssuranceLevel;
 use App\Domain\Evidence\Sealing\Exceptions\SealingException;
 use App\Domain\Evidence\Sealing\HttpTimestampAuthority;
 use App\Domain\Evidence\Sealing\SealedArtifact;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
+use Tests\Support\FinalizationScenario;
 use Tests\Support\SealingFixtures;
 use Tests\Support\TsaProbe;
 use Tests\TestCase;
@@ -27,6 +32,10 @@ use Tests\TestCase;
  */
 final class ValidationFixturesTest extends TestCase
 {
+    // The finalized artifact is built from a real signed envelope, so this class needs a
+    // schema. Every other fixture here is pure bytes and would not.
+    use RefreshDatabase;
+
     private const MANIFEST = 'manifest.tsv';
 
     /** Only the fixture root is trusted; the OS trust store is replaced. */
@@ -126,12 +135,51 @@ final class ValidationFixturesTest extends TestCase
             'Cryptographically sound but sealed with a key outside the trusted root.',
         ];
 
+        $manifest[] = $this->writeFinalizedArtifact();
         $manifest = [...$manifest, ...$this->writeTimestampedArtifacts()];
 
         $this->writeManifest($manifest);
 
         $this->assertFileExists($directory.'/'.self::MANIFEST);
         $this->assertFileExists($directory.'/sealed-b-b.pdf');
+        $this->assertFileExists($directory.'/finalized-executed.pdf');
+    }
+
+    /**
+     * The artifact the staged publication actually produces, end to end.
+     *
+     * Everything else in this directory is a document sealed directly from a synthetic input.
+     * This one goes through the whole of issue #28 — a signed envelope, the field values drawn
+     * on the reviewed revision, the completion report appended, and the seal applied to the
+     * result — so pyHanko is validating what a deployment publishes rather than what the
+     * sealer can do in isolation.
+     *
+     * It is deterministic in the way that matters here: same fixture document, same fixture
+     * key, same trust anchor, and the same `valid` verdict every run. It is *not* byte-stable
+     * (a fresh signing time and fresh document identifiers each run), which is true of every
+     * artifact in this directory and is why they are regenerated rather than diffed.
+     *
+     * @return array{string, string, string, string}
+     */
+    private function writeFinalizedArtifact(): array
+    {
+        $scenario = FinalizationScenario::signed();
+        $scenario->finalizer()->finalize($scenario->envelope);
+
+        $artifact = Artifact::query()
+            ->where('envelope_id', $scenario->envelope->getKey())
+            ->where('kind', ArtifactKind::ExecutedPdf->value)
+            ->firstOrFail();
+
+        $this->write('finalized-executed.pdf', (string) Storage::disk('documents')->get($artifact->path));
+
+        return [
+            'finalized-executed.pdf',
+            'valid',
+            self::TRUST_FIXTURE_ONLY,
+            'The executed agreement produced by the staged finalization: reviewed revision, field '.
+            'values, appended completion report, sealed at PAdES B-B under the fixture root.',
+        ];
     }
 
     /**
