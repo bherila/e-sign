@@ -38,6 +38,68 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Document intake (Stage 2, issue #19)
+    |--------------------------------------------------------------------------
+    |
+    | Limits applied to an uploaded PDF before anything else touches it. They
+    | are enforced twice on purpose: the Form Request rejects an oversized body
+    | before it is parsed, and the preflight parser re-checks the same ceiling
+    | against the bytes it actually received.
+    |
+    | The defaults come from the measured cost table in docs/stage0/pdf-import.md
+    | (roughly 0.03 ms/page preflight and 50 KB/page of peak memory on
+    | text-dense pages). They are configuration, not an invariant, and are
+    | expected to move once there is a corpus of real uploads.
+    |
+    | Nesting depth and the decompression ceiling are not separately
+    | configurable: the object-graph walk fixes its recursion depth at 32, and
+    | decompression is bounded by `max_decoded_stream_bytes` per stream. See
+    | App\Domain\Preparation\Preflight\PreflightLimits.
+    |
+    */
+
+    'documents' => [
+        // A disk *name*, resolved through config/filesystems.php. Code never
+        // branches on the driver behind it, and it is never presigned.
+        'disk' => env('ESIGN_DOCUMENTS_DISK', 'documents'),
+
+        'max_bytes' => (int) env('ESIGN_DOCUMENTS_MAX_BYTES', 33_554_432),
+        'max_pages' => (int) env('ESIGN_DOCUMENTS_MAX_PAGES', 500),
+        'max_objects' => (int) env('ESIGN_DOCUMENTS_MAX_OBJECTS', 100_000),
+        'max_decoded_stream_bytes' => (int) env('ESIGN_DOCUMENTS_MAX_DECODED_STREAM_BYTES', 33_554_432),
+
+        // The MIME types the upload Form Request accepts, checked against the
+        // file's sniffed type rather than its name or its declared header. This
+        // is a first gate only; preflight then parses the document for real.
+        'allowed_mimetypes' => ['application/pdf'],
+
+        'normalization' => [
+            // Rebuild every accepted document through the importer before it
+            // becomes the review revision.
+            //
+            // Off by default, and that default is a fidelity decision rather
+            // than a performance one: tc-lib-pdf 8.73 drops annotations and
+            // /UserUnit on import and emits fresh document identifiers each run
+            // (docs/stage0/pdf-import.md, findings 2, 3 and 6). Rebuilding a
+            // document that needs no rebuilding would therefore lose content
+            // and produce a review revision that cannot be reproduced from the
+            // original. With it off, the review revision is the original bytes
+            // and carries the original digest.
+            //
+            // The switch exists because normalization steps that genuinely have
+            // to run before review — AcroForm flattening is the expected first
+            // one — need this path to be built and tested, not invented later.
+            // Whatever it does is recorded on the revision and disclosed to the
+            // sender; see docs/preparation/documents.md.
+            'rebuild_pages' => filter_var(
+                env('ESIGN_DOCUMENTS_NORMALIZE_REBUILD_PAGES', false),
+                FILTER_VALIDATE_BOOLEAN
+            ),
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Service seal material
     |--------------------------------------------------------------------------
     |
