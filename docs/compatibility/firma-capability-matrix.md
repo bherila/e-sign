@@ -295,3 +295,13 @@ on `/signing-requests/{id}`, `/signing-requests/{id}/reminders`,
 
 Expanding into any of these families is a deliberate profile change: add the rows here, with
 shapes read from the pinned document, before writing the adapter.
+
+## Recorded fixtures
+
+`tests/Fixtures/firma/firma-compat-v1/<workflow>/{request,users,fields,download}.json` hold
+sanitized live responses (2026-09-08) for the four consumer workflows in four different states
+(sent, finished, cancelled, finished single-recipient). `tests/Feature/Compatibility/FirmaFixtureShapeTest.php`
+pins the shapes the consumer depends on. Rows for `GET /signing-requests/{id}`, `/users`,
+`/fields`, and `/download` are therefore fixture-backed; create/send/patch/cancel remain derived
+from the consumer's client code and the reference only.
+
