@@ -119,10 +119,12 @@ composer test
 
 ## Review policy
 
-Pull requests touching cryptography, sealing, key handling, the signing state machine,
-guest access, service credentials, webhooks, or either HTTP API surface require an
-independent review (`@codex review`) before merge, in addition to green CI. Documentation,
-configuration, UI-only, dependency, and test-only PRs merge on green CI. Squash merge always.
+Pull requests squash-merge on green CI. For PRs touching cryptography, sealing, key handling,
+the signing state machine, guest access, service credentials, webhooks, or either HTTP API
+surface, also request an independent review (`@codex review`) when opening the PR; it does not
+block the merge, and its findings are fixed in follow-up commits or PRs on `main`, never left
+unanswered. Documentation, configuration, UI-only, dependency, and test-only PRs need CI only.
+Squash merge always.
 
 ## Context budget
 
