@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Support;
 
+use App\Domain\Preparation\Schema\SchemaVersion;
 use RuntimeException;
 
 /**
@@ -68,27 +69,27 @@ final class FieldSchemaFixture
         return $raw;
     }
 
-    /** The published JSON Schema, decoded. */
-    public static function schemaPath(): string
+    /** The published JSON Schema for a given version; the current one by default. */
+    public static function schemaPath(string $version = SchemaVersion::CURRENT): string
     {
-        return dirname(__DIR__, 2).'/resources/schema/field-schema-1.0.json';
+        return dirname(__DIR__, 2).'/resources/schema/field-schema-'.$version.'.json';
     }
 
     /**
      * @return array<string, mixed>
      */
-    public static function schema(): array
+    public static function schema(string $version = SchemaVersion::CURRENT): array
     {
-        $raw = file_get_contents(self::schemaPath());
+        $raw = file_get_contents(self::schemaPath($version));
 
         if ($raw === false) {
-            throw new RuntimeException('Could not read resources/schema/field-schema-1.0.json.');
+            throw new RuntimeException('Could not read '.self::schemaPath($version).'.');
         }
 
         $decoded = json_decode($raw, true, 64, JSON_THROW_ON_ERROR);
 
         if (! is_array($decoded)) {
-            throw new RuntimeException('resources/schema/field-schema-1.0.json is not a JSON object.');
+            throw new RuntimeException(self::schemaPath($version).' is not a JSON object.');
         }
 
         /** @var array<string, mixed> */

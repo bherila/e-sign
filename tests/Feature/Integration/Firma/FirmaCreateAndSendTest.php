@@ -274,6 +274,53 @@ class FirmaCreateAndSendTest extends TestCase
     }
 
     /**
+     * The receipt has to name the bytes the text was actually located in.
+     *
+     * With `rebuild_pages` on, intake stores a *rewritten* review revision, so the upload and the
+     * revision are two different PDFs. The page geometry has always come from the revision; if
+     * the text came from the upload while the receipt claimed the revision's digest, send would
+     * take that receipt as proof the work was already done and place fields using coordinates
+     * measured in a document nobody signs.
+     */
+    public function test_an_anchor_is_resolved_in_the_review_revision_that_will_be_signed(): void
+    {
+        config()->set('esign.documents.normalization.rebuild_pages', true);
+
+        [, $issued] = $this->scenario();
+
+        $response = $this->postJson(self::BASE.'/create-and-send', [
+            'name' => 'Synthetic anchored agreement',
+            'document' => base64_encode(PdfFixtures::bytes('single-page-letter')),
+            'recipients' => [['first_name' => 'Dana', 'email' => 'dana@buyer.example.test', 'order' => 1]],
+            'fields' => [[
+                'type' => 'signature',
+                'page_number' => 1,
+                'anchor' => ['text' => 'Signature:', 'occurrence' => 'sole'],
+                'position' => [
+                    'x' => 0.0,
+                    'y' => 0.0,
+                    'width' => 170.0 / self::PAGE_WIDTH * 100,
+                    'height' => 36.0 / self::PAGE_HEIGHT * 100,
+                ],
+            ]],
+        ], FirmaFacadeScenario::headers($issued))->assertStatus(201);
+
+        $envelope = Envelope::query()->where('public_id', $response->json('id'))->firstOrFail();
+        $revision = $envelope->documentRevision;
+        $receipt = $envelope->fieldSchema()->fields[0]->anchor?->resolved;
+
+        $this->assertNotNull($receipt);
+        $this->assertNotNull($revision);
+
+        // The revision is a rewrite of the upload, so its digest is its own.
+        $this->assertNotSame(hash('sha256', PdfFixtures::bytes('single-page-letter')), $revision->sha256);
+
+        // And the receipt names it, because that is the document the text was read from.
+        $this->assertSame($revision->sha256, $receipt->documentSha256);
+        $this->assertSame($envelope->document_sha256, $receipt->documentSha256);
+    }
+
+    /**
      * An anchor offset cannot push a field off the page.
      *
      * The percent path is bounded by `x + width <= 100`, but an anchored rectangle is built

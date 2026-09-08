@@ -23,12 +23,28 @@ use InvalidArgumentException;
  */
 final readonly class SchemaVersion
 {
-    /** The version this build implements and writes. */
-    public const CURRENT = '1.0';
+    /**
+     * The version this build implements and writes.
+     *
+     * 1.1 adds the optional anchor members `placement`, `required` and `tolerance`, and the
+     * service-written `resolved` receipt (docs/preparation/anchors.md). They are additive and
+     * optional, which is exactly the case the policy above says bumps the minor version: a 1.0
+     * reader validating with `additionalProperties: false` must not be handed a document that
+     * still calls itself 1.0 and carries members its contract does not declare.
+     *
+     * A document keeps the version it arrived with. A 1.0 document that uses none of the new
+     * members stays a 1.0 document, byte for byte and digest for digest; only a document this
+     * service *rewrites* — which in practice means one whose anchors it resolved — is stamped
+     * with the version it was written as.
+     */
+    public const CURRENT = '1.1';
 
     public const MAJOR = 1;
 
-    public const MINOR = 0;
+    public const MINOR = 1;
+
+    /** Every minor this build can read, oldest first. Each has its own published contract file. */
+    public const SUPPORTED = ['1.0', '1.1'];
 
     public function __construct(public int $major, public int $minor)
     {

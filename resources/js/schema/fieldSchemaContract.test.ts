@@ -1,7 +1,8 @@
 import Ajv2020, { type ValidateFunction } from "ajv/dist/2020";
 
 import fixtureJson from "../../../tests/Fixtures/schema/nda-two-signers.json";
-import schemaJson from "../../schema/field-schema-1.0.json";
+import legacySchemaJson from "../../schema/field-schema-1.0.json";
+import schemaJson from "../../schema/field-schema-1.1.json";
 import {
   ANCHOR_OPTIONAL,
   ANCHOR_ORIGINS,
@@ -22,7 +23,7 @@ import {
 } from "./fieldSchema";
 
 /**
- * `resources/schema/field-schema-1.0.json` is the published contract; these types are one
+ * `resources/schema/field-schema-1.1.json` is the published contract; these types are one
  * implementation of it and `app/Domain/Preparation/Schema` is the other. This file enforces the
  * contract directly with ajv and pins the TypeScript mirror against it. The PHP suite
  * (`tests/Unit/Preparation/Schema/FieldSchemaContractTest.php`) pins the same file from the
@@ -66,6 +67,32 @@ describe("the published JSON Schema", () => {
     const canonical = JSON.parse(serializeFieldSchema(parseFieldSchema(fixtureJson))) as unknown;
 
     expect(errorsFor(canonical)).toEqual([]);
+  });
+
+  /**
+   * The reason 1.1 is a separate file rather than an edit to 1.0.
+   *
+   * A document written before the new anchor members existed says `"1.0"`, and a consumer holding
+   * the 1.0 contract validates it with `additionalProperties: false`. That contract is unchanged
+   * here, the document still satisfies it, and this build still reads the document — and hands
+   * back exactly the bytes it was given, version included, so the field-schema digest every
+   * attestation binds is untouched.
+   */
+  it("keeps a 1.0 document valid against the unchanged 1.0 contract, and round trips it", () => {
+    const legacy = JSON.parse(JSON.stringify(fixtureJson)) as Record<string, any>;
+    legacy.schema_version = "1.0";
+    delete legacy.fields[9].anchor.required;
+
+    const validateLegacy = new Ajv2020({ strict: false, allErrors: true }).compile(legacySchemaJson);
+
+    expect(validateLegacy(legacy)).toBe(true);
+    expect((validateLegacy.errors ?? []).map((error) => error.message)).toEqual([]);
+
+    const round = JSON.parse(serializeFieldSchema(parseFieldSchema(legacy))) as Record<string, any>;
+
+    expect(round.schema_version).toBe("1.0");
+    expect(round).toEqual(legacy);
+    expect(validateLegacy(round)).toBe(true);
   });
 
   it.each([

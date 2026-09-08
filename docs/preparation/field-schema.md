@@ -147,6 +147,10 @@ differently: `replace` is not a guess between readings but the only behaviour an
 had here, and defaulting it is what keeps an already-written anchor's canonical bytes — and the
 field-schema digest every attestation is bound to — unchanged.
 
+`placement`, `required`, `tolerance` and `resolved` are additive optional members and therefore
+arrive in **schema 1.1**. `resources/schema/field-schema-1.0.json` is unchanged and still
+published; a 1.0 document keeps its version and its bytes, and this build reads both.
+
 `occurrence` and `origin` are the serialised form of `Text\AnchorOccurrence` and
 `Text\AnchorOrigin`, so the document cannot express a placement the resolver does not implement,
 and there is one definition of what each mode means.

@@ -181,7 +181,7 @@ class TemplateHttpTest extends TestCase
             ->assertJsonPath('recipients.0.id', 'buyer')
             ->assertJsonPath('recipients.0.stage', 1)
             ->assertJsonPath('recipients.1.stage', 2)
-            ->assertJsonPath('field_schema.schema_version', '1.0');
+            ->assertJsonPath('field_schema.schema_version', '1.1');
 
         // No storage handle in a version payload, for the same reason there is none in a
         // document payload.

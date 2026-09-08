@@ -162,12 +162,20 @@ final readonly class FieldSchemaDocument
      * it. Passing a whole new document would make that a matter of care; this makes it
      * structural.
      *
+     * What it does change is `schema_version`: see below.
+     *
      * @param  list<FieldDefinition>  $fields
      */
     public function withFields(array $fields): self
     {
         return new self(
-            $this->schemaVersion,
+            // Stamped with the version this build writes, not the one the document arrived
+            // with. A rewritten field set can carry members an older minor does not declare —
+            // a resolution receipt is exactly that — and a document that kept an older version
+            // string while gaining them would be a document its own published contract rejects.
+            // A document this method is never called on keeps its original version untouched,
+            // which is what preserves an existing envelope's field-schema digest.
+            SchemaVersion::current(),
             $this->documentId,
             $this->coordinateSpace,
             $this->recipients,

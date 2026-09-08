@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Signing\Envelopes;
 
+use App\Domain\Preparation\Anchoring\AnchorOmission;
 use App\Domain\Preparation\Anchoring\AnchorResolutionFailed;
 use App\Domain\Preparation\Anchoring\AnchorResolutionOutcome;
 use App\Domain\Preparation\Schema\FieldDefinition;
@@ -180,6 +181,7 @@ final readonly class EnvelopeStateMachine
                 $changes += $this->resolvedSchemaChanges($resolution);
 
                 $this->commitEnvelope($locked, $changes);
+                $this->discardOmittedValues($locked, $resolution);
 
                 if ($locked->signing_mode->freezesAtSend()) {
                     $this->stampMaterialValuesFrozen($locked, $now);
@@ -1019,6 +1021,33 @@ final readonly class EnvelopeStateMachine
                 ? null
                 : json_encode($resolution->omissionsToArray(), JSON_THROW_ON_ERROR),
         ];
+    }
+
+    /**
+     * Forget any value a sender supplied for a field that was then omitted.
+     *
+     * A sender may prefill an optional anchored field before send, and its anchor may then turn
+     * out not to be in the document. The field is gone from the copied schema at that point, but
+     * its `envelope_field_values` row would outlive it — and the finalizer captures every row it
+     * finds, so the evidence would describe a value for a field the agreement does not contain,
+     * typed `unknown` because nothing in the schema explains it.
+     *
+     * Deleted in the same transaction as the send, so the field set and the values recorded
+     * against it always describe the same agreement.
+     */
+    private function discardOmittedValues(Envelope $locked, AnchorResolutionOutcome $resolution): void
+    {
+        if ($resolution->omissions === []) {
+            return;
+        }
+
+        EnvelopeFieldValue::query()
+            ->where('envelope_id', $locked->getKey())
+            ->whereIn('schema_field_id', array_map(
+                static fn (AnchorOmission $omission): string => $omission->fieldId,
+                $resolution->omissions,
+            ))
+            ->delete();
     }
 
     /**

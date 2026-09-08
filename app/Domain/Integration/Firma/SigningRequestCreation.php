@@ -12,6 +12,7 @@ use App\Domain\Identity\Credentials\ServiceCredential;
 use App\Domain\Identity\Models\Workspace;
 use App\Domain\Integration\Native\EnvelopeService;
 use App\Domain\Integration\Native\NewEnvelope;
+use App\Domain\Preparation\Documents\DocumentBlobStore;
 use App\Domain\Preparation\Documents\DocumentIntake;
 use App\Domain\Preparation\Documents\Models\Document;
 use App\Domain\Preparation\Documents\Models\DocumentRevision;
@@ -83,6 +84,7 @@ final readonly class SigningRequestCreation
         private PageGeometryReader $pages,
         private DocumentIntake $intake,
         private CurrentPrincipal $principal,
+        private DocumentBlobStore $blobs,
     ) {}
 
     /**
@@ -253,6 +255,27 @@ final readonly class SigningRequestCreation
         return $contacts;
     }
 
+    /**
+     * The review revision's stored bytes.
+     *
+     * @throws FirmaException When the object is gone, which is an internal failure rather than
+     *                        anything the caller can fix — and says so without naming a path.
+     */
+    private function reviewBytes(DocumentRevision $revision): string
+    {
+        $bytes = $this->blobs->disk((string) $revision->disk)->get((string) $revision->path);
+
+        if (! is_string($bytes) || $bytes === '') {
+            throw FirmaException::of(
+                FirmaErrorCode::InternalError,
+                'The document behind this signing request could not be read, so no anchor in it '
+                .'can be resolved.',
+            );
+        }
+
+        return $bytes;
+    }
+
     /* ------------------------------------------------------------------ document */
 
     /**
@@ -298,15 +321,24 @@ final readonly class SigningRequestCreation
 
         $settings = is_array($body['settings'] ?? null) ? $body['settings'] : [];
 
+        $revision->setRelation('document', $document);
+
         $schema = $this->placement->schema(
             documentId: $document->public_id,
-            pages: $this->pages->forRevision($revision->setRelation('document', $document)),
+            pages: $this->pages->forRevision($revision),
             recipients: $recipients,
             fields: $fields,
-            documentBytes: static fn (): string => $bytes,
+            // The *review revision's* bytes, not the upload's. Normalization may rebuild the
+            // pages (`esign.documents.normalization.rebuild_pages`), and then the two are
+            // different PDFs: the page geometry above already comes from the revision, and text
+            // read from the upload would be measured against a page it does not belong to. It is
+            // also the document that will be shown for assent and stamped at finalization, so it
+            // is the only one an anchor may be resolved in.
+            documentBytes: fn (): string => $this->reviewBytes($revision),
             useSigningOrder: ($settings['use_signing_order'] ?? true) !== false,
             // The digest the anchors were resolved against, so the envelope's own send-time
-            // resolution can see the work is already done for these exact bytes.
+            // resolution can see the work is already done for these exact bytes. It is the same
+            // revision the closure above reads, which is what makes the receipt true.
             documentSha256: (string) $revision->sha256,
         );
 

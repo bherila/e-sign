@@ -16,8 +16,21 @@
  * Never infer points versus percent from a number's magnitude.
  */
 
-/** The schema version this build implements and writes. */
-export const FIELD_SCHEMA_VERSION = "1.0";
+/**
+ * The schema version this build implements and writes.
+ *
+ * 1.1 adds the optional anchor members `placement`, `required` and `tolerance`, and the
+ * service-written `resolved` receipt. They are additive and optional, which is the case the
+ * version policy says bumps the minor: a 1.0 reader validating with `additionalProperties: false`
+ * must not be handed a document that still calls itself 1.0 and carries members its contract does
+ * not declare.
+ */
+export const FIELD_SCHEMA_VERSION = "1.1";
+
+/** Every minor this build can read, oldest first. Each has its own published contract file. */
+export const SUPPORTED_FIELD_SCHEMA_VERSIONS = ["1.0", "1.1"] as const;
+
+export type FieldSchemaVersion = (typeof SUPPORTED_FIELD_SCHEMA_VERSIONS)[number];
 
 /**
  * Field types version 1.0 implements, in schema declaration order.
@@ -168,7 +181,7 @@ export interface FieldDefinition {
 }
 
 export interface FieldSchemaDocument {
-  schema_version: typeof FIELD_SCHEMA_VERSION;
+  schema_version: FieldSchemaVersion;
   document_id: string;
   coordinate_space: CoordinateSpace;
   recipients: Recipient[];
@@ -393,7 +406,10 @@ export function serializeFieldSchema(document: FieldSchemaDocument): string {
 /** The canonical object form: property order fixed, defaults stated, coordinates rounded. */
 export function canonicaliseDocument(document: FieldSchemaDocument): FieldSchemaDocument {
   return {
-    schema_version: FIELD_SCHEMA_VERSION,
+    // The version the document arrived with, not the one this build writes: a 1.0 document that
+    // uses none of the 1.1 members stays a 1.0 document, byte for byte, and so does its digest.
+    // Only the server rewrites a document's version, and only when it rewrites its fields.
+    schema_version: document.schema_version ?? FIELD_SCHEMA_VERSION,
     document_id: document.document_id,
     coordinate_space: {
       unit: NATIVE_COORDINATE_SPACE.unit,

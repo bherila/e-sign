@@ -70,6 +70,19 @@ anchored agreement already signed would stop verifying. The same applies to `req
 the default and is written out only when it is `false`. An anchor authored before either property
 existed canonicalises to exactly the bytes it always did.
 
+### Which contract version
+
+`placement`, `required`, `tolerance` and `resolved` are additive optional members, which under the
+version policy in `SchemaVersion` bumps the **minor**: they arrive in **schema 1.1**
+(`resources/schema/field-schema-1.1.json`). `field-schema-1.0.json` is unchanged and still
+published, because a consumer holding it validates with `additionalProperties: false` and must not
+be handed a document that calls itself 1.0 while carrying members its contract does not declare.
+
+A document keeps the version it arrived with. One that uses none of the new members stays a 1.0
+document — byte for byte, digest for digest — and this build reads both. The only thing that moves
+a version is the service *rewriting* a field set, which in practice means resolving its anchors:
+the result is stamped 1.1 because that is what it was written as.
+
 **`required`** is the field-level rule applied to the anchor: an unstated requirement fails
 closed.
 
@@ -101,7 +114,10 @@ refusal is not.
 
 `tolerance` defaults to `config('esign.preparation.anchor_cross_check_tolerance')`, one point.
 Deliberately tight: the point of a cross-check is to catch a layout that moved, and a generous
-tolerance catches nothing. `tolerance` on a `replace` anchor is a validation error, because there
+tolerance catches nothing. When the deployment default is used, resolution **writes it into the
+document**: the setting can change between the publish that resolved a template and the send that
+copies it, or differ between instances, and a receipt whose standard has to be inferred from
+whatever the configuration says later is not a record of anything. `tolerance` on a `replace` anchor is a validation error, because there
 is no declared rectangle for it to be a tolerance of.
 
 `anchor.required: false` is a validation error here too, for the mirror-image reason: in this mode
@@ -224,7 +240,7 @@ sender fixing one does not discover the next afterwards.
 | `anchor_occurrence_out_of_range` | `occurrence: n` and fewer than *n* matches exist |
 | `anchor_cross_check_failed` | a `cross_check` anchor resolved further than `tolerance` from the declared rectangle |
 | `anchor_resolved_off_page` | the offset put the rectangle off the page it was found on |
-| `anchor_text_unreadable` | the document's text could not be extracted at all |
+| `anchor_text_unreadable` | the document's text could not be extracted at all. The *cause* goes to the service log, never to the caller: a storage adapter's message carries the private disk and object path, and no response reveals those |
 | `anchor_optional_on_required_field` | `anchor.required: false` on a field whose own `required` is true |
 | `invalid_format` | `anchor.required: false` with `cross_check`, `tolerance` with `replace`, or a `replace` receipt whose `rect` is not the field's |
 
@@ -257,9 +273,11 @@ It is narrow in three ways.
    about what to do when the text is there three times, and a field that could go in three places
    is not a field anybody can be asked to sign. An ambiguous optional anchor is refused exactly
    like a required one.
-3. **The field is omitted, not placed.** It is removed from the envelope's field set. There is no
-   fallback position, because a field at a fallback position is a field nobody agreed to sign
-   there.
+3. **The field is omitted, not placed.** It is removed from the envelope's field set, together
+   with any value a sender had already supplied for it — the finalizer captures every value row it
+   finds, and one belonging to a field the agreement does not contain would appear in the evidence
+   as an untyped stray. There is no fallback position, because a field at a fallback position is a
+   field nobody agreed to sign there.
 
 ### Where the omission is recorded
 
@@ -304,6 +322,10 @@ number the producer already had exactly:
 
 **Use an anchor when the document comes from somewhere else** and the wording is the only stable
 handle you have.
+
+The editor does not author anchors, and duplicating an anchored field drops the anchor: a
+`replace` anchor decides x and y, so a copy that kept it would resolve straight back on top of the
+original, two fields in one place in a document whose canvas showed two.
 
 **Use `cross_check` when both are true** — you generated the layout *and* you want the coordinates
 proved against the words before anybody signs. It is the belt-and-braces option, and it is the one

@@ -168,6 +168,33 @@ final readonly class AnchorPlacement
         return $this->mode()->replacesRect();
     }
 
+    /**
+     * The same request with its effective tolerance written down.
+     *
+     * A `cross_check` that names no tolerance is judged against the deployment's setting, and
+     * that setting can change between the publish that resolved a template and the send that
+     * copies it — or differ across instances. Recording the number the check actually used means
+     * the stored document says what it was checked against, instead of leaving a receipt whose
+     * standard has to be inferred from whatever the configuration happens to say later.
+     */
+    public function withTolerance(float $tolerance): self
+    {
+        if ($this->tolerance !== null) {
+            return $this;
+        }
+
+        return new self(
+            $this->text,
+            $this->occurrence,
+            $this->placement,
+            $this->origin,
+            $this->offset,
+            $this->required,
+            CanonicalNumber::round($tolerance),
+            $this->resolved,
+        );
+    }
+
     /** The same request with a resolution receipt attached. */
     public function resolvedAs(ResolvedAnchorRecord $record): self
     {

@@ -12,6 +12,7 @@ use App\Domain\Preparation\Documents\PreflightPageSizes;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\ValidationCode;
 use App\Domain\Preparation\Text\TextRun;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
@@ -85,7 +86,18 @@ final readonly class RevisionAnchorResolver
         try {
             return $this->text->extract($this->bytes($revision));
         } catch (Throwable $failure) {
-            throw new AnchorResolutionFailed($this->unreadableProblems($schema, $documentSha256, $failure));
+            // The cause goes to the log, where an operator can see all of it. It does not go to
+            // the caller: a filesystem adapter's message routinely carries the private disk name
+            // and object path, and a parser's carries engine internals — neither of which any
+            // other document response is allowed to reveal (docs/BLOB_STORAGE.md). What the
+            // sender gets is the stable code and a sentence they can act on.
+            Log::error('Anchor resolution could not read a document revision.', [
+                'document_revision_id' => $revision->public_id,
+                'exception' => $failure::class,
+                'message' => $failure->getMessage(),
+            ]);
+
+            throw new AnchorResolutionFailed($this->unreadableProblems($schema, $documentSha256));
         }
     }
 
@@ -97,6 +109,8 @@ final readonly class RevisionAnchorResolver
         $bytes = $this->blobs->disk((string) $revision->disk)->get((string) $revision->path);
 
         if (! is_string($bytes) || $bytes === '') {
+            // Caught by the caller, logged, and never returned: the disk name is a storage
+            // handle, and those do not appear in responses.
             throw new DocumentStorageException(
                 'Document revision '.$revision->public_id.' has no readable bytes on disk ['.$revision->disk.'], '
                 .'so no anchor in it can be resolved.',
@@ -112,11 +126,12 @@ final readonly class RevisionAnchorResolver
      * Reporting one problem per affected field rather than a single document-level error keeps
      * the two surfaces honest: the editor still annotates each field it cannot place, and a
      * caller reading `details.problems[]` sees the same list it would see for any other anchor
-     * failure. The cause is identical in each message, because it is.
+     * failure. The cause is identical in each message, because it is — and it is deliberately
+     * *not* in them: see where this is called for why the detail is logged rather than returned.
      *
      * @return list<AnchorResolutionProblem>
      */
-    private function unreadableProblems(FieldSchemaDocument $schema, string $documentSha256, Throwable $failure): array
+    private function unreadableProblems(FieldSchemaDocument $schema, string $documentSha256): array
     {
         $problems = [];
 
@@ -133,7 +148,7 @@ final readonly class RevisionAnchorResolver
                 ValidationCode::AnchorTextUnreadable,
                 'the document\'s text could not be read',
                 'Field "'.$field->id.'" is anchored to "'.$field->anchor->text.'", and the document\'s text could '
-                    .'not be read, so no anchor in it can be resolved: '.$failure->getMessage(),
+                    .'not be read, so no anchor in it can be resolved. The cause is in the service log.',
             );
         }
 

@@ -20,6 +20,7 @@ use App\Domain\Signing\Envelopes\EnvelopeState;
 use App\Domain\Signing\Envelopes\EnvelopeStateMachine;
 use App\Domain\Signing\Exceptions\SendPreconditionsFailed;
 use App\Domain\Signing\Models\Envelope;
+use App\Domain\Signing\Models\EnvelopeFieldValue;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use Tests\Support\PdfFixtures;
@@ -207,6 +208,31 @@ class EnvelopeAnchorResolutionTest extends TestCase
         $sent = $this->scenario->sink->payloadFor(EnvelopeEvent::Sent);
         $this->assertSame('seller_notes', $sent['anchor_fields_omitted'][0]['field_id']);
         $this->assertSame(1, $sent['anchors_resolved']);
+    }
+
+    public function test_a_value_supplied_for_an_omitted_field_is_discarded_with_it(): void
+    {
+        $envelope = $this->scenario->preparedDraft([
+            'field_schema' => $this->anchoredSchema(notesText: 'Witness signature:', notesAnchorRequired: false),
+        ]);
+
+        // The sender prefilled the optional field before send; its anchor then turns out not to
+        // be in the document.
+        $this->scenario->machine()->setSenderValues($envelope, ['seller_notes' => 'Prefilled by the sender.']);
+
+        $this->scenario->machine()->send($envelope->refresh());
+
+        // The field is gone from the agreement, and so is the value: the finalizer captures every
+        // row it finds, and a value for a field the agreement does not contain would appear in
+        // the evidence as an untyped stray.
+        $this->assertNull($envelope->refresh()->fieldSchema()->field('seller_notes'));
+        $this->assertSame(0, EnvelopeFieldValue::query()
+            ->where('envelope_id', $envelope->getKey())
+            ->where('schema_field_id', 'seller_notes')
+            ->count());
+
+        // Everything else a sender supplied survives untouched.
+        $this->assertGreaterThan(0, EnvelopeFieldValue::query()->where('envelope_id', $envelope->getKey())->count());
     }
 
     public function test_the_omission_reaches_the_audit_trail(): void

@@ -58,6 +58,24 @@ final readonly class FieldDefinition
             && ! $this->anchor->isResolvedAgainst($documentSha256);
     }
 
+    /** The same field carrying a different anchor request; nothing else moves. */
+    public function withAnchor(AnchorPlacement $anchor): self
+    {
+        return new self(
+            $this->id,
+            $this->recipientId,
+            $this->type,
+            $this->page,
+            $this->rect,
+            $this->required,
+            $this->readOnly,
+            $this->label,
+            $this->alias,
+            $this->prefill,
+            $anchor,
+        );
+    }
+
     /**
      * The same field with a resolved rectangle and the receipt that produced it.
      *

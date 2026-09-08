@@ -453,5 +453,13 @@ function duplicateField(source: FieldDefinition, document: FieldSchemaDocument):
   // answer to a name an integration uses to patch exactly one.
   delete copy.alias;
 
+  // An anchor is dropped for the same shape of reason. Duplicating shifts the rectangle, but a
+  // `replace` anchor overrides x and y at publish and send, so the copy would resolve straight
+  // back on top of the original — two fields in one place, in a document whose canvas showed
+  // two. The editor does not author anchors (docs/preparation/editor.md), so there is no control
+  // here to re-aim the copy with; the honest result of duplicating an anchored field is a
+  // hand-placed field at the shifted rectangle the user just saw.
+  delete copy.anchor;
+
   return copy;
 }

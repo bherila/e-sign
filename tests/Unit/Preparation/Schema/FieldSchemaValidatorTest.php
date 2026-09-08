@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Preparation\Schema;
 
 use App\Domain\Preparation\Schema\CoordinateSpaceDeclaration;
+use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\FieldSchemaValidator;
 use App\Domain\Preparation\Schema\PageSizes;
 use App\Domain\Preparation\Schema\ValidationCode;
@@ -87,6 +88,33 @@ class FieldSchemaValidatorTest extends TestCase
     /**
      * @return iterable<string, array{0: callable(array<string, mixed>): array<string, mixed>, 1: ValidationCode, 2: string}>
      */
+    /**
+     * The reason 1.1 is a new contract file rather than an edit to 1.0.
+     *
+     * A document written before the anchor members existed says `"1.0"`, and this build still
+     * reads it — and canonicalises it to exactly the bytes it arrived as, version included. That
+     * is not a nicety: an envelope's `field_schema_sha256` is what every attestation on it binds,
+     * so a canonical form that grew a property, or a version string that moved on its own, would
+     * invalidate the evidence for every anchored agreement already signed.
+     */
+    public function test_a_1_0_document_still_imports_and_keeps_its_exact_bytes(): void
+    {
+        $legacy = FieldSchemaFixture::asArray();
+        $legacy['schema_version'] = '1.0';
+        unset($legacy['fields'][9]['anchor']['required']);
+
+        $this->assertTrue((new FieldSchemaValidator)->validate($legacy)->isValid());
+
+        $document = FieldSchemaDocument::fromArray($legacy);
+
+        $this->assertSame('1.0', $document->schemaVersion->toString());
+        $this->assertSame($legacy, $document->toArray());
+        $this->assertSame(
+            hash('sha256', $document->canonicalJson()),
+            hash('sha256', FieldSchemaDocument::fromArray($document->toArray())->canonicalJson()),
+        );
+    }
+
     /**
      * A run's box is its advance by the font's ascent plus descent, so a heading near the top of
      * the page starts above the CropBox edge and a run at the margin ends on it. Both are

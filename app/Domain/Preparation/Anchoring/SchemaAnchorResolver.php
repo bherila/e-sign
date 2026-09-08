@@ -215,6 +215,13 @@ final readonly class SchemaAnchorResolver
             );
         }
 
+        // A cross-check judged against the deployment default records that number, so the
+        // stored document says what it was checked against rather than leaving it to whatever
+        // the configuration says the next time somebody looks.
+        if ($anchor->mode() === AnchorPlacementMode::CrossCheck) {
+            $field = $field->withAnchor($anchor->withTolerance($this->toleranceFor($anchor)));
+        }
+
         return $field->withResolvedAnchor($record);
     }
 
@@ -312,7 +319,7 @@ final readonly class SchemaAnchorResolver
             return null;
         }
 
-        $tolerance = $anchor->tolerance ?? $this->defaultCrossCheckTolerance;
+        $tolerance = $this->toleranceFor($anchor);
         $dx = abs($found->resolvedRect->x - $field->rect->x);
         $dy = abs($found->resolvedRect->y - $field->rect->y);
 
@@ -335,6 +342,12 @@ final readonly class SchemaAnchorResolver
                 .'", but the two disagree by more than the '.$this->number($tolerance).' pt tolerance: resolved '
                 .$where.'. One of them is stale and there is no way to tell which, so neither is used.',
         );
+    }
+
+    /** The tolerance a cross-check is judged against: the document's, else the deployment's. */
+    private function toleranceFor(AnchorPlacement $anchor): float
+    {
+        return $anchor->tolerance ?? $this->defaultCrossCheckTolerance;
     }
 
     private function number(float $value): string
