@@ -58,7 +58,7 @@ ESIGN_HEALTH_ALLOW_CIDRS=127.0.0.1/32,::1/128
 | `mail` | `mail.default` is a delivering transport, or the app is not in production | — | `mail.default` is `log` or `array` while `APP_ENV=production` |
 | `mail_backlog` | No message is stuck in `queued` beyond `esign.mail.backlog_warn_seconds` (default 300s) and fewer than `esign.mail.failed_warn_count` (default 1) reached `failed` in the last 24h | Oldest `queued` message is older than the warn threshold, or the 24h `failed` count has reached `failed_warn_count` | Oldest `queued` message is older than `esign.mail.backlog_fail_seconds` (default 1800s), the 24h `failed` count has reached `esign.mail.failed_fail_count` (default 25), or the outbox table is unreadable |
 | `webhook_backlog` | No overdue delivery, and no disabled endpoint | Oldest overdue delivery exceeds `esign.delivery.webhooks.backlog_warn_seconds` (default 300s), or ≥1 endpoint is disabled | Oldest overdue delivery exceeds `esign.delivery.webhooks.backlog_fail_seconds` (default 1800s), or the outbox tables are unavailable |
-| `signing_material` | Certificate and private key paths are configured and readable, and the certificate expires more than `esign.health.cert_warn_days` (default 30) days out | Unset outside production, or the certificate expires within the warn window | Unset in production, unreadable, unparseable, or expired |
+| `signing_material` | Certificate and private key paths are configured and readable, the certificate expires more than `esign.health.cert_warn_days` (default 30) days out, and every seal key id named by a published artifact resolves to a certificate here | Unset outside production, or the certificate expires within the warn window | Unset in production, unreadable, unparseable, expired, or **some published artifact names a seal key id this deployment can no longer resolve** |
 | `tsa` | `ESIGN_TSA_URL` unset, or set and parses as `http`/`https` | — | Set but not a valid `http(s)` URL |
 | `artifact_integrity` | The last completed `esign:artifacts:verify` run passed and finished within `esign.retention.verification_warn_days` (default 8) | That run passed but is older than the window, or no verification has ever completed | The last completed run found a digest mismatch, a missing object, or a seal that no longer validates |
 | `finalization_backlog` | No envelope has been waiting to finalize longer than `esign.finalization.resume_after_minutes` (default 10) | At least one has | More than 10 have, one of them has waited an hour, or the tables are unreadable |
@@ -78,6 +78,16 @@ if the worst is a `warn`, `fail` if any probe `fail`s.
 
 - **`signing_material` never reads the private key past `is_readable()`.** It only opens and
   parses the certificate (via `openssl_x509_parse`) to report expiry.
+- **`signing_material` also asks whether the past is still verifiable.** Every artifact records
+  the seal key id that produced it. If any published artifact names an id that no longer
+  resolves to a certificate — the usual cause is a rotation that dropped the outgoing key out
+  of `ESIGN_SEAL_RETIRED_KEYS` — the probe fails. It is an evidence gap, not a nuisance: the
+  bytes are intact and nobody on this host can say who sealed them. The check is a `DISTINCT`
+  over an indexed column, so it costs the number of key versions rather than the number of
+  artifacts, and it runs only once the active material is configured — so the Docker web role,
+  which mounts no seal material by design, reports that and stops rather than reporting every
+  artifact as unattributable. See
+  [`docs/operations/seal-key-management.md`](seal-key-management.md).
 - **`tsa` never makes a network call.** It only checks that the configured URL is
   well-formed. Actual TSA reachability is checked by the worker at signing time, where an
   unreachable TSA is a signing error, not a silent downgrade to a B-B signature — see

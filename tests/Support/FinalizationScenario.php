@@ -43,11 +43,17 @@ final class FinalizationScenario
 
     public readonly Envelope $envelope;
 
-    private function __construct(AssuranceLevel $level)
+    private function __construct(AssuranceLevel $level, bool $reset)
     {
-        Storage::fake('documents');
+        // `Storage::fake()` *clears* the disk, and `configureSeal()` puts the active key back
+        // to fixture key A. Both are what a single-scenario test wants and both are wrong for
+        // the second envelope of the rotation drill, which has to keep the first envelope's
+        // artifacts on disk and must be sealed under whatever key the test has rotated to.
+        if ($reset) {
+            Storage::fake('documents');
 
-        self::configureSeal();
+            self::configureSeal();
+        }
 
         $this->signing = SigningScenario::create(
             revisionBytes: PdfFixtures::bytes(self::DOCUMENT_FIXTURE),
@@ -68,9 +74,14 @@ final class FinalizationScenario
         }
     }
 
-    public static function signed(AssuranceLevel $level = AssuranceLevel::PadesBB): self
+    /**
+     * @param  bool  $reset  Re-fake the documents disk and reset the seal configuration.
+     *                       Pass false for a second scenario in the same test, which needs the
+     *                       first one's artifacts to survive and the current seal key to stand.
+     */
+    public static function signed(AssuranceLevel $level = AssuranceLevel::PadesBB, bool $reset = true): self
     {
-        return new self($level);
+        return new self($level, $reset);
     }
 
     /**

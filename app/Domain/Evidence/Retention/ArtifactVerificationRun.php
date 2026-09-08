@@ -23,12 +23,14 @@ use Illuminate\Support\Str;
  * @property string $public_id
  * @property string|null $workspace_public_id
  * @property CarbonImmutable|null $published_since
+ * @property string|null $seal_key_id
  * @property CarbonImmutable $started_at
  * @property CarbonImmutable|null $finished_at
  * @property int $artifacts_checked
  * @property int $digest_mismatches
  * @property int $missing_objects
  * @property int $invalid_signatures
+ * @property int $unresolvable_keys
  * @property bool|null $passed
  * @property list<array<string, mixed>>|null $findings
  * @property CarbonImmutable|null $created_at
@@ -41,12 +43,14 @@ class ArtifactVerificationRun extends Model
     protected $fillable = [
         'workspace_public_id',
         'published_since',
+        'seal_key_id',
         'started_at',
         'finished_at',
         'artifacts_checked',
         'digest_mismatches',
         'missing_objects',
         'invalid_signatures',
+        'unresolvable_keys',
         'passed',
         'findings',
     ];
@@ -61,6 +65,7 @@ class ArtifactVerificationRun extends Model
             'digest_mismatches' => 'integer',
             'missing_objects' => 'integer',
             'invalid_signatures' => 'integer',
+            'unresolvable_keys' => 'integer',
             'passed' => 'boolean',
             'findings' => 'array',
             'created_at' => 'immutable_datetime',
@@ -81,10 +86,21 @@ class ArtifactVerificationRun extends Model
         return 'public_id';
     }
 
-    /** Everything that did not match, across the three failure kinds. */
+    /**
+     * Everything that did not match, across the four failure kinds.
+     *
+     * `unresolvable_keys` counts here on purpose. An artifact whose `seal_key_id` this
+     * deployment can no longer resolve to a certificate is an evidence gap, not a
+     * housekeeping note: the bytes are intact and nobody here can say who sealed them.
+     * Leaving it out of the total would let a rotation that dropped the outgoing key out of
+     * ESIGN_SEAL_RETIRED_KEYS pass a green verification run.
+     */
     public function problemCount(): int
     {
-        return $this->digest_mismatches + $this->missing_objects + $this->invalid_signatures;
+        return $this->digest_mismatches
+            + $this->missing_objects
+            + $this->invalid_signatures
+            + $this->unresolvable_keys;
     }
 
     /** The most recent run that ran to completion, or null if none ever has. */

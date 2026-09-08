@@ -27,8 +27,11 @@ Two things are load-bearing and easy to undo by accident:
 exist before envelopes do: whatever produces a message flattens what it wants said into that
 object, and the Mailables never learn what an envelope is.
 
-The SES feedback endpoint fails closed — see `Mail/Feedback/RejectingSnsMessageVerifier` for
-what implementing SNS signature verification involves and why it has not been hand-rolled.
+The SES feedback endpoint verifies the SNS signature (`Mail/Feedback/AwsSnsMessageVerifier`,
+over `aws/aws-php-sns-message-validator`) and accepts only topics named in
+`esign.mail.ses.topic_arns`. With that list empty — the default —
+`Mail/Feedback/RejectingSnsMessageVerifier` is bound instead and every message is refused, so
+an unconfigured deployment fails closed. `docs/delivery/mail.md` has the whole shape.
 
 ## Envelope events
 

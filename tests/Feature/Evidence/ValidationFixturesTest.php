@@ -50,6 +50,9 @@ final class ValidationFixturesTest extends TestCase
     /** The fixture root is added to the OS trust store, which anchors a public TSA. */
     private const TRUST_FIXTURE_PLUS_SYSTEM = 'fixture-plus-system';
 
+    /** Only the rotation target's root is trusted; the fixture root is not. */
+    private const TRUST_ROTATION_TARGET_ONLY = 'rotation-target-only';
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -136,6 +139,7 @@ final class ValidationFixturesTest extends TestCase
         ];
 
         $manifest[] = $this->writeFinalizedArtifact();
+        $manifest = [...$manifest, ...$this->writeRotationArtifacts()];
         $manifest = [...$manifest, ...$this->writeTimestampedArtifacts()];
 
         $this->writeManifest($manifest);
@@ -143,6 +147,8 @@ final class ValidationFixturesTest extends TestCase
         $this->assertFileExists($directory.'/'.self::MANIFEST);
         $this->assertFileExists($directory.'/sealed-b-b.pdf');
         $this->assertFileExists($directory.'/finalized-executed.pdf');
+        $this->assertFileExists($directory.'/rotation-retired-key.pdf');
+        $this->assertFileExists($directory.'/rotation-active-key.pdf');
     }
 
     /**
@@ -179,6 +185,67 @@ final class ValidationFixturesTest extends TestCase
             self::TRUST_FIXTURE_ONLY,
             'The executed agreement produced by the staged finalization: reviewed revision, field '.
             'values, appended completion report, sealed at PAdES B-B under the fixture root.',
+        ];
+    }
+
+    /**
+     * The rotation drill, checked by something that shares no code with the sealer.
+     *
+     * `tests/Feature/Evidence/SealRotationDrillTest.php` proves in-process that an artifact
+     * sealed under a retired key still verifies against that key's certificate. That is a
+     * self-check: it uses the same library to verify that it used to sign, so it cannot find a
+     * fault common to both directions. These four rows are the independent half.
+     *
+     * Two artifacts, four rows, because the claim has two halves and both need proving:
+     *
+     *  - the retired artifact is VALID under the retired key's anchor, and the active artifact
+     *    is VALID under the active key's anchor — each verifies against its own certificate;
+     *  - each is INVALID under the *other* anchor — which is what makes the first half mean
+     *    something. Without the negative rows, a validator that trusted everything would
+     *    produce the same two VALID verdicts.
+     *
+     * The two keys have different roots on purpose; tests/Fixtures/crypto/README.md says why.
+     *
+     * @return list<array{string, string, string, string}>
+     */
+    private function writeRotationArtifacts(): array
+    {
+        $retired = SealingFixtures::seal(marker: 'A');
+        $active = SealingFixtures::seal(material: SealingFixtures::materialB(), marker: 'B');
+
+        $this->write('rotation-retired-key.pdf', $retired->pdf);
+        $this->write('rotation-active-key.pdf', $active->pdf);
+
+        return [
+            [
+                'rotation-retired-key.pdf',
+                'valid',
+                self::TRUST_FIXTURE_ONLY,
+                'Sealed under the RETIRED key ('.SealingFixtures::KEY_ID.'), validated against the retired '
+                .'certificate\'s own anchor. A rotation does not invalidate what the old key sealed.',
+            ],
+            [
+                'rotation-active-key.pdf',
+                'valid',
+                self::TRUST_ROTATION_TARGET_ONLY,
+                'Sealed under the ACTIVE key after rotation ('.SealingFixtures::KEY_ID_B.'), validated '
+                .'against the new certificate\'s anchor.',
+            ],
+            [
+                'rotation-retired-key.pdf',
+                self::EXPECT_INVALID,
+                self::TRUST_ROTATION_TARGET_ONLY,
+                'The retired artifact under the NEW key\'s anchor: refused. The two anchors discriminate, '
+                .'so the VALID verdicts above are about the right certificate and not about a validator '
+                .'that trusts everything.',
+            ],
+            [
+                'rotation-active-key.pdf',
+                self::EXPECT_INVALID,
+                self::TRUST_FIXTURE_ONLY,
+                'The active artifact under the RETIRED key\'s anchor: refused. The complement of the row '
+                .'above.',
+            ],
         ];
     }
 
@@ -286,6 +353,9 @@ final class ValidationFixturesTest extends TestCase
             '#                unreadable  pyHanko refuses the file before reaching the signature',
             '#   trust-mode:  fixture-only          --trust-replace --trust root.test.crt',
             '#                fixture-plus-system   --trust root.test.crt, OS trust kept',
+            '#                rotation-target-only  --trust-replace --trust root-b.test.crt',
+            '# A file may appear more than once, under different trust modes: that is how the',
+            '# rotation rows prove each artifact verifies against its own key and not the other.',
         ];
 
         foreach ($rows as $row) {

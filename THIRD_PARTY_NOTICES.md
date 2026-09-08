@@ -13,7 +13,7 @@ file and fails the build on a license that is not allowed.
   and `pnpm licenses list --json --prod`.
 - **Checked by:** `scripts/check-licenses.php` (allowlist + per-package exceptions).
 - **Inventory date:** 2026-09-08.
-- **Counts:** 116 Composer production packages, 70 pnpm production packages.
+- **Counts:** 117 Composer production packages, 70 pnpm production packages.
 
 Development-only dependencies (test runners, linters, build tooling) are excluded: they are
 not distributed in the Docker image or the cPanel bundle and carry no distribution
@@ -46,7 +46,7 @@ ever needed, revisit the plugin.
 | LGPL-3.0-or-later | 14 | 0 | The `tecnickcom/tc-lib-*` PDF engine family — see below. |
 | ISC | 0 | 12 | |
 | BSD-3-Clause | 5 | 1 | |
-| Apache-2.0 | 3 | 2 | `pdfjs-dist` joined `class-variance-authority` — see below. |
+| Apache-2.0 | 4 | 2 | The three AWS packages, plus `pdfjs-dist` alongside `class-variance-authority` — see below. |
 | BSD-3-Clause OR GPL-2.0-only OR GPL-3.0-only | 2 | 0 | `nette/schema`, `nette/utils`. Disjunctive: **we take BSD-3-Clause** and no GPL obligation attaches. |
 | MIT AND ISC | 0 | 1 | `victory-vendor`. Conjunctive: both apply, both permissive. |
 
@@ -131,6 +131,7 @@ file, for a code path nothing here reaches.
 | `bherila/auth-laravel` | MIT | Shared BWH authentication package (`docs/HANDOFF.md` §2). |
 | `laravel/framework` and the Laravel ecosystem | MIT | |
 | `aws/aws-sdk-php`, `aws/aws-crt-php` | Apache-2.0 | S3-compatible blob storage client. Apache-2.0 requires the NOTICE file to travel with the distribution; it ships inside `vendor/aws/`. |
+| `aws/aws-php-sns-message-validator` | Apache-2.0 | SNS message signature verification for the SES mail-feedback endpoint (issue #35). Three files, no transitive dependency of its own beyond `ext-openssl` and `psr/http-message`, both already present. AWS publishes the canonical string-to-sign per SNS message type; `AGENTS.md` forbids re-deriving that locally when a maintained library exists. Same NOTICE obligation, satisfied the same way. |
 | `nette/schema`, `nette/utils` | BSD-3-Clause OR GPL-2.0-only OR GPL-3.0-only | We take BSD-3-Clause. |
 | `victory-vendor` | MIT AND ISC | Transitive dependency of `recharts`. |
 | `pdfjs-dist` | Apache-2.0 | The PDF renderer for the preparation and signing pages (issue #22). Served entirely from this origin — see [Serving PDF.js locally](#serving-pdfjs-locally). Apache-2.0 requires its `LICENSE` and any `NOTICE` to travel with the distribution; they ship inside the copied `public/vendor/pdfjs/` directories and in `node_modules/pdfjs-dist/LICENSE` in the source distribution. |
@@ -213,11 +214,12 @@ Installed into a throwaway virtualenv by the job and never committed. Its transi
 (`asn1crypto`, `cryptography`, `pyhanko-certvalidator`, and the rest) is resolved at install
 time and is not pinned here; nothing from it is distributed either.
 
-## Composer production dependencies (116)
+## Composer production dependencies (117)
 
 | Package | Version | License |
 |---|---|---|
 | `aws/aws-crt-php` | 1.2.7 | Apache-2.0 |
+| `aws/aws-php-sns-message-validator` | 1.10.2 | Apache-2.0 |
 | `aws/aws-sdk-php` | 3.394.9 | Apache-2.0 |
 | `bherila/auth-laravel` | 0.12.2 | MIT |
 | `brick/math` | 0.18.0 | MIT |

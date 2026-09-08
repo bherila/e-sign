@@ -24,8 +24,8 @@ use Illuminate\Support\Facades\Route;
 | machine callers with no session and no CSRF token, and putting them in
 | routes/web.php would either break them or weaken the session stack for
 | everyone. No `auth` either — each endpoint authenticates its own caller,
-| which for Brevo is a shared token in the Form Request and for SES is an SNS
-| signature that is currently refused outright.
+| which for Brevo is a shared token in the Form Request and for SES is a
+| verified SNS signature over an allowlisted topic.
 |
 | Both are rate limited. A webhook endpoint is a public POST surface, and the
 | work behind it writes rows.
@@ -41,7 +41,8 @@ Route::middleware('throttle:120,1')
         // config('esign.mail.brevo_webhook_token'), because Brevo signs nothing.
         Route::post('/brevo', BrevoWebhookController::class)->name('brevo');
 
-        // SES Delivery/Bounce/Complaint via SNS. Rejects every message until an SNS
-        // signature verifier is implemented; see the controller.
+        // SES Delivery/Bounce/Complaint via SNS. Authenticated by the SNS signature
+        // (App\Domain\Delivery\Mail\Feedback\AwsSnsMessageVerifier) over a topic named in
+        // config('esign.mail.ses.topic_arns'). An empty list disables the endpoint.
         Route::post('/ses', SesWebhookController::class)->name('ses');
     });

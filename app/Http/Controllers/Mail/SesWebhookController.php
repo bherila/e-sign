@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Mail;
 
 use App\Domain\Delivery\Mail\Feedback\SesFeedbackProcessor;
+use App\Domain\Delivery\Mail\Feedback\SesFeedbackRefusals;
 use App\Domain\Delivery\Mail\Feedback\SnsMessageVerifier;
 use App\Domain\Delivery\Mail\Feedback\SnsVerificationException;
 use App\Http\Controllers\Controller;
@@ -17,14 +18,18 @@ use RuntimeException;
 /**
  * SES feedback, delivered through SNS.
  *
- * Fails closed. The shipped SnsMessageVerifier refuses every message
- * (App\Domain\Delivery\Mail\Feedback\RejectingSnsMessageVerifier), so in this release the
- * endpoint accepts nothing and the code past the gate never runs over HTTP. It exists,
- * reviewed and tested, so that installing a real verifier is the only change required.
+ * Nothing past the verifier runs until the message is proven to have come from AWS *and*
+ * from a topic this deployment was told to accept. The bound verifier is
+ * AwsSnsMessageVerifier when `esign.mail.ses.topic_arns` names a topic and
+ * RejectingSnsMessageVerifier when it does not, so an unconfigured deployment still accepts
+ * nothing.
  *
  * 503 rather than 403 for an unverifiable message: the caller has done nothing wrong and
- * cannot fix it, and SNS treats 503 as retryable, so a deployment that turns verification
- * on does not lose the feedback that arrived in the meantime.
+ * cannot fix it, and SNS treats 503 as retryable, so a deployment that fixes its
+ * configuration does not lose the feedback that arrived in the meantime. The body says
+ * nothing about which check failed — an endpoint that mutates mail state should not explain
+ * to an unauthenticated caller how to satisfy it — but the refusal is recorded on this side,
+ * with its reason, so an operator is not left guessing either.
  */
 class SesWebhookController extends Controller
 {
@@ -32,12 +37,15 @@ class SesWebhookController extends Controller
         SesWebhookRequest $request,
         SnsMessageVerifier $verifier,
         SesFeedbackProcessor $processor,
+        SesFeedbackRefusals $refusals,
     ): JsonResponse {
         $envelope = $request->envelope();
 
         try {
             $verifier->verify($envelope);
-        } catch (SnsVerificationException) {
+        } catch (SnsVerificationException $exception) {
+            $refusals->record($exception->reason, $envelope);
+
             // Deliberately uninformative. An endpoint that mutates mail state should not
             // explain to an unauthenticated caller which part of their message failed.
             return response()->json([
@@ -47,7 +55,7 @@ class SesWebhookController extends Controller
         }
 
         return match ($request->messageType()) {
-            'SubscriptionConfirmation' => $this->confirm($processor, $envelope),
+            'SubscriptionConfirmation' => $this->confirm($processor, $refusals, $envelope),
             'Notification' => response()->json([
                 'status' => $processor->processNotification($envelope) ? 'recorded' : 'ignored',
             ]),
@@ -58,7 +66,17 @@ class SesWebhookController extends Controller
     }
 
     /**
-     * Two failures with two different meanings, and they must not share a status code.
+     * Confirm a subscription, if this deployment confirms subscriptions at all.
+     *
+     * The switch is off by default and the answer when it is off is **200**, not an error.
+     * The message was genuine and correctly addressed; the application has simply decided
+     * that starting to receive a topic's traffic is a person's decision, taken once in the
+     * SNS console. A non-2xx would make SNS retry a confirmation this deployment has
+     * declined on purpose, which is noise rather than safety. The declined confirmation is
+     * recorded so an operator can see the subscription is waiting for them.
+     *
+     * When it is on, two failures with two different meanings, and they must not share a
+     * status code.
      *
      * A confirmation URL that is not an AWS SNS endpoint, or that resolves somewhere it
      * should not, is the shape of a server-side request forgery attempt. It will never
@@ -72,11 +90,22 @@ class SesWebhookController extends Controller
      *
      * @param  array<string, mixed>  $envelope
      */
-    private function confirm(SesFeedbackProcessor $processor, array $envelope): JsonResponse
-    {
+    private function confirm(
+        SesFeedbackProcessor $processor,
+        SesFeedbackRefusals $refusals,
+        array $envelope,
+    ): JsonResponse {
+        if (! $processor->autoConfirmEnabled()) {
+            $refusals->record('auto_confirm_disabled', $envelope);
+
+            return response()->json(['status' => 'not_confirmed']);
+        }
+
         try {
             $processor->confirmSubscription($envelope);
         } catch (RuntimeException) {
+            $refusals->record('subscribe_url_refused', $envelope);
+
             return response()->json(['status' => 'rejected'], 422);
         } catch (ConnectionException|RequestException) {
             return response()->json(['status' => 'unconfirmed'], 503);

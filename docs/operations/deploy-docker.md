@@ -139,6 +139,7 @@ from the database. See [`backups.md`](backups.md).
 | `ESIGN_SEAL_PRIVATE_KEY_PASSPHRASE` | **Secret.** Empty if the key is unencrypted (not recommended). |
 | `ESIGN_SEAL_CHAIN_PATH` | `/keys/seal-chain.pem`, optional. |
 | `ESIGN_SEAL_DIGEST_ALGORITHM` | `sha256`, `sha384`, or `sha512`. |
+| `ESIGN_SEAL_RETIRED_KEYS` | Certificates of key versions retired by an earlier rotation, so their artifacts stay verifiable. Blank until the first rotation. Comma-separated `key-id\|certificate-path[\|chain-path]`. **Certificates only.** |
 
 `esign` and `esign-scheduler` receive these same variables (one shared env file) but never mount
 `/keys`, so the paths simply do not resolve there — `signing_material` in `/health/ready`
@@ -167,6 +168,13 @@ the state machine but is a second line of defense.
 | `seal.crt` | `ESIGN_SEAL_CERTIFICATE_PATH=/keys/seal.crt` | `0440`, owned by `root:<container-gid>` |
 | `seal.key` | `ESIGN_SEAL_PRIVATE_KEY_PATH=/keys/seal.key` | `0440`, owned by `root:<container-gid>` |
 | `seal-chain.pem` (optional) | `ESIGN_SEAL_CHAIN_PATH=/keys/seal-chain.pem` | `0440`, owned by `root:<container-gid>` |
+| `retired/<key-id>.crt` (after a rotation) | one entry of `ESIGN_SEAL_RETIRED_KEYS` | `0440`, owned by `root:<container-gid>` |
+
+A retired generation's **certificate** stays in this directory forever; its **private key**
+should be removed from the host once your key policy allows, because verification never needs
+it. Deleting a retired certificate is what breaks verification of every document that key
+sealed, and `signing_material` fails the moment it happens. Rotation steps are in
+[`seal-key-management.md`](seal-key-management.md).
 
 `<container-gid>` is the numeric GID of `www-data` inside the image (`33` on the Debian base
 `php:8.5-fpm` uses; confirm with `docker run --rm <image> id -g www-data` after a build, since a

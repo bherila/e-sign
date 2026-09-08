@@ -14,8 +14,17 @@ use App\Domain\Delivery\Events\SigningUrlMinter;
 use App\Domain\Delivery\Events\UnconfiguredDownloadUrlMinter;
 use App\Domain\Delivery\Mail\Console\MailBacklogCommand;
 use App\Domain\Delivery\Mail\Console\ResendOutboundMailCommand;
+use App\Domain\Delivery\Mail\Feedback\AwsSnsMessageVerifier;
+use App\Domain\Delivery\Mail\Feedback\MailFeedbackRecorder;
 use App\Domain\Delivery\Mail\Feedback\RejectingSnsMessageVerifier;
+use App\Domain\Delivery\Mail\Feedback\SesEventMapper;
+use App\Domain\Delivery\Mail\Feedback\SesFeedbackProcessor;
+use App\Domain\Delivery\Mail\Feedback\SesFeedbackRefusals;
+use App\Domain\Delivery\Mail\Feedback\SesFeedbackSettings;
 use App\Domain\Delivery\Mail\Feedback\SnsMessageVerifier;
+use App\Domain\Delivery\Mail\Feedback\SnsSigningCertificates;
+use App\Domain\Delivery\Mail\Feedback\SnsTopicAllowlist;
+use App\Domain\Delivery\Mail\MailErrorRedactor;
 use App\Domain\Delivery\Outbound\DestinationAllowlist;
 use App\Domain\Delivery\Outbound\DestinationPolicy;
 use App\Domain\Delivery\Outbound\HostResolver;
@@ -35,6 +44,7 @@ use App\Domain\Identity\Audit\AuditRecorder;
 use App\Domain\Signing\Contracts\EnvelopeEventSink;
 use App\Domain\Signing\Envelopes\AuditEnvelopeEventSink;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Support\ServiceProvider;
 
 /**
@@ -79,17 +89,72 @@ final class DeliveryServiceProvider extends ServiceProvider
             );
         });
 
+        $this->app->singleton(
+            SesFeedbackSettings::class,
+            function (Application $app): SesFeedbackSettings {
+                /** @var array<string, mixed> $config */
+                $config = $app->make('config')->get('esign.mail.ses', []);
+
+                return SesFeedbackSettings::fromConfig($config);
+            }
+        );
+
+        $this->app->singleton(SnsTopicAllowlist::class, fn (Application $app): SnsTopicAllowlist => SnsTopicAllowlist::fromConfig(
+            $app->make('config')->get('esign.mail.ses.topic_arns', [])
+        ));
+
+        $this->app->singleton(SesFeedbackRefusals::class, fn (Application $app): SesFeedbackRefusals => new SesFeedbackRefusals(
+            cache: $app->make('cache.store'),
+            redactor: $app->make(MailErrorRedactor::class),
+            settings: $app->make(SesFeedbackSettings::class),
+        ));
+
+        $this->app->singleton(SnsSigningCertificates::class, fn (Application $app): SnsSigningCertificates => new SnsSigningCertificates(
+            http: $app->make(HttpFactory::class),
+            destinations: $app->make(DestinationPolicy::class),
+            cache: $app->make('cache.store'),
+            ttlSeconds: $app->make(SesFeedbackSettings::class)->certificateCacheTtlSeconds,
+        ));
+
+        $this->app->bind(SesFeedbackProcessor::class, fn (Application $app): SesFeedbackProcessor => new SesFeedbackProcessor(
+            mapper: $app->make(SesEventMapper::class),
+            recorder: $app->make(MailFeedbackRecorder::class),
+            http: $app->make(HttpFactory::class),
+            destinations: $app->make(DestinationPolicy::class),
+            settings: $app->make(SesFeedbackSettings::class),
+        ));
+
         /*
-         * The SES mail-feedback endpoint fails closed.
+         * The SES mail-feedback endpoint, and the one place the decision to accept SES
+         * feedback at all is made (issue #35).
          *
-         * TODO(#35): bind a verifier backed by `aws/aws-sns-message-validator` — the
-         * package is not a dependency, and `aws-sdk-php`, which is present only
-         * transitively through league/flysystem-aws-s3-v3, does not include the validator.
-         * Until then every SNS message is refused, so no unverified body can mark a
-         * message delivered or bounced. RejectingSnsMessageVerifier documents exactly what
-         * implementing this involves.
+         * With no topic in `esign.mail.ses.topic_arns` this binds
+         * RejectingSnsMessageVerifier and the endpoint refuses everything. That is not a
+         * formality: a valid AWS signature proves only that *some* AWS customer signed the
+         * message, and with no allowlist there is no answer to "is this our topic?". An
+         * unconfigured deployment therefore fails closed rather than degrading to
+         * signature-only, and it does so by binding a different class, so the refusal is
+         * visible in the container instead of buried in a conditional.
+         *
+         * With a topic configured, AwsSnsMessageVerifier does the real work over
+         * `aws/aws-php-sns-message-validator`: AWS's own canonical string-to-sign for each
+         * of the three message types, the certificate fetched through the shared
+         * DestinationPolicy and cached, SHA-1 signatures refused unless enabled, and a
+         * replay window on the timestamp.
          */
-        $this->app->bind(SnsMessageVerifier::class, RejectingSnsMessageVerifier::class);
+        $this->app->bind(SnsMessageVerifier::class, function (Application $app): SnsMessageVerifier {
+            $topics = $app->make(SnsTopicAllowlist::class);
+
+            if (! $topics->isConfigured()) {
+                return new RejectingSnsMessageVerifier;
+            }
+
+            return new AwsSnsMessageVerifier(
+                topics: $topics,
+                certificates: $app->make(SnsSigningCertificates::class),
+                settings: $app->make(SesFeedbackSettings::class),
+            );
+        });
 
         /*
          * Signing links are one-shot invitations issued by the Signing module. Every mint
