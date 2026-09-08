@@ -8,7 +8,7 @@ facade converts its own convention into it. It is the only field vocabulary in t
 |---|---|
 | Contract | [`resources/schema/field-schema-1.0.json`](../../resources/schema/field-schema-1.0.json) (JSON Schema draft 2020-12) |
 | Server | `app/Domain/Preparation/Schema` (`FieldSchemaDocument`, `FieldSchemaValidator`) |
-| Editor | [`resources/js/schema/fieldSchema.ts`](../../resources/js/schema/fieldSchema.ts) (`parseFieldSchema`, `serializeFieldSchema`) |
+| Editor | [`resources/js/schema/fieldSchema.ts`](../../resources/js/schema/fieldSchema.ts) (`parseFieldSchema`, `serializeFieldSchema`); the editor itself is [editor.md](editor.md) |
 | Fixture | [`tests/Fixtures/schema/nda-two-signers.json`](../../tests/Fixtures/schema/nda-two-signers.json), synthetic, shared by both suites |
 | Specification | `docs/HANDOFF.md` section 7 |
 
