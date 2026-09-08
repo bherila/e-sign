@@ -1112,5 +1112,147 @@
         "name": "embedded-file",
         "file": "embedded-file.pdf",
         "bytes": 1619
+    },
+    {
+        "description": "Two US Letter pages carrying the anchor strings tests/Fixtures/schema/nda-two-signers.json looks for.",
+        "expected_preflight": "accept",
+        "expected_rejections": [],
+        "pages": [
+            {
+                "page": 1,
+                "media_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "crop_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "rotation": 0,
+                "user_unit": 1,
+                "native_width": 612,
+                "native_height": 792,
+                "probe_native": [
+                    50,
+                    50,
+                    20,
+                    10
+                ],
+                "probe_user": [
+                    50,
+                    732,
+                    70,
+                    742
+                ],
+                "overlay_native": [
+                    90,
+                    400,
+                    120,
+                    30
+                ],
+                "text_runs": [
+                    {
+                        "text": "Mutual Non-Disclosure Agreement",
+                        "native_rect": [
+                            60,
+                            82.4,
+                            223.2,
+                            12
+                        ]
+                    },
+                    {
+                        "text": "Buyer initials:",
+                        "native_rect": [
+                            505.25,
+                            722.4,
+                            108,
+                            12
+                        ]
+                    }
+                ]
+            },
+            {
+                "page": 2,
+                "media_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "crop_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "rotation": 0,
+                "user_unit": 1,
+                "native_width": 612,
+                "native_height": 792,
+                "probe_native": [
+                    40,
+                    40,
+                    20,
+                    10
+                ],
+                "probe_user": [
+                    40,
+                    742,
+                    60,
+                    752
+                ],
+                "overlay_native": [
+                    80,
+                    380,
+                    120,
+                    30
+                ],
+                "text_runs": [
+                    {
+                        "text": "Buyer signature:",
+                        "native_rect": [
+                            60,
+                            622.4,
+                            115.2,
+                            12
+                        ]
+                    },
+                    {
+                        "text": "Counterparty signature:",
+                        "native_rect": [
+                            330,
+                            622.4,
+                            165.6,
+                            12
+                        ]
+                    },
+                    {
+                        "text": "Notes:",
+                        "native_rect": [
+                            60,
+                            532.4,
+                            43.2,
+                            12
+                        ]
+                    },
+                    {
+                        "text": "Notes:",
+                        "native_rect": [
+                            60,
+                            682.4,
+                            43.2,
+                            12
+                        ]
+                    }
+                ]
+            }
+        ],
+        "name": "nda-two-signers",
+        "file": "nda-two-signers.pdf",
+        "bytes": 1894
     }
 ]

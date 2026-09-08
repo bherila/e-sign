@@ -37,9 +37,11 @@ use Tests\TestCase;
  *
  * Documents go through the real DocumentIntake with committed synthetic fixtures rather than
  * DocumentFactory, because a version binds to a *review revision* and a factory-made row has
- * none. `multi-page-mixed-size` is the fixture used for the happy path: the shared
- * `nda-two-signers` field set places fields on pages 1 and 2, and the page-fit check runs
- * against the geometry in that document's own preflight report.
+ * none. `nda-two-signers` is the fixture used for the happy path: it is the PDF the shared
+ * `nda-two-signers` field set is written against, so its two pages carry both the geometry the
+ * page-fit check runs against and the text the field set's anchors look for. Publishing resolves
+ * those anchors, so a document without them would make every publish in this file a failure
+ * case (docs/preparation/anchors.md).
  */
 class TemplateLifecycleTest extends TestCase
 {
@@ -294,14 +296,25 @@ class TemplateLifecycleTest extends TestCase
         $this->assertSame('America/New_York', $snapshot['render_settings']['timezone']);
         $this->assertNotNull($snapshot['published_at']);
 
-        // The field set is the canonical document, and the digest is the digest of it.
+        // The field set is the canonical document with its anchors resolved, and the digest is
+        // the digest of exactly that. Publishing is where an anchor stops being a request and
+        // becomes a rectangle, so the snapshot an envelope copies is already placed; nothing
+        // downstream of here resolves anything (docs/preparation/anchors.md).
+        $stored = FieldSchemaDocument::fromArray($snapshot['field_schema']);
+
+        $this->assertSame($stored->canonicalJson(), json_encode($snapshot['field_schema'], FieldSchemaDocument::JSON_FLAGS));
+        $this->assertSame(hash('sha256', $stored->canonicalJson()), $snapshot['field_schema_sha256']);
+
+        $anchored = $stored->field('counterparty_signature');
+        $this->assertNotNull($anchored?->anchor?->resolved);
+        $this->assertSame($revision->sha256, $anchored->anchor->resolved->documentSha256);
+        $this->assertSame($anchored->anchor->resolved->rect->toArray(), $anchored->rect->toArray());
+
+        // Everything that is not anchored is byte-identical to what was submitted.
+        $submitted = FieldSchemaDocument::fromArray(FieldSchemaFixture::asArray());
         $this->assertSame(
-            FieldSchemaDocument::fromArray(FieldSchemaFixture::asArray())->canonicalJson(),
-            json_encode($snapshot['field_schema'], FieldSchemaDocument::JSON_FLAGS),
-        );
-        $this->assertSame(
-            hash('sha256', FieldSchemaDocument::fromArray(FieldSchemaFixture::asArray())->canonicalJson()),
-            $snapshot['field_schema_sha256'],
+            $submitted->field('buyer_signature')?->toArray(),
+            $stored->field('buyer_signature')?->toArray(),
         );
 
         // No storage handle reaches a snapshot, any more than it reaches a response.
@@ -642,7 +655,7 @@ class TemplateLifecycleTest extends TestCase
         return $this->templates->createTemplate($this->workspace, $this->sender, $name);
     }
 
-    private function readyDocument(string $fixture = 'multi-page-mixed-size'): Document
+    private function readyDocument(string $fixture = 'nda-two-signers'): Document
     {
         return $this->intake($fixture);
     }
