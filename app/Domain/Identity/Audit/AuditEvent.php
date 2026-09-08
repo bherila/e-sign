@@ -16,9 +16,16 @@ use RuntimeException;
  * it happens before there is anything to sign.
  *
  * Append-only is enforced here rather than with a database trigger, which is not portable
- * across SQLite, MySQL, and MariaDB. Model-level enforcement stops the application from
- * rewriting its own history; a deployment that needs the guarantee against a compromised
- * application grants its database user INSERT and SELECT on this table and nothing else.
+ * across SQLite, MySQL, and MariaDB. Be precise about what that buys: the model events
+ * below refuse an update or a delete through *this model*, and nothing more. They are not
+ * reached by `AuditEvent::query()->update()`, `AuditEvent::query()->delete()`,
+ * `saveQuietly()`, or `DB::table('esign_audit_events')->delete()`, all of which rewrite the
+ * table freely. So this stops the ordinary mistake, not a determined caller.
+ *
+ * The only enforcement that holds against application code is the grant: a deployment that
+ * needs the guarantee gives its database user INSERT and SELECT on this table and nothing
+ * else. AuditEventTest pins both halves — the model refusals and the query-builder
+ * bypass — so the boundary stays documented by a test rather than by this comment alone.
  *
  * @property string $actor_type
  * @property string|null $actor_id
