@@ -242,6 +242,43 @@ class BrevoMailWebhookTest extends TestCase
         $this->assertStringContainsString('mailbox unavailable', $encoded);
     }
 
+    public function test_a_provider_payload_cannot_rewrite_the_recorded_verdict(): void
+    {
+        $mail = $this->sentMail('precedence@mail.example.test');
+
+        // Anyone holding the shared token can put arbitrary keys in the body. The fields an
+        // operator reads to tell a duplicate webhook from an ignored one must come from this
+        // application, not from the body.
+        $this->deliver([
+            'event' => 'delivered',
+            'message-id' => 'precedence@mail.example.test',
+            'state_changed' => false,
+            'state_before' => 'complained',
+            'state_after' => 'failed',
+            'orphan' => true,
+        ])->assertOk();
+
+        $payload = $mail->events()->where('source', MailEventSource::Brevo->value)->sole()->payload;
+
+        $this->assertTrue($payload['state_changed']);
+        $this->assertSame('sent_to_provider', $payload['state_before']);
+        $this->assertSame('delivered', $payload['state_after']);
+        $this->assertSame(MailState::Delivered, $mail->fresh()?->state);
+    }
+
+    public function test_an_orphan_verdict_cannot_be_rewritten_by_the_payload(): void
+    {
+        $this->deliver([
+            'event' => 'hardBounce',
+            'message-id' => 'unknown@mail.example.test',
+            'orphan' => false,
+        ])->assertOk();
+
+        $orphan = OutboundMailEvent::query()->whereNull('outbound_mail_id')->sole();
+
+        $this->assertTrue($orphan->payload['orphan']);
+    }
+
     public function test_rejects_a_body_that_is_not_a_recognizable_event(): void
     {
         $this->withHeader(BrevoWebhookRequest::TOKEN_HEADER, self::TOKEN)

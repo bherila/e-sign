@@ -64,7 +64,10 @@ final class MailFeedbackRecorder
                 'source' => $source,
                 'event' => $event,
                 'message_id' => $normalized,
-                'payload' => $redacted + ['orphan' => true],
+                // Our own keys first: with `+` the left operand wins, so a provider body
+                // that happens to carry an `orphan` field cannot overwrite our verdict on
+                // whether this event matched anything.
+                'payload' => ['orphan' => true] + $redacted,
                 'occurred_at' => $occurredAt,
             ]);
         }
@@ -72,12 +75,14 @@ final class MailFeedbackRecorder
         $previous = $mail->state;
         $moved = $state !== null && $mail->applyFeedbackState($state, $occurredAt);
 
-        return $mail->recordEvent($source, $event, $redacted + [
+        // Same ordering rule as above, and it matters more here: these three fields are
+        // what an operator reads to tell a duplicate webhook from one this application
+        // chose to ignore, and a payload key of the same name must not be able to rewrite
+        // them.
+        return $mail->recordEvent($source, $event, [
             'state_before' => $previous->value,
             'state_after' => $mail->state->value,
-            // Explicit rather than inferable, so an operator reading the log can tell a
-            // duplicate webhook from one this application chose to ignore.
             'state_changed' => $moved,
-        ], $occurredAt);
+        ] + $redacted, $occurredAt);
     }
 }
