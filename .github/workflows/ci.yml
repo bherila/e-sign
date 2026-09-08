@@ -22,6 +22,7 @@ jobs:
       frontend: ${{ steps.filter.outputs.frontend }}
       backend: ${{ steps.filter.outputs.backend }}
       docker: ${{ steps.filter.outputs.docker }}
+      licenses: ${{ steps.filter.outputs.licenses }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -63,6 +64,15 @@ jobs:
               - '.docker/**'
               - '.dockerignore'
               - 'docker-compose.yml'
+            licenses:
+              - 'composer.json'
+              - 'composer.lock'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'scripts/check-licenses.php'
+              - 'THIRD_PARTY_NOTICES.md'
+              - '.github/workflows/**'
 
   test:
     name: Changed-area checks (PHP ${{ matrix.php }})
@@ -136,6 +146,67 @@ jobs:
           ./vendor/bin/pint --parallel --test
           composer test
 
+  licenses:
+    name: License inventory and SBOM
+    needs: changes
+    if: needs.changes.outputs.licenses == 'true'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          # The gate reads lock metadata only; the runtime matrix lives in the `test` job.
+          php-version: '8.4'
+          extensions: dom, curl, libxml, mbstring, zip
+          coverage: none
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      # Production trees only. Dev tooling is never distributed, so its licenses carry no
+      # obligations and must not gate the build.
+      - name: Install production dependencies
+        timeout-minutes: 4
+        run: |
+          composer install --no-interaction --prefer-dist --no-dev --no-scripts &
+          composer_pid=$!
+          pnpm install --frozen-lockfile --prod --ignore-scripts &
+          pnpm_pid=$!
+          wait "$composer_pid"; composer_status=$?
+          wait "$pnpm_pid"; pnpm_status=$?
+          test "$composer_status" -eq 0 -a "$pnpm_status" -eq 0
+
+      - name: Collect license inventories
+        run: |
+          mkdir -p build/licenses
+          composer licenses --format=json --no-interaction > build/licenses/composer-licenses.json
+          pnpm licenses list --json --prod > build/licenses/pnpm-licenses.json
+
+      - name: Check licenses against the allowlist and build the SBOM
+        run: |
+          php scripts/check-licenses.php \
+            --composer=build/licenses/composer-licenses.json \
+            --pnpm=build/licenses/pnpm-licenses.json \
+            --sbom=build/licenses/sbom.cdx.json
+
+      - name: Upload the license inventory and SBOM
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: license-inventory
+          path: build/licenses/
+          retention-days: 30
+          if-no-files-found: error
+
   image:
     name: Production image builds
     needs: changes
@@ -172,7 +243,7 @@ jobs:
 
   result:
     name: CI result
-    needs: [changes, test, image]
+    needs: [changes, test, licenses, image]
     if: always()
     runs-on: ubuntu-24.04-arm
     steps:
@@ -182,6 +253,9 @@ jobs:
             exit 1
           fi
           if [[ "${{ needs.test.result }}" == "failure" || "${{ needs.test.result }}" == "cancelled" ]]; then
+            exit 1
+          fi
+          if [[ "${{ needs.licenses.result }}" == "failure" || "${{ needs.licenses.result }}" == "cancelled" ]]; then
             exit 1
           fi
           if [[ "${{ needs.image.result }}" == "failure" || "${{ needs.image.result }}" == "cancelled" ]]; then
