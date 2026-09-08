@@ -181,13 +181,41 @@ final class SesFeedbackProcessor
     }
 
     /**
+     * When the event happened, which is not when the message was sent.
+     *
+     * `mail.timestamp` is the send time and is the same on every notification about one
+     * message. The event's own time lives in the type-specific object — `bounce.timestamp`,
+     * `complaint.timestamp`, and so on — and it is the one that matters here, because this
+     * value becomes `outbound_mails.state_changed_at`. Using the send time would stamp a
+     * bounce that arrived an hour later as if it had happened at send, which breaks both the
+     * operator timeline and the 24-hour windows the backlog probe and
+     * `esign:mail:backlog` read.
+     *
+     * `mail.timestamp` is still the fallback: a timestamp near the truth beats none.
+     *
      * @param  array<string, mixed>  $message
      */
     private function occurredAt(array $message): ?Carbon
     {
-        $mail = $message['mail'] ?? null;
-        $timestamp = is_array($mail) ? ($mail['timestamp'] ?? null) : null;
+        foreach (['bounce', 'complaint', 'delivery', 'deliveryDelay', 'reject', 'send', 'mail'] as $key) {
+            $object = $message[$key] ?? null;
 
+            if (! is_array($object)) {
+                continue;
+            }
+
+            $parsed = $this->parseTimestamp($object['timestamp'] ?? null);
+
+            if ($parsed instanceof Carbon) {
+                return $parsed;
+            }
+        }
+
+        return null;
+    }
+
+    private function parseTimestamp(mixed $timestamp): ?Carbon
+    {
         if (! is_string($timestamp) || trim($timestamp) === '') {
             return null;
         }

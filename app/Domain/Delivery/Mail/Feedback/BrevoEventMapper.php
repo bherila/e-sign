@@ -70,7 +70,13 @@ final class BrevoEventMapper
 
             // It arrived and the recipient reported it.
             'spam' => MailState::Complained,
-            'unsubscribed' => MailState::Complained,
+
+            // Recorded, but it moves nothing. An unsubscribe is not a spam complaint and
+            // not evidence about delivery — this application has no suppression state to
+            // put it in, and `complained` is both the wrong claim (MailState defines it as
+            // "the recipient marked it as spam") and the top rank, so nothing could ever
+            // correct it afterwards.
+            'unsubscribed' => null,
 
             // Still in flight; the receiving server asked for a retry.
             'deferred' => null,

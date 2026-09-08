@@ -24,7 +24,7 @@ class MailBacklogCommand extends Command
 {
     protected $signature = 'esign:mail:backlog
         {--limit=20 : How many rows to list}
-        {--all : List recent messages in every state, not only queued and failed}';
+        {--all : List the most recent messages in every state, not only queued and failed}';
 
     protected $description = 'Show queued and failed outbound mail, oldest first.';
 
@@ -64,12 +64,19 @@ class MailBacklogCommand extends Command
 
         $this->line("{$failedLast24h} message(s) reached failed in the last 24h.");
 
+        $listEverything = (bool) $this->option('all');
+
         $rows = OutboundMail::query()
             ->when(
-                ! (bool) $this->option('all'),
+                ! $listEverything,
                 fn ($query) => $query->whereIn('state', [MailState::Queued->value, MailState::Failed->value]),
             )
-            ->orderBy('created_at')
+            // Two questions, two orderings. The default listing answers "what has been
+            // waiting longest", so oldest first. `--all` answers "what just happened", so
+            // newest first — oldest-first there would hand an operator the first twenty rows
+            // the outbox ever wrote, which on any deployment with history is never what they
+            // were looking for.
+            ->orderBy('created_at', $listEverything ? 'desc' : 'asc')
             ->limit($limit)
             ->get();
 
