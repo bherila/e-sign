@@ -61,7 +61,7 @@ class OAuthLoginController extends Controller
         if (! $policy->canLogin($user, $request)) {
             $this->auditLoginFailed($request, $user, $identity->email, 'Account disabled', self::AUTH_METHOD);
 
-            abort(403, 'This account has been disabled. Ask a workspace owner to restore it.');
+            abort(403, 'This account has been disabled. Contact an operator of this installation.');
         }
 
         Auth::login($user);

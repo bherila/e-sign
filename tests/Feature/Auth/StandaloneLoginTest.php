@@ -98,7 +98,7 @@ class StandaloneLoginTest extends TestCase
         $user = $this->localUser(['disabled_at' => now()]);
 
         $this->post('/login', ['email' => $user->email, 'password' => self::PASSWORD])
-            ->assertSessionHasErrors(['email' => 'This account has been disabled. Ask a workspace owner to restore it.']);
+            ->assertSessionHasErrors(['email' => 'This account has been disabled. Contact an operator of this installation.']);
 
         $this->assertGuest();
         $this->assertDatabaseHas('auth_audit_log', [

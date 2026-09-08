@@ -80,7 +80,7 @@ class LocalLoginController extends Controller
             $this->auditLoginFailed($request, $user, $email, 'Account disabled', self::AUTH_METHOD);
 
             throw ValidationException::withMessages([
-                'email' => 'This account has been disabled. Ask a workspace owner to restore it.',
+                'email' => 'This account has been disabled. Contact an operator of this installation.',
             ]);
         }
 
