@@ -4,6 +4,7 @@ use App\Providers\AppServiceProvider;
 use App\Providers\DeliveryServiceProvider;
 use App\Providers\EvidenceServiceProvider;
 use App\Providers\HealthServiceProvider;
+use App\Providers\IntegrationServiceProvider;
 use App\Providers\PreparationServiceProvider;
 use App\Providers\SigningServiceProvider;
 
@@ -12,6 +13,7 @@ return [
     DeliveryServiceProvider::class,
     EvidenceServiceProvider::class,
     HealthServiceProvider::class,
+    IntegrationServiceProvider::class,
     PreparationServiceProvider::class,
     SigningServiceProvider::class,
 ];
