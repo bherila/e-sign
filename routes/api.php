@@ -26,8 +26,14 @@ use Illuminate\Support\Facades\Route;
 |   /api/v1                            native API (issue #32, below)
 |   /functions/v1/signing-request-api  Firma-compatible facade (profile firma-compat-v1)
 |
-| The facade does not exist yet. Unsupported routes must fail clearly, never
-| succeed as a no-op.
+| Only the first of them is declared *in this file*. The facade lives in
+| routes/compat-firma.php and is loaded by App\Providers\IntegrationServiceProvider,
+| because bootstrap/app.php hands this file to `Route::middleware('api')->prefix('api')`
+| and the facade's base path is fixed by somebody else's published contract — a
+| `require` here would mount it at /api/functions/v1/signing-request-api, which is
+| not an address any consumer of that contract calls. Read routes/compat-firma.php
+| and docs/api/firma-compat-v1.md for that surface; it shares every domain service
+| with the routes below and no signing rule with either.
 |
 |--------------------------------------------------------------------------
 | The native API

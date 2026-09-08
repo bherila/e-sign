@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Domain\Integration\Firma\FirmaErrorMap;
+use App\Domain\Integration\Firma\FirmaProfile;
 use App\Domain\Integration\Native\ApiErrorMap;
 use App\Domain\Integration\Native\ArtifactLocator;
 use App\Domain\Integration\Native\Console\PruneIdempotencyKeysCommand;
@@ -11,11 +13,13 @@ use App\Domain\Integration\Native\FinalizedArtifactLocator;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Foundation\Exceptions\Handler;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use Throwable;
 
 /**
- * Wires the Integration module: the native API's one port, and its one command.
+ * Wires the Integration module: the native API's one port, the compatibility facade's routes,
+ * and this module's one command.
  *
  * {@see ArtifactLocator} is bound to {@see FinalizedArtifactLocator}, the `artifacts` table.
  * It was bound to `NoArtifactsYetLocator` — which finds nothing, and so made every artifact
@@ -44,11 +48,33 @@ final class IntegrationServiceProvider extends ServiceProvider
             ]);
         }
 
+        $this->mountFirmaFacade();
         $this->silenceExpectedRefusals();
     }
 
     /**
-     * Keep the native API's own refusals out of the error log.
+     * Mount the Firma-compatible facade at the application root.
+     *
+     * `routes/compat-firma.php` cannot be loaded from `routes/api.php`, which would otherwise
+     * be its natural home: bootstrap/app.php hands that file to
+     * `Route::middleware('api')->prefix('api')`, so a `require` there would mount the facade
+     * at `/api/functions/v1/signing-request-api`. The base path is upstream's `servers[0]` and
+     * is not ours to move — a consumer of the profile calls
+     * `/functions/v1/signing-request-api` and nothing else.
+     *
+     * Loading it from a provider rather than from bootstrap/app.php's `then:` callback keeps
+     * the whole surface — routes, middleware, services, error shape — inside the one module
+     * that owns it, which is the same reason `routes/documents.php` declares its own stack
+     * instead of inheriting one. Registration happens during `boot()`, so `route:cache` sees
+     * these routes exactly like any other.
+     */
+    private function mountFirmaFacade(): void
+    {
+        Route::group([], base_path('routes/compat-firma.php'));
+    }
+
+    /**
+     * Keep either HTTP surface's own refusals out of the error log.
      *
      * `Illuminate\Routing\Pipeline` reports every exception it renders, so without this a
      * `409 illegal_transition` — an integration calling send twice, which both surfaces
@@ -86,6 +112,7 @@ final class IntegrationServiceProvider extends ServiceProvider
             // Returning false stops reporting; null lets the default reporting continue.
             return match (true) {
                 $request->is('api/v1/*') => ApiErrorMap::isExpectedRefusal($exception) ? false : null,
+                $request->is(FirmaProfile::BASE_PATH.'/*') => FirmaErrorMap::isExpectedRefusal($exception) ? false : null,
                 default => null,
             };
         });
