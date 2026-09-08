@@ -50,8 +50,20 @@ ENV APP_ENV=local
 ENTRYPOINT ["esign-entrypoint"]
 CMD ["web"]
 
+# ---------- vendor: Composer dependencies, resolved once on the build host ----------
+# vendor/ is pure PHP, so it is built once on the native platform (no QEMU) and copied into every
+# target platform. This halves the dist downloads per multi-arch build and keeps flaky upstream
+# zipball fetches out of the slow emulated leg.
+FROM --platform=$BUILDPLATFORM composer:2 AS vendor
+WORKDIR /app
+ENV COMPOSER_ALLOW_SUPERUSER=1 COMPOSER_NO_INTERACTION=1
+COPY composer.json composer.lock ./
+RUN --mount=type=cache,target=/tmp/cache \
+    composer install --no-dev --no-scripts --no-autoloader --prefer-dist --ignore-platform-reqs \
+    || (sleep 15 && composer install --no-dev --no-scripts --no-autoloader --prefer-dist --ignore-platform-reqs)
+
 # ---------- assets: compile the frontend bundle ----------
-FROM node:24-bookworm-slim AS assets
+FROM --platform=$BUILDPLATFORM node:24-bookworm-slim AS assets
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@11.5.0 --activate
 # pnpm-workspace.yaml carries install policy (overrides, allowBuilds); it must be present before install.
@@ -66,9 +78,9 @@ FROM base AS production
 ENV APP_ENV=production
 COPY .docker/php/opcache-prod.ini /usr/local/etc/php/conf.d/zz-opcache-prod.ini
 COPY --chown=www-data:www-data . /var/www/html
+COPY --chown=www-data:www-data --from=vendor /app/vendor /var/www/html/vendor
 COPY --chown=www-data:www-data --from=assets /app/public/build /var/www/html/public/build
-RUN composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist --no-scripts \
-    && composer dump-autoload --optimize --no-dev --no-interaction \
+RUN composer dump-autoload --optimize --no-dev --no-interaction \
     && rm -rf /root/.composer \
     && mkdir -p storage/framework/cache/data storage/framework/sessions storage/framework/views \
                 storage/app/private storage/logs bootstrap/cache \
