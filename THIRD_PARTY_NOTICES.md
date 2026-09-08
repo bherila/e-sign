@@ -70,7 +70,8 @@ build failure until someone makes the licensing decision deliberately.
 ## LGPL handling for the PDF engine
 
 `tecnickcom/tc-lib-pdf` and its 13 `tc-lib-*` companions are LGPL-3.0-or-later and are the
-Stage 0 PDF engine candidate (`docs/adr/0004-pdf-engine-candidate.md`). The position and the
+Stage 0 PDF engine candidate (`docs/adr/0004-pdf-engine-candidate.md`); the sealing half of
+that evaluation has since passed, see [`docs/stage0/sealing.md`](docs/stage0/sealing.md). The position and the
 obligations are stated in full in
 [`docs/adr/0005-lgpl-dependency-handling.md`](docs/adr/0005-lgpl-dependency-handling.md).
 In summary:
