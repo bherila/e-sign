@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Identity;
 
+use App\Domain\Identity\Console\CreateUserCommand;
 use App\Models\User;
+use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Hash;
@@ -63,6 +65,32 @@ class CreateUserCommandTest extends TestCase
             ->assertRedirect(route('dashboard'));
 
         $this->assertAuthenticated();
+    }
+
+    public function test_a_generated_password_with_console_markup_characters_is_shown_verbatim(): void
+    {
+        // Str::password() draws from a symbol set that includes < and >; the console formatter
+        // would otherwise treat "<b>...</b>" as a style tag and print a different password than
+        // the one that was hashed.
+        $pinned = 'Ab<b>cd</b>Ef<info>12345678!';
+
+        $this->app[Kernel::class]->registerCommand(new class($pinned) extends CreateUserCommand
+        {
+            public function __construct(private readonly string $pinned)
+            {
+                parent::__construct();
+            }
+
+            protected function generatePassword(): string
+            {
+                return $this->pinned;
+            }
+        });
+
+        Artisan::call('esign:create-user', ['--name' => 'Grace Hopper', '--email' => 'grace@example.test']);
+
+        $this->assertStringContainsString('  '.$pinned, Artisan::output());
+        $this->assertTrue(Hash::check($pinned, (string) User::sole()->password));
     }
 
     public function test_a_supplied_password_is_used_and_never_echoed(): void

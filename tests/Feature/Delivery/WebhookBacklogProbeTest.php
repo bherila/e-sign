@@ -44,6 +44,10 @@ class WebhookBacklogProbeTest extends TestCase
         config()->set('esign.delivery.webhooks.backlog_warn_seconds', 300);
         config()->set('esign.delivery.webhooks.backlog_fail_seconds', 1800);
 
+        // Pin the clock: the message states the exact age, so a slow test host must not
+        // turn "600s old" into "601s old".
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-09-08 12:00:00'));
+
         $delivery = $this->pendingDelivery(CarbonImmutable::now()->subMinutes(10));
 
         $warned = $this->probe()->check();
@@ -103,5 +107,12 @@ class WebhookBacklogProbeTest extends TestCase
             'state' => DeliveryState::Pending,
             'next_attempt_at' => $dueAt,
         ]);
+    }
+
+    protected function tearDown(): void
+    {
+        CarbonImmutable::setTestNow();
+
+        parent::tearDown();
     }
 }

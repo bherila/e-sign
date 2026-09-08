@@ -8,6 +8,7 @@ use App\Domain\Evidence\Sealing\AssuranceLevel;
 use App\Domain\Signing\Envelopes\EnvelopeSourceSnapshot;
 use App\Domain\Signing\Envelopes\SigningMode;
 use App\Domain\Signing\Exceptions\InvalidEnvelopeSnapshot;
+use Illuminate\Support\Str;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\SigningFixtures;
 
@@ -126,11 +127,48 @@ class EnvelopeSourceSnapshotTest extends TestCase
         }
     }
 
-    public function test_it_refuses_a_non_positive_expiration(): void
+    /**
+     * The upper bound is about the column, not the workflow: `expires_at` is a MySQL
+     * `TIMESTAMP`, which runs out in 2038, so an unbounded expiry would make `send()` succeed
+     * on SQLite and fail on the production engines.
+     */
+    public function test_it_refuses_an_expiration_outside_the_supported_range(): void
     {
-        $this->expectException(InvalidEnvelopeSnapshot::class);
+        foreach ([0, -1, EnvelopeSourceSnapshot::MAX_EXPIRATION_HOURS + 1] as $hours) {
+            try {
+                EnvelopeSourceSnapshot::fromArray($this->snapshot(['expiration_hours' => $hours]));
+                $this->fail('Expected '.$hours.' hours to be refused.');
+            } catch (InvalidEnvelopeSnapshot $e) {
+                $this->assertSame('invalid_property', $e->code());
+            }
+        }
 
-        EnvelopeSourceSnapshot::fromArray($this->snapshot(['expiration_hours' => 0]));
+        $this->assertSame(
+            EnvelopeSourceSnapshot::MAX_EXPIRATION_HOURS,
+            EnvelopeSourceSnapshot::fromArray($this->snapshot([
+                'expiration_hours' => EnvelopeSourceSnapshot::MAX_EXPIRATION_HOURS,
+            ]))->expirationHours,
+        );
+    }
+
+    public function test_it_refuses_a_template_version_id_that_is_not_a_public_identifier(): void
+    {
+        try {
+            EnvelopeSourceSnapshot::fromArray($this->snapshot([
+                'source_template_version_id' => str_repeat('x', 27),
+            ]));
+            $this->fail('The column is a ULID; a longer id would truncate on MySQL and store whole on SQLite.');
+        } catch (InvalidEnvelopeSnapshot $e) {
+            $this->assertSame('invalid_property', $e->code());
+        }
+
+        $ulid = (string) Str::ulid();
+        $this->assertSame(
+            $ulid,
+            EnvelopeSourceSnapshot::fromArray(
+                $this->snapshot(['source_template_version_id' => $ulid]),
+            )->sourceTemplateVersionId,
+        );
     }
 
     /**

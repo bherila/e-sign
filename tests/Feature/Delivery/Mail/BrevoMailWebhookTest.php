@@ -103,6 +103,9 @@ class BrevoMailWebhookTest extends TestCase
             'spam' => ['spam', MailState::Complained],
             // Still in flight: the receiving server asked for a retry.
             'deferred' => ['deferred', null],
+            // Recorded, but it moves nothing: an unsubscribe is not a spam complaint and
+            // says nothing about whether the message arrived.
+            'unsubscribed' => ['unsubscribed', null],
             // An event name this release has never heard of moves nothing.
             'someFutureEvent' => ['someFutureEvent', null],
         ];

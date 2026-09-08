@@ -286,6 +286,13 @@ final readonly class EnvelopeStateMachine
      * initials, which is signing on somebody else's behalf, and never a service-supplied
      * field, which would let the sender state when a recipient signed.
      *
+     * Nor may a sender touch anything belonging to a recipient who has already attested. A
+     * signer-specific field is deliberately outside the material digest, so that recipient's
+     * attestation cannot detect a change to it: without this guard the sender could rewrite
+     * a signed party's printed name, title, or company while a later signer was still
+     * outstanding, and #28 would render values nobody agreed to. `submitValues()` gets the
+     * same rule for free, because only an `active` recipient reaches it.
+     *
      * @param  array<string, mixed>  $values  Schema field id => value.
      *
      * @throws IllegalTransition|FieldSubmissionRejected|StaleEnvelope
@@ -326,12 +333,18 @@ final readonly class EnvelopeStateMachine
                         throw FieldSubmissionRejected::frozen($fieldId);
                     }
 
+                    $owner = $this->ownerOf($locked, $field);
+
+                    if ($owner !== null && $owner->state->hasAttested()) {
+                        throw FieldSubmissionRejected::ownerHasSigned($fieldId, $field->recipientId);
+                    }
+
                     $this->writeValue(
                         $locked,
                         $field,
                         FieldValueValidator::normalize($field, $value),
                         ValueSource::Sender,
-                        $this->recipientIdFor($locked, $field),
+                        $owner?->getKey(),
                     );
                     $written[] = $field->id;
                 }
@@ -961,8 +974,15 @@ final readonly class EnvelopeStateMachine
             }
 
             $owner = $recipients->get($field->recipientId);
+            // A material field is only fillable by its owner if the owner is the *only*
+            // person who acts before the content freezes. That is narrower than "stage one":
+            // a sequential order may put several recipients in one stage, and the freeze
+            // happens on the first acceptance, not at the end of the stage — so the second
+            // member of stage one is already too late.
             $ownerActsAfterFreeze = $locked->signing_mode->freezesAtSend()
-                || ($owner !== null && $owner->order_index > 1);
+                || $owner === null
+                || $owner->order_index > 1
+                || count($locked->fieldSchema()->signingOrder[0] ?? []) > 1;
 
             if ($ownerActsAfterFreeze) {
                 $problems[] = [
@@ -1109,14 +1129,13 @@ final readonly class EnvelopeStateMachine
         return array_fill_keys($ids, true);
     }
 
-    private function recipientIdFor(Envelope $locked, FieldDefinition $field): ?int
+    /** The recipient a field belongs to, as a row rather than an id: the guards need its state. */
+    private function ownerOf(Envelope $locked, FieldDefinition $field): ?EnvelopeRecipient
     {
-        $id = EnvelopeRecipient::query()
+        return EnvelopeRecipient::query()
             ->where('envelope_id', $locked->getKey())
             ->where('schema_recipient_id', $field->recipientId)
-            ->value('id');
-
-        return $id === null ? null : (int) $id;
+            ->first();
     }
 
     // ---------------------------------------------------------------------------------

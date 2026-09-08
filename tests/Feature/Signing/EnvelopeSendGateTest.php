@@ -152,6 +152,35 @@ class EnvelopeSendGateTest extends TestCase
         }
     }
 
+    /**
+     * A sequential order may put several recipients in one stage, and the freeze happens on
+     * the *first acceptance*, not at the end of the stage — so the second member of stage
+     * one is already too late to fill a material field. Reaching that state is the permanent
+     * deadlock this gate exists to prevent.
+     */
+    public function test_it_refuses_a_required_material_field_owned_by_a_shared_first_stage(): void
+    {
+        $scenario = SigningScenario::create();
+        $schema = SigningFixtures::sequentialTwoSigners();
+        // One stage holding both recipients, still sequential mode: a valid document.
+        $schema['signing_order'] = [['buyer', 'seller']];
+        $schema = SigningFixtures::mutateField($schema, 'seller_notes', ['required' => true]);
+
+        $envelope = $scenario->draft(['field_schema' => $schema]);
+        $scenario->machine()->setSenderValues($envelope, ['agreement_effective_date' => '2026-01-31']);
+
+        try {
+            $scenario->machine()->send($envelope->refresh());
+            $this->fail('Whichever of the two signs first freezes the other out of that field forever.');
+        } catch (SendPreconditionsFailed $e) {
+            $this->assertTrue($e->hasCode('required_material_field_unfillable'));
+        }
+
+        // The buyer's own material field is refused for the same reason, even though its
+        // owner is in stage one: they are not the only person who acts before the freeze.
+        $this->assertSame(EnvelopeState::Draft, $envelope->refresh()->state);
+    }
+
     public function test_a_supplied_value_satisfies_the_material_field_gate(): void
     {
         $scenario = SigningScenario::create();

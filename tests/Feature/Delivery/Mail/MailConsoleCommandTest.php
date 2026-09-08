@@ -108,6 +108,36 @@ class MailConsoleCommandTest extends TestCase
             ->assertSuccessful();
     }
 
+    public function test_backlog_all_lists_the_most_recent_messages_not_the_first_ever(): void
+    {
+        $ancient = OutboundMail::factory()->sentToProvider()->create([
+            'created_at' => Carbon::now()->subYear(),
+            'updated_at' => Carbon::now()->subYear(),
+        ]);
+        $recent = OutboundMail::factory()->sentToProvider()->create([
+            'created_at' => Carbon::now()->subMinute(),
+            'updated_at' => Carbon::now()->subMinute(),
+        ]);
+
+        // `--all` answers "what just happened". Oldest-first there would hand an operator
+        // the first rows the outbox ever wrote, which is never what they were looking for.
+        $this->artisan('esign:mail:backlog', ['--all' => true, '--limit' => 1])
+            ->expectsOutputToContain($recent->public_id)
+            ->doesntExpectOutputToContain($ancient->public_id)
+            ->assertSuccessful();
+    }
+
+    public function test_the_default_listing_stays_oldest_first_because_that_is_what_is_stuck(): void
+    {
+        $oldest = OutboundMail::factory()->queuedAt(Carbon::now()->subDay())->create();
+        $newest = OutboundMail::factory()->queuedAt(Carbon::now()->subMinute())->create();
+
+        $this->artisan('esign:mail:backlog', ['--limit' => 1])
+            ->expectsOutputToContain($oldest->public_id)
+            ->doesntExpectOutputToContain($newest->public_id)
+            ->assertSuccessful();
+    }
+
     public function test_backlog_honours_the_limit(): void
     {
         OutboundMail::factory()->count(3)->create();

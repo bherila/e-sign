@@ -19,9 +19,11 @@ use Illuminate\Support\ServiceProvider;
  * Both defaults are deliberate rather than placeholders:
  *
  * - {@see AuditEnvelopeEventSink} writes each transition to the append-only
- *   `esign_audit_events` store, inside the transaction that made it. The webhook outbox
- *   (issue #29) is a second sink of the same shape, not a replacement — an event that exists
- *   only as a webhook delivery leaves no local history the moment an endpoint is disabled.
+ *   `esign_audit_events` store, inside the transaction that made it. It is the module's own
+ *   default and stays correct with nothing else installed. Where the Delivery module is
+ *   present, `App\Providers\DeliveryServiceProvider` composes this sink with the webhook
+ *   outbox instead of replacing it — an event that exists only as a webhook delivery leaves
+ *   no local history the moment an endpoint is disabled.
  * - {@see SealMaterialAssurancePolicyCheck} answers from the seal configuration the sealer
  *   itself reads and then from the material behind it, so an install with no usable seal
  *   material cannot send. It layers the cheap configuration check

@@ -9,6 +9,8 @@ use App\Domain\Delivery\Mail\Feedback\SnsMessageVerifier;
 use App\Domain\Delivery\Mail\Feedback\SnsVerificationException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Mail\SesWebhookRequest;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\JsonResponse;
 use RuntimeException;
 
@@ -56,6 +58,18 @@ class SesWebhookController extends Controller
     }
 
     /**
+     * Two failures with two different meanings, and they must not share a status code.
+     *
+     * A confirmation URL that is not an AWS SNS endpoint, or that resolves somewhere it
+     * should not, is the shape of a server-side request forgery attempt. It will never
+     * succeed, so 422 and no detail about what was rejected.
+     *
+     * AWS being slow or answering 5xx is transient and nobody's fault. Those arrive as the
+     * HTTP client's own exceptions, which are not RuntimeExceptions, so they are caught
+     * separately and answered 503 — SNS retries a 503, and losing a subscription
+     * confirmation to a momentary blip would leave the topic unsubscribed with nothing to
+     * say why.
+     *
      * @param  array<string, mixed>  $envelope
      */
     private function confirm(SesFeedbackProcessor $processor, array $envelope): JsonResponse
@@ -63,10 +77,9 @@ class SesWebhookController extends Controller
         try {
             $processor->confirmSubscription($envelope);
         } catch (RuntimeException) {
-            // A confirmation URL that is not an AWS SNS endpoint is the shape of a
-            // server-side request forgery attempt, not a transient failure. 422, and no
-            // detail about what was rejected.
             return response()->json(['status' => 'rejected'], 422);
+        } catch (ConnectionException|RequestException) {
+            return response()->json(['status' => 'unconfirmed'], 503);
         }
 
         return response()->json(['status' => 'confirmed']);

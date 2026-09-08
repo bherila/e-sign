@@ -155,24 +155,29 @@ section is `(prose)` from `https://docs.firma.dev/guides/webhooks`.
 
 The outbox accepts exactly the names below plus our own, which are prefixed `esign.`;
 anything else is refused rather than recorded (`App\Domain\Delivery\Webhooks\WebhookEventName`,
-`tests/Unit/Delivery/WebhookEventNameTest.php`). The delivery machinery is implemented, but
-no caller records these events yet — envelopes do not exist — so the rows stay **unknown**
-until the transitions that emit them ship.
+`tests/Unit/Delivery/WebhookEventNameTest.php`).
+
+The envelope state machine now records them. `App\Domain\Delivery\Events\DeliveryEnvelopeEventSink`
+publishes each transition inside the transaction that made it, with the payload
+`App\Domain\Delivery\Events\SigningRequestPayload` builds — the same builder the facade uses
+for `GET /signing-requests/{id}`, so a polling receiver and a subscribing receiver cannot be
+told two different stories. The mapping from transition to event to message is
+`docs/delivery/envelope-events.md`. Rows for events no transition produces stay **unknown**.
 
 | Event | Upstream shape (prose) | Status | Fixture | Notes |
 |---|---|---|---|---|
-| `signing_request.created` | Envelope below, `data.signing_request` | unknown | | |
-| `signing_request.sent` | idem | unknown | | |
+| `signing_request.created` | Envelope below, `data.signing_request` | supported | `DeliveryEnvelopeEventSinkTest::test_creating_an_envelope_records_the_created_event_and_tells_nobody` | Recorded when the envelope is built from its snapshot. No mail: a draft has been shown to nobody. |
+| `signing_request.sent` | idem | supported | `DeliveryEnvelopeEventSinkTest::test_sending_records_one_event_and_invites_only_the_released_stage` | Carries every recipient. The invitation mail goes only to the stage `send()` released. |
 | `signing_request.viewed` | idem | unknown | | A view is not assent. GET must stay harmless (`AGENTS.md`). |
 | `signing_request.updated` | idem | unknown | | |
 | `signing_request.deleted` | "deleted (before sending)" | unknown | | |
-| `signing_request.completed` | "All recipients finished signing" | **intentionally different** | | Upstream ties this to signing completion. We publish it only after the final PDF is generated, validated, durably stored and retrievable (`AGENTS.md`, `docs/HANDOFF.md` §11). Later than upstream, deliberately. |
+| `signing_request.completed` | "All recipients finished signing" | **intentionally different** | `DeliveryEnvelopeEventSinkTest::test_completion_is_recorded_once_the_artifact_reference_exists` | Upstream ties this to signing completion. We publish it only after the final PDF is generated, validated, durably stored and retrievable (`AGENTS.md`, `docs/HANDOFF.md` §11) — from `markCompleted()` and nowhere else. Later than upstream, deliberately. |
 | `signing_request.certificate.generated` | "Signing certificate generated" | unknown | | Distinct from `completed`. The documented distinction must be preserved, not merged (`docs/HANDOFF.md` §11). |
-| `signing_request.cancelled` | idem | unknown | | |
-| `signing_request.expired` | idem | unknown | | |
-| `signing_request.reminder.sent` | idem | unknown | | |
-| `signing_request.recipient.signed` | `data.recipients[]` | unknown | | Does not imply full execution (`docs/HANDOFF.md` §11). |
-| `signing_request.recipient.declined` | idem | unknown | | There is **no** `signing_request.declined` event, even though `SigningRequestDetail.status.declined` and `timestamps.declined_on` exist. See D12. |
+| `signing_request.cancelled` | idem | supported | `DeliveryEnvelopeEventSinkTest::test_a_cancellation_reaches_everybody_who_had_been_written_to` | Mail reaches recipients carrying an `invited_at`; a later signer who was never written to is not told an agreement they never saw was withdrawn. |
+| `signing_request.expired` | idem | supported | `DeliveryEnvelopeEventSinkTest::test_an_expiry_reaches_everybody_who_had_been_written_to`, `SigningScheduleCommandsTest` | Applied by `esign:signing:expire`; the state machine re-checks the deadline under a lock, so the command cannot expire anything early. |
+| `signing_request.reminder.sent` | idem | unknown | | `esign:signing:remind` sends the mail but records no event yet. The name is accepted by the outbox; nothing publishes it. |
+| `signing_request.recipient.signed` | `data.recipients[]` | supported | `DeliveryEnvelopeEventSinkTest::test_an_acceptance_is_a_recipient_event_and_never_a_completion` | Does not imply full execution (`docs/HANDOFF.md` §11). `data.recipients` carries the one party who signed, with their `finished_on`; `status.finished` stays false. |
+| `signing_request.recipient.declined` | idem | supported | `DeliveryEnvelopeEventSinkTest::test_a_decline_records_both_names_and_writes_only_to_the_sender` | There is **no** `signing_request.declined` event, even though `SigningRequestDetail.status.declined` and `timestamps.declined_on` exist. See D12. We emit this one and our own `esign.envelope.declined` beside it, and never invent the upstream name. |
 | `signing_request.recipient.identity_changed` | idem | unknown | | Pairs with `settings.identity_editable_fields` and `settings.notify_identity_change_email`. |
 | `template.updated`, `template.used` | Template events | unsupported | | Out of `firma-compat-v1`. Templates are a later family (`docs/HANDOFF.md` §10). |
 | `workspace.created`, `workspace.updated` | Workspace events | unsupported | | Out of profile. |
@@ -186,6 +191,10 @@ Implemented in `app/Domain/Delivery/Webhooks` (issue #34). Contract and runbook:
 | Surface | Upstream shape (prose) | Status | Fixture / test | Notes |
 |---|---|---|---|---|
 | Payload envelope | `{id, type, created_at, company_id, workspace_id, data:{signing_request, recipients[], workspace}}` | **intentionally different** | `tests/Feature/Delivery/Webhooks/OutboxWriterTest.php` | `id`, `type`, `created_at`, `workspace_id` and `data` are emitted verbatim. `company_id` is omitted: this product has no company above the workspace, and a null or invented value would be worse than its absence. Event identity is `id`; see D13. `created_at` is when the transition occurred, not when the attempt was made. |
+| `data.signing_request.status` | **Object** of booleans: `sent`, `finished`, `cancelled`, `declined`, `expired`; several true at once for terminal states | supported | `tests/Unit/Delivery/Events/SigningRequestPayloadTest.php` | Key set asserted against the captured `request.json` fixtures. Overlapping flags are reproduced: a cancelled envelope that was sent reports both, which a single enum cast could not. |
+| `data.signing_request.timestamps` | Object with the `_on` suffix: `created_on`, `sent_on`, `finished_on`, `cancelled_on`, `declined_on`, `last_changed_on`, `last_signing_action_on` | supported | idem | Key set asserted against the fixtures. `finished_on` is completion, not the last signature — those are further apart here than upstream, and `last_signing_action_on` is where the signature shows up. |
+| `data.recipients[]` | `SigningRequestUser`: `id`, `name`, `email`, `designation`, `order`, `finished_on`, `declined_on`, `decline_reason` | **intentionally different** | idem | Key set asserted against `users.json`. `first_name`/`last_name` are omitted: one display name is stored and splitting it would guess at a person's name (`docs/HANDOFF.md` §2). `designation` is the constant `Signer`; there is no approver or CC concept to enforce. |
+| `data.signing_request.download` | not upstream — our own hint | **intentionally different** | `SigningRequestPayloadTest::test_a_published_artifact_is_reported_without_a_url` | Null until a validated artifact is published, then `{available, is_partial, generated_on}` and **never a URL**. A body is encoded once and replayed for ~40 h, so a link in it is either dead on arrival or a long-lived credential in a receiver's log. Bytes come from the download route, authorized per request. |
 | `X-Firma-Signature` | `t=<unix seconds>,v1=<hex HMAC-SHA256>`; signed payload is `{timestamp}.{raw_json_body}`; hex digest; verify against the **raw** body | supported | `tests/Unit/Delivery/WebhookSignerTest.php`, `tests/Feature/Delivery/Webhooks/DeliverWebhookTest.php` | Byte-exact raw body: the envelope is encoded once when the event is recorded and every attempt sends those bytes unchanged. Tests verify with an independent `hash_hmac` computation, not by calling the signer twice. |
 | Rotation overlap | `X-Firma-Signature-Old`: a second signature under the previous secret, for a 7-day grace period | **intentionally different** | `DeliverWebhookTest::test_during_a_rotation_both_secrets_sign_the_same_attempt` | We emit **both** forms: `X-Firma-Signature` carries one `v1=` per live secret, current first (the Stripe convention), and `X-Firma-Signature-Old` is emitted alongside during the overlap. A receiver that loops over `v1=` entries and a receiver that reads only the documented old header both verify. Grace window is `ESIGN_WEBHOOK_ROTATION_GRACE_HOURS`, default 168 h. |
 | `X-Firma-Event` | Event type string | supported | `DeliverWebhookTest::test_the_identity_headers_name_the_event_the_attempt_and_the_type` | |

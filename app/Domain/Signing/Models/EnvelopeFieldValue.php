@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Domain\Signing\Models;
 
-use App\Domain\Signing\Envelopes\MaterialValues;
 use App\Domain\Signing\Envelopes\ValueSource;
+use App\Domain\Signing\Fields\MaterialValues;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;

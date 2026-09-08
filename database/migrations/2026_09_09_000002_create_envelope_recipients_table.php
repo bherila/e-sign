@@ -33,11 +33,16 @@ return new class extends Migration
             $table->ulid('public_id')->unique();
             $table->foreignId('envelope_id')->constrained('envelopes')->restrictOnDelete();
 
-            // The id used by the copied schema; unique within one envelope.
-            $table->string('schema_recipient_id', 191);
+            // The id used by the copied schema; unique within one envelope, and compared
+            // byte-for-byte. See binaryCollation() below.
+            $table->string('schema_recipient_id', 191)->collation($this->binaryCollation());
 
             $table->string('name');
-            $table->string('email', 191);
+            // 320, the longest address the field schema accepts
+            // (FieldSchemaValidator::EMAIL_MAX_LENGTH). A narrower column would truncate a
+            // long address on a permissive engine — sending the invitation somewhere other
+            // than the address recorded on the agreement — and error on a strict one.
+            $table->string('email', 320);
             $table->unsignedInteger('order_index');
 
             // pending|active|signed|declined
@@ -59,6 +64,29 @@ return new class extends Migration
             $table->index(['envelope_id', 'order_index']);
             $table->index(['envelope_id', 'state']);
         });
+    }
+
+    /**
+     * The collation that makes a string column compare byte-for-byte, or null where the
+     * engine already does.
+     *
+     * The connection default is `utf8mb4_unicode_ci`, under which MySQL and MariaDB treat
+     * `notes` and `Notes` as the same value. SQLite's default is binary, so it treats them
+     * as two. Schema identifiers and session references are exact tokens, and a unique key
+     * over them that means different things on different engines is precisely the collation
+     * assumption docs/adr/0002-supported-databases.md rules out — here it would let one
+     * recipient's value overwrite another's, or two sessions collapse into one acceptance.
+     *
+     * Driver-conditional rather than a literal, because `utf8mb4_bin` is not a collation
+     * SQLite knows and Laravel's SQLite grammar emits the `collate` clause verbatim. The CI
+     * `database` job runs this migration on both engines, which is what
+     * docs/adr/0002-supported-databases.md asks of an engine-specific choice.
+     */
+    private function binaryCollation(): ?string
+    {
+        return in_array(Schema::getConnection()->getDriverName(), ['mysql', 'mariadb'], true)
+            ? 'utf8mb4_bin'
+            : null;
     }
 
     public function down(): void
