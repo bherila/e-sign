@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Domain\Identity\Audit\AuditRecorder;
+use App\Domain\Preparation\Anchoring\RevisionAnchorResolver;
+use App\Domain\Preparation\Anchoring\SchemaAnchorResolver;
 use App\Domain\Preparation\Contracts\PdfAssembler;
 use App\Domain\Preparation\Contracts\PdfPreflight;
 use App\Domain\Preparation\Contracts\PdfTextLocator;
@@ -17,6 +19,7 @@ use App\Domain\Preparation\TcPdf\TcPdfAssembler;
 use App\Domain\Preparation\TcPdf\TcPdfPreflight;
 use App\Domain\Preparation\TcPdf\TcPdfTextLocator;
 use App\Domain\Preparation\Templates\TemplateService;
+use App\Domain\Preparation\Text\AnchorResolver;
 use Illuminate\Contracts\Config\Repository;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
@@ -67,6 +70,31 @@ class PreparationServiceProvider extends ServiceProvider
 
         $this->app->bind(PdfTextLocator::class, TcPdfTextLocator::class);
 
+        // The cross-check tolerance is a deployment decision, so it is read here rather than
+        // inside the resolver: a document may still name its own, and a document that names
+        // none gets this one.
+        $this->app->bind(SchemaAnchorResolver::class, function (Application $app): SchemaAnchorResolver {
+            /** @var Repository $config */
+            $config = $app->make('config');
+
+            return new SchemaAnchorResolver(
+                $app->make(AnchorResolver::class),
+                (float) $config->get(
+                    'esign.preparation.anchor_cross_check_tolerance',
+                    SchemaAnchorResolver::DEFAULT_CROSS_CHECK_TOLERANCE,
+                ),
+            );
+        });
+
+        $this->app->bind(
+            RevisionAnchorResolver::class,
+            fn (Application $app): RevisionAnchorResolver => new RevisionAnchorResolver(
+                $app->make(PdfTextLocator::class),
+                $app->make(DocumentBlobStore::class),
+                $app->make(SchemaAnchorResolver::class),
+            ),
+        );
+
         $this->app->bind(ReviewNormalizer::class, function (Application $app): ReviewNormalizer {
             /** @var Repository $config */
             $config = $app->make('config');
@@ -97,6 +125,7 @@ class PreparationServiceProvider extends ServiceProvider
             return new TemplateService(
                 $app->make(FieldSchemaValidator::class),
                 $app->make(AuditRecorder::class),
+                $app->make(RevisionAnchorResolver::class),
                 (string) $config->get('esign.templates.default_consent_policy_version'),
             );
         });

@@ -509,6 +509,23 @@ return [
             'trim',
             explode(',', (string) env('ESIGN_PREFILL_VARIABLES', ''))
         ))),
+
+        /*
+         * How far, in points, a `cross_check` anchor may resolve from the rectangle the
+         * document declares before the disagreement is refused.
+         *
+         * Only `anchor.placement: "cross_check"` reads this: that mode is for a document whose
+         * layout the consumer generated itself, where the coordinates are already known and the
+         * anchor is there to prove they still describe the page. When the two disagree by more
+         * than this, one of them is stale and there is no way to tell which, so neither is used
+         * and the send is refused.
+         *
+         * One point (about a third of a millimetre) by default, deliberately tight: a generous
+         * tolerance turns the check into a formality that passes on a page whose text has moved.
+         * A document may name its own `anchor.tolerance`, which wins over this.
+         * See docs/preparation/anchors.md.
+         */
+        'anchor_cross_check_tolerance' => (float) env('ESIGN_ANCHOR_CROSS_CHECK_TOLERANCE', 1.0),
     ],
 
     /*
