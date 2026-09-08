@@ -113,9 +113,18 @@ from the same source and the two cannot drift.
 | `invitation` | the recipient asked to sign | the signing URL |
 | `reminder` | the recipient, again | the same signing URL |
 | `declined` | the sender | no |
-| `cancelled` | every recipient, including those who already signed | no |
+| `cancelled` | every recipient who was invited, including those who already signed | no |
+| `expired` | every recipient who was invited, and the sender | no |
 | `completed` | every party | a download URL, optional |
-| `admin_failure` | operators | no |
+| `admin_failure` | the workspace's owners | no |
+
+`expired` is separate from `cancelled` rather than reusing it. An expiry is the clock
+arriving and a cancellation is a person deciding; telling somebody their agreement "was
+cancelled" when nobody cancelled it is the kind of wording `AGENTS.md` rules out.
+
+Who receives each one, and when, is `docs/delivery/envelope-events.md`. The short version:
+mail is scheduled after the transition commits, never inside it, and a recipient who has
+never been invited is never told about an agreement they were not shown.
 
 No images, no remote stylesheets, no third-party assets, no tracking pixels. A message that
 fetches nothing renders identically in a client with remote content blocked, and cannot
@@ -157,6 +166,13 @@ CommonMark sees them, which is what kills raw HTML and `<autolink>` syntax. Bare
 links either, because Laravel's mail Markdown environment loads only the CommonMark core and
 table extensions with no autolink extension — asserted in `MailableRenderingTest` rather than
 assumed, so a framework change that adds autolinking fails a test instead of shipping.
+
+## Reminders
+
+`esign:signing:remind` runs daily from `routes/console.php`. Its conditions are facts about a
+row — active, invited more than `esign.signing.reminder_after_hours` ago, not reminded within
+`esign.signing.reminder_interval_hours` — so an extra run sends nothing extra. Details and the
+`last_reminded_at` claim are in `docs/delivery/envelope-events.md`.
 
 ## Provider feedback
 
