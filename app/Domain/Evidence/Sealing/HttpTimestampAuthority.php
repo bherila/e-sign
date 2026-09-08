@@ -4,22 +4,25 @@ declare(strict_types=1);
 
 namespace App\Domain\Evidence\Sealing;
 
+use App\Domain\Delivery\Outbound\DestinationPolicy;
+use App\Domain\Delivery\Outbound\Exceptions\DestinationRefusedException;
+use App\Domain\Delivery\Outbound\ValidatedDestination;
 use App\Domain\Evidence\Contracts\TimestampAuthority;
 use App\Domain\Evidence\Sealing\Exceptions\TimestampAuthorityDestinationException;
 use App\Domain\Evidence\Sealing\Exceptions\TimestampAuthorityNotConfiguredException;
 use App\Domain\Evidence\Sealing\Exceptions\TimestampAuthorityUnreachableException;
 
 /**
- * RFC 3161 transport over cURL, behind a destination policy.
+ * RFC 3161 transport over cURL, behind the shared outbound destination policy.
  *
  * The policy exists because the TSA endpoint is operator configuration that
  * the signing pipeline dereferences: without it, a URL in the environment is
- * an SSRF primitive reachable from a queue worker. It refuses anything but
- * HTTP(S), refuses plaintext HTTP unless the operator opted in, refuses
- * credentials in the URL, refuses a host that resolves to a loopback,
- * private, link-local, or otherwise reserved address, and pins the connection
- * to the address it validated so a second DNS answer cannot move the target.
- * Redirects are never followed, since only the first hop is checked.
+ * an SSRF primitive reachable from a queue worker. It lives in
+ * App\Domain\Delivery\Outbound because webhook delivery needs exactly the
+ * same rules; see that class for what it refuses. This transport pins the
+ * connection to the addresses the policy validated so a second DNS answer
+ * cannot move the target, and never follows a redirect, since only the first
+ * hop is checked.
  */
 final class HttpTimestampAuthority implements TimestampAuthority
 {
@@ -30,18 +33,27 @@ final class HttpTimestampAuthority implements TimestampAuthority
 
     private readonly string $url;
 
+    private readonly DestinationPolicy $policy;
+
     public function __construct(
         string $url,
         private readonly int $timeout = 15,
-        private readonly bool $allowPlaintextHttp = false,
+        bool $allowPlaintextHttp = false,
+        ?DestinationPolicy $policy = null,
     ) {
         $this->url = trim($url);
+        $this->policy = ($policy ?? new DestinationPolicy)->for(
+            subject: 'timestamp authority',
+            plaintextHint: 'Set ESIGN_TSA_ALLOW_PLAINTEXT_HTTP=true to accept that the document '.
+                'digest travels in the clear.',
+            allowPlaintextHttp: $allowPlaintextHttp,
+        );
     }
 
     /**
      * @param  array<string, mixed>  $config  The `esign.tsa` configuration array.
      */
-    public static function fromConfig(array $config): self
+    public static function fromConfig(array $config, ?DestinationPolicy $policy = null): self
     {
         $url = $config['url'] ?? '';
         $timeout = $config['timeout'] ?? 15;
@@ -50,6 +62,7 @@ final class HttpTimestampAuthority implements TimestampAuthority
             url: is_scalar($url) ? (string) $url : '',
             timeout: is_numeric($timeout) ? max(1, (int) $timeout) : 15,
             allowPlaintextHttp: ($config['allow_plaintext_http'] ?? false) === true,
+            policy: $policy,
         );
     }
 
@@ -77,7 +90,7 @@ final class HttpTimestampAuthority implements TimestampAuthority
 
     public function post(string $derRequest): string
     {
-        [$url, $host, $port, $address] = $this->validatedDestination();
+        $destination = $this->validatedDestination();
 
         if (! function_exists('curl_init')) {
             throw new TimestampAuthorityUnreachableException(
@@ -85,7 +98,7 @@ final class HttpTimestampAuthority implements TimestampAuthority
             );
         }
 
-        $handle = curl_init($url);
+        $handle = curl_init($destination->url);
         if ($handle === false) {
             throw new TimestampAuthorityUnreachableException('Unable to initialize the timestamp request.');
         }
@@ -109,7 +122,7 @@ final class HttpTimestampAuthority implements TimestampAuthority
             CURLOPT_SSL_VERIFYHOST => 2,
             // Pin to the address the policy checked, closing the window between
             // validation and connection in which DNS could answer differently.
-            CURLOPT_RESOLVE => [$host.':'.$port.':'.$address],
+            CURLOPT_RESOLVE => [$destination->curlResolveEntry()],
         ]);
 
         $body = curl_exec($handle);
@@ -146,162 +159,20 @@ final class HttpTimestampAuthority implements TimestampAuthority
     }
 
     /**
-     * Apply the destination policy and return the parts needed to connect.
+     * Apply the shared destination policy to the configured endpoint.
      *
-     * @return array{string, string, int, string} URL, host, port, validated IP address.
+     * The refusal is re-thrown as a sealing exception so callers keep catching
+     * one exception family; the message, which operators read, is unchanged.
      *
      * @throws TimestampAuthorityNotConfiguredException
      * @throws TimestampAuthorityDestinationException
      */
-    private function validatedDestination(): array
+    private function validatedDestination(): ValidatedDestination
     {
-        $url = $this->endpoint();
-
-        $parts = parse_url($url);
-        if ($parts === false || ! isset($parts['host']) || ! isset($parts['scheme'])) {
-            throw new TimestampAuthorityDestinationException(
-                'The configured timestamp authority URL could not be parsed.'
-            );
+        try {
+            return $this->policy->validate($this->endpoint());
+        } catch (DestinationRefusedException $refusal) {
+            throw new TimestampAuthorityDestinationException($refusal->getMessage(), 0, $refusal);
         }
-
-        $scheme = strtolower($parts['scheme']);
-        if (! in_array($scheme, ['http', 'https'], true)) {
-            throw new TimestampAuthorityDestinationException(
-                'The timestamp authority URL must use http or https, not "'.$scheme.'".'
-            );
-        }
-
-        if ($scheme === 'http' && ! $this->allowPlaintextHttp) {
-            throw new TimestampAuthorityDestinationException(
-                'The timestamp authority URL uses plaintext HTTP. Set ESIGN_TSA_ALLOW_PLAINTEXT_HTTP=true '.
-                'to accept that the document digest travels in the clear.'
-            );
-        }
-
-        if (isset($parts['user']) || isset($parts['pass'])) {
-            throw new TimestampAuthorityDestinationException(
-                'The timestamp authority URL must not carry credentials.'
-            );
-        }
-
-        $host = $parts['host'];
-        $port = $parts['port'] ?? ($scheme === 'https' ? 443 : 80);
-
-        return [$url, $host, $port, $this->resolvePublicAddress($host)];
-    }
-
-    /**
-     * Resolve a host and require every answer to be a public address.
-     *
-     * Every answer, not just the one that would be used: a host that resolves
-     * to both a public and an internal address is refused outright rather than
-     * left to connection ordering.
-     *
-     * @throws TimestampAuthorityDestinationException
-     */
-    private function resolvePublicAddress(string $host): string
-    {
-        $literal = trim($host, '[]');
-        if (filter_var($literal, FILTER_VALIDATE_IP) !== false) {
-            $this->assertPublicAddress($literal, $host);
-
-            return $literal;
-        }
-
-        if (filter_var($host, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false) {
-            throw new TimestampAuthorityDestinationException(
-                'The timestamp authority URL does not name a valid host.'
-            );
-        }
-
-        $addresses = $this->resolveAll($host);
-        if ($addresses === []) {
-            throw new TimestampAuthorityDestinationException(
-                'The timestamp authority host "'.$host.'" does not resolve.'
-            );
-        }
-
-        foreach ($addresses as $address) {
-            $this->assertPublicAddress($address, $host);
-        }
-
-        // cURL accepts a comma-separated address list for one host:port, so the
-        // pin covers every answer that was checked, not only the first.
-        return implode(',', $addresses);
-    }
-
-    /**
-     * Every A and AAAA answer for a host.
-     *
-     * @return list<string>
-     */
-    private function resolveAll(string $host): array
-    {
-        $addresses = gethostbynamel($host);
-        $addresses = $addresses === false ? [] : $addresses;
-
-        $records = @dns_get_record($host, DNS_AAAA);
-        if (is_array($records)) {
-            foreach ($records as $record) {
-                $ipv6 = $record['ipv6'] ?? null;
-                if (is_string($ipv6) && $ipv6 !== '') {
-                    $addresses[] = $ipv6;
-                }
-            }
-        }
-
-        return array_values(array_unique($addresses));
-    }
-
-    /**
-     * @throws TimestampAuthorityDestinationException
-     */
-    private function assertPublicAddress(string $address, string $host): void
-    {
-        $public = filter_var(
-            $address,
-            FILTER_VALIDATE_IP,
-            FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE
-        );
-
-        if ($public === false || $this->isInExtraReservedRange($address)) {
-            throw new TimestampAuthorityDestinationException(
-                'The timestamp authority host "'.$host.'" resolves to the non-public address '.$address.'.'
-            );
-        }
-    }
-
-    /**
-     * Ranges PHP's IP filter flags treat as public but which are not the
-     * public internet.
-     *
-     * `FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE` covers RFC 1918,
-     * loopback, link-local, IPv6 ULA, and IPv4-mapped IPv6, but it lets through
-     * RFC 6598 carrier-grade NAT — which is exactly the address space a shared
-     * host's internal network sits in — and RFC 6890 IETF protocol assignments.
-     */
-    private function isInExtraReservedRange(string $address): bool
-    {
-        // ::ffff:a.b.c.d is the same destination as a.b.c.d, so it is judged as one.
-        $candidate = preg_replace('/^::ffff:/i', '', $address) ?? $address;
-
-        $packed = @inet_pton($candidate);
-        if ($packed === false || strlen($packed) !== 4) {
-            return false;
-        }
-
-        $value = unpack('N', $packed);
-        if ($value === false) {
-            return false;
-        }
-
-        foreach ([['100.64.0.0', 10], ['192.0.0.0', 24], ['198.18.0.0', 15]] as [$network, $bits]) {
-            $mask = -1 << (32 - $bits) & 0xFFFFFFFF;
-            if (($value[1] & $mask) === (ip2long($network) & $mask)) {
-                return true;
-            }
-        }
-
-        return false;
     }
 }
