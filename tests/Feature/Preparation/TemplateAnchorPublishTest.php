@@ -123,12 +123,16 @@ class TemplateAnchorPublishTest extends TestCase
     {
         $template = $this->template();
         $draft = $this->draft($template, $this->schemaWithout('anchor'));
-        $before = [$draft->field_schema, $draft->field_schema_sha256];
+        $before = [$draft->canonicalFieldSchemaJson(), $draft->field_schema_sha256];
 
         app(TemplateService::class)->publish($this->versionOf($template), $this->sender);
 
         $published = $draft->fresh();
-        $this->assertSame($before, [$published?->field_schema, $published?->field_schema_sha256]);
+
+        // Compared through the canonical form, never as the raw column: a MySQL JSON column
+        // does not preserve object key order, so the bytes that come back are not necessarily
+        // the bytes that went in (docs/preparation/templates.md).
+        $this->assertSame($before, [$published?->canonicalFieldSchemaJson(), $published?->field_schema_sha256]);
     }
 
     // ------------------------------------------------------------------------ visible failure

@@ -99,11 +99,15 @@ class EnvelopeAnchorResolutionTest extends TestCase
     public function test_an_envelope_with_no_anchors_keeps_its_schema_and_its_digest(): void
     {
         $envelope = $this->scenario->preparedDraft();
-        $before = [$envelope->field_schema, $envelope->field_schema_sha256];
+        $before = [$envelope->fieldSchema()->canonicalJson(), $envelope->field_schema_sha256];
 
         $this->scenario->machine()->send($envelope);
 
-        $this->assertSame($before, [$envelope->refresh()->field_schema, $envelope->field_schema_sha256]);
+        // Through the canonical form: a MySQL JSON column does not preserve object key order.
+        $this->assertSame(
+            $before,
+            [$envelope->refresh()->fieldSchema()->canonicalJson(), $envelope->field_schema_sha256],
+        );
     }
 
     // ------------------------------------------------------------------------ visible failure
@@ -179,7 +183,12 @@ class EnvelopeAnchorResolutionTest extends TestCase
         );
 
         $this->assertTrue($envelope->hasOmittedAnchorFields());
-        $this->assertSame([[
+
+        // Key-sorted on both sides: a MySQL JSON column does not preserve object key order, and
+        // what this record promises is its contents, not a byte layout.
+        $recorded = $envelope->omittedAnchorFields()[0];
+        ksort($recorded);
+        $expected = [
             'field_id' => 'seller_notes',
             'recipient_id' => 'seller',
             'type' => 'text',
@@ -188,7 +197,11 @@ class EnvelopeAnchorResolutionTest extends TestCase
             'anchor_text' => 'Witness signature:',
             'occurrence' => 'index 2',
             'reason' => 'optional_anchor_absent',
-        ]], $envelope->omittedAnchorFields());
+        ];
+        ksort($expected);
+
+        $this->assertCount(1, $envelope->omittedAnchorFields());
+        $this->assertSame($expected, $recorded);
 
         // And in the event, so a reader following the trail sees it too.
         $sent = $this->scenario->sink->payloadFor(EnvelopeEvent::Sent);
@@ -251,7 +264,7 @@ class EnvelopeAnchorResolutionTest extends TestCase
     {
         // What the Firma facade produces: the rectangle and the receipt for these exact bytes.
         $envelope = $this->scenario->preparedDraft(['field_schema' => $this->preResolvedSchema()]);
-        $before = [$envelope->field_schema, $envelope->field_schema_sha256];
+        $before = [$envelope->fieldSchema()->canonicalJson(), $envelope->field_schema_sha256];
 
         // Remove the bytes. Anything that tried to read the document would fail loudly.
         Storage::disk('documents')->delete($this->scenario->revision->path);
@@ -259,7 +272,7 @@ class EnvelopeAnchorResolutionTest extends TestCase
         $this->scenario->machine()->send($envelope);
 
         $this->assertSame(EnvelopeState::Sent, $envelope->refresh()->state);
-        $this->assertSame($before, [$envelope->field_schema, $envelope->field_schema_sha256]);
+        $this->assertSame($before, [$envelope->fieldSchema()->canonicalJson(), $envelope->field_schema_sha256]);
     }
 
     // ------------------------------------------------------------------------ over HTTP
