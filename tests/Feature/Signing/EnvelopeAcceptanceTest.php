@@ -12,6 +12,7 @@ use App\Domain\Signing\Exceptions\RequiredFieldsMissing;
 use App\Domain\Signing\Exceptions\StaleReview;
 use App\Domain\Signing\Models\RecipientAttestation;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use InvalidArgumentException;
 use RuntimeException;
 use Tests\Support\SigningScenario;
 use Tests\TestCase;
@@ -77,6 +78,32 @@ class EnvelopeAcceptanceTest extends TestCase
             'ip' => '198.51.100.7',
             'user_agent' => 'SyntheticBrowser/1.0',
         ], $stored->client_evidence);
+    }
+
+    /**
+     * The session reference is the idempotency key, so a truncated one is worse than a
+     * database error: two different sessions sharing a prefix would collide into one logical
+     * acceptance.
+     */
+    public function test_an_acceptance_request_refuses_values_too_long_for_their_columns(): void
+    {
+        foreach ([
+            ['session', str_repeat('s', AcceptanceRequest::MAX_SESSION_REF_LENGTH + 1), 'consent-2026-01'],
+            ['consent', 'session-1', str_repeat('v', AcceptanceRequest::MAX_CONSENT_POLICY_VERSION_LENGTH + 1)],
+            ['empty session', '', 'consent-2026-01'],
+        ] as [$case, $sessionRef, $consent]) {
+            try {
+                new AcceptanceRequest(
+                    consentPolicyVersion: $consent,
+                    sessionRef: $sessionRef,
+                    reviewedMaterialSha256: hash('sha256', ''),
+                    reviewedEnvelopeVersion: 1,
+                );
+                $this->fail('Expected the '.$case.' case to be refused.');
+            } catch (InvalidArgumentException) {
+                $this->addToAssertionCount(1);
+            }
+        }
     }
 
     public function test_the_hash_chain_links_each_acceptance_to_the_one_before_it(): void

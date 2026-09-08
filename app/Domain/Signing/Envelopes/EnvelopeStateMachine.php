@@ -103,6 +103,9 @@ final readonly class EnvelopeStateMachine
     /** Firma caps its cancellation reason at 500 characters; the column matches. */
     public const MAX_REASON_LENGTH = 500;
 
+    /** The artifact_ref column's width. Refused rather than truncated: half a key finds nothing. */
+    public const MAX_ARTIFACT_REF_LENGTH = 512;
+
     public function __construct(
         private EnvelopeEventSink $sink,
         private AssurancePolicyCheck $assurance,
@@ -615,8 +618,17 @@ final readonly class EnvelopeStateMachine
         string $artifactRef,
         ?int $expectedVersion = null,
     ): TransitionResult {
-        if (trim($artifactRef) === '') {
+        $artifactRef = trim($artifactRef);
+
+        if ($artifactRef === '') {
             throw new MissingArtifactReference;
+        }
+
+        if (mb_strlen($artifactRef) > self::MAX_ARTIFACT_REF_LENGTH) {
+            throw new InvalidArgumentException(
+                'An artifact reference may be at most '.self::MAX_ARTIFACT_REF_LENGTH.' characters; '
+                .mb_strlen($artifactRef).' given. Half a storage key resolves to nothing.',
+            );
         }
 
         return $this->withLockedEnvelope(
@@ -629,7 +641,7 @@ final readonly class EnvelopeStateMachine
                 $this->commitEnvelope($locked, [
                     'state' => EnvelopeState::Completed->value,
                     'completed_at' => $now,
-                    'artifact_ref' => trim($artifactRef),
+                    'artifact_ref' => $artifactRef,
                     'finalization_failure_reason' => null,
                 ]);
 

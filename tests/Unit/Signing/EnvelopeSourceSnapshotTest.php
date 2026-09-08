@@ -106,6 +106,26 @@ class EnvelopeSourceSnapshotTest extends TestCase
         }
     }
 
+    /**
+     * Refused, not truncated. A shortened title is a silently different agreement name in
+     * every notification the recipients receive, and the caller is never told.
+     */
+    public function test_it_refuses_values_too_long_for_their_columns(): void
+    {
+        foreach ([
+            'title' => str_repeat('a', EnvelopeSourceSnapshot::MAX_TITLE_LENGTH + 1),
+            'consent_policy_version' => str_repeat('v', EnvelopeSourceSnapshot::MAX_CONSENT_POLICY_VERSION_LENGTH + 1),
+        ] as $property => $value) {
+            try {
+                EnvelopeSourceSnapshot::fromArray($this->snapshot([$property => $value]));
+                $this->fail('An over-long "'.$property.'" must be refused rather than truncated.');
+            } catch (InvalidEnvelopeSnapshot $e) {
+                $this->assertSame('invalid_property', $e->code());
+                $this->assertStringContainsString('character limit', $e->getMessage());
+            }
+        }
+    }
+
     public function test_it_refuses_a_non_positive_expiration(): void
     {
         $this->expectException(InvalidEnvelopeSnapshot::class);

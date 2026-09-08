@@ -6,9 +6,11 @@ namespace Tests\Feature\Signing;
 
 use App\Domain\Signing\Envelopes\EnvelopeEvent;
 use App\Domain\Signing\Envelopes\EnvelopeState;
+use App\Domain\Signing\Envelopes\EnvelopeStateMachine;
 use App\Domain\Signing\Exceptions\MissingArtifactReference;
 use App\Domain\Signing\Models\Envelope;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use InvalidArgumentException;
 use Tests\Support\SigningFixtures;
 use Tests\Support\SigningScenario;
 use Tests\TestCase;
@@ -40,6 +42,20 @@ class EnvelopeFinalizationTest extends TestCase
 
         $this->assertSame(EnvelopeState::Finalizing, $envelope->refresh()->state);
         $this->assertNotContains(EnvelopeEvent::Completed->value, $scenario->sink->names());
+    }
+
+    public function test_an_over_long_artifact_reference_is_refused_rather_than_truncated(): void
+    {
+        $scenario = SigningScenario::create();
+        $envelope = $this->finalizing($scenario);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/resolves to nothing/');
+
+        $scenario->machine()->markCompleted(
+            $envelope,
+            str_repeat('a', EnvelopeStateMachine::MAX_ARTIFACT_REF_LENGTH + 1),
+        );
     }
 
     public function test_completing_records_the_artifact_and_publishes_the_completion_event(): void

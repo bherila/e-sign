@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Signing\Envelopes;
 
 use App\Domain\Signing\Fields\ClientEvidence;
+use InvalidArgumentException;
 
 /**
  * Everything a recipient has to state to give assent.
@@ -27,6 +28,18 @@ use App\Domain\Signing\Fields\ClientEvidence;
  */
 final readonly class AcceptanceRequest
 {
+    /**
+     * Column widths, enforced before the row is attempted.
+     *
+     * A session reference too long for its column is a truncation on a permissive engine and
+     * an opaque driver error on a strict one — and a *truncated* session reference is worse
+     * than either, because it is the idempotency key: two different sessions sharing a
+     * prefix would collide into one logical acceptance.
+     */
+    public const MAX_SESSION_REF_LENGTH = 191;
+
+    public const MAX_CONSENT_POLICY_VERSION_LENGTH = 64;
+
     /** @var array<string, string> */
     public array $clientEvidence;
 
@@ -41,6 +54,23 @@ final readonly class AcceptanceRequest
         public VerificationMethod $verificationMethod = VerificationMethod::EmailLink,
         array $clientEvidence = [],
     ) {
+        if (trim($sessionRef) === '' || mb_strlen($sessionRef) > self::MAX_SESSION_REF_LENGTH) {
+            throw new InvalidArgumentException(
+                'A session reference must be non-empty and at most '
+                .self::MAX_SESSION_REF_LENGTH.' characters; it is the idempotency key.',
+            );
+        }
+
+        if (
+            trim($consentPolicyVersion) === ''
+            || mb_strlen($consentPolicyVersion) > self::MAX_CONSENT_POLICY_VERSION_LENGTH
+        ) {
+            throw new InvalidArgumentException(
+                'A consent policy version must be non-empty and at most '
+                .self::MAX_CONSENT_POLICY_VERSION_LENGTH.' characters.',
+            );
+        }
+
         $this->clientEvidence = ClientEvidence::minimize($clientEvidence);
     }
 }

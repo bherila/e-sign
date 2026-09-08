@@ -26,11 +26,11 @@ use App\Domain\Signing\Exceptions\InvalidEnvelopeSnapshot;
  *
  * | Key | Required | Notes |
  * |---|---|---|
- * | `title` | yes | non-empty |
+ * | `title` | yes | non-empty, at most 255 characters (the profile's own `name` limit) |
  * | `document_revision_id` | yes | an immutable `document_revisions` row; the review revision |
  * | `document_sha256` | yes | must equal that revision's digest, checked by the factory |
  * | `field_schema` | yes | a native field schema 1.0 document, re-validated on the way in |
- * | `consent_policy_version` | yes | the version of the consent text that will be displayed |
+ * | `consent_policy_version` | yes | the version of the consent text that will be displayed, at most 64 characters |
  * | `assurance_level` | no, default `pades-b-b` | `pades-b-b` or `pades-b-t` |
  * | `signing_mode` | no, default `sequential` | `sequential` or `parallel` |
  * | `render_settings` | no, default `[]` | snapshotted rendering settings |
@@ -47,6 +47,18 @@ final readonly class EnvelopeSourceSnapshot
 {
     /** Firma's documented default, and a reasonable one: seven days. */
     public const DEFAULT_EXPIRATION_HOURS = 168;
+
+    /**
+     * Column widths, enforced here rather than left to the database.
+     *
+     * A value too long for its column is a truncation on a permissive engine and an opaque
+     * driver error on a strict one. Neither tells the caller which property was wrong, and a
+     * truncated title is a silently different agreement name in every notification the
+     * recipients receive. 255 is also the `name` limit the Firma profile documents.
+     */
+    public const MAX_TITLE_LENGTH = 255;
+
+    public const MAX_CONSENT_POLICY_VERSION_LENGTH = 64;
 
     /**
      * @param  array<string, mixed>  $renderSettings
@@ -71,9 +83,13 @@ final readonly class EnvelopeSourceSnapshot
      */
     public static function fromArray(array $snapshot): self
     {
-        $title = self::requiredString($snapshot, 'title');
-        $consent = self::requiredString($snapshot, 'consent_policy_version');
-        $documentSha256 = self::requiredString($snapshot, 'document_sha256');
+        $title = self::requiredString($snapshot, 'title', self::MAX_TITLE_LENGTH);
+        $consent = self::requiredString(
+            $snapshot,
+            'consent_policy_version',
+            self::MAX_CONSENT_POLICY_VERSION_LENGTH,
+        );
+        $documentSha256 = self::requiredString($snapshot, 'document_sha256', 64);
 
         if (preg_match('/^[0-9a-f]{64}$/', $documentSha256) !== 1) {
             throw InvalidEnvelopeSnapshot::invalidProperty(
@@ -175,7 +191,7 @@ final readonly class EnvelopeSourceSnapshot
     /**
      * @param  array<string, mixed>  $snapshot
      */
-    private static function requiredString(array $snapshot, string $key): string
+    private static function requiredString(array $snapshot, string $key, int $maxLength): string
     {
         $value = $snapshot[$key] ?? null;
 
@@ -183,7 +199,16 @@ final readonly class EnvelopeSourceSnapshot
             throw InvalidEnvelopeSnapshot::missingProperty($key);
         }
 
-        return trim($value);
+        $value = trim($value);
+
+        if (mb_strlen($value) > $maxLength) {
+            throw InvalidEnvelopeSnapshot::invalidProperty(
+                $key,
+                'it is longer than the '.$maxLength.' character limit.',
+            );
+        }
+
+        return $value;
     }
 
     /**
