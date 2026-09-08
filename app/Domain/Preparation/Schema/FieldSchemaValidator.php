@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Domain\Preparation\Schema;
 
+use App\Domain\Preparation\Text\AnchorOrigin;
+
 /**
  * Validates a decoded native field document against field schema 1.0.
  *
@@ -92,6 +94,12 @@ final class FieldSchemaValidator
 
     /** @var list<string> */
     public const RECT_REQUIRED = ['x', 'y', 'width', 'height'];
+
+    /** @var list<string> */
+    public const ANCHOR_REQUIRED = ['text', 'occurrence'];
+
+    /** @var list<string> */
+    public const ANCHOR_OPTIONAL = ['origin', 'offset'];
 
     /**
      * @param  array<string, mixed>  $document  A decoded document (`json_decode(..., true)`).
@@ -754,22 +762,29 @@ final class FieldSchemaValidator
             return;
         }
 
-        $this->checkObjectShape($path, $anchor, ['text'], ['occurrence', 'offset'], $errors);
+        $this->checkObjectShape($path, $anchor, self::ANCHOR_REQUIRED, self::ANCHOR_OPTIONAL, $errors);
 
         if (array_key_exists('text', $anchor)) {
             $this->checkNonEmptyString($path.'/text', 'anchor.text', $anchor['text'], self::ANCHOR_TEXT_MAX_LENGTH, $errors);
         }
 
         if (array_key_exists('occurrence', $anchor)) {
-            $occurrence = $this->asInteger($anchor['occurrence']);
+            $this->checkAnchorOccurrence($path.'/occurrence', $anchor['occurrence'], $errors);
+        }
 
-            if ($occurrence === null) {
-                $errors[] = new ValidationError($path.'/occurrence', ValidationCode::InvalidType, 'anchor.occurrence must be an integer.');
-            } elseif ($occurrence < 1) {
+        if (array_key_exists('origin', $anchor)) {
+            $origin = $anchor['origin'];
+
+            if (! is_string($origin)) {
+                $errors[] = new ValidationError($path.'/origin', ValidationCode::InvalidType, 'anchor.origin must be a string.');
+            } elseif (! AnchorOrigin::tryFrom($origin) instanceof AnchorOrigin) {
                 $errors[] = new ValidationError(
-                    $path.'/occurrence',
+                    $path.'/origin',
                     ValidationCode::InvalidFormat,
-                    'anchor.occurrence is 1-based; got '.$occurrence.'.',
+                    'anchor.origin must be one of '.implode(', ', array_map(
+                        static fn (AnchorOrigin $corner): string => $corner->value,
+                        AnchorOrigin::cases(),
+                    )).'; got "'.$origin.'". Nothing is inferred from the sign of the offset.',
                 );
             }
         }
@@ -808,6 +823,54 @@ final class FieldSchemaValidator
                     'anchor.offset.'.$name.' must be a finite number; got '.var_export($value, true).'.',
                 );
             }
+        }
+    }
+
+    /**
+     * `"sole"` or a 1-based index, and nothing else.
+     *
+     * `Text\AnchorOccurrence` refuses a "first match wins" default, so a document that does not
+     * say which match it means is under-specified rather than defaulted. `"all"` is a resolver
+     * capability that places one box per match, which a single field with a single id cannot
+     * represent, so it is rejected here with that explanation instead of being half-honoured.
+     *
+     * @param  list<ValidationError>  $errors
+     */
+    private function checkAnchorOccurrence(string $path, mixed $occurrence, array &$errors): void
+    {
+        if (is_string($occurrence)) {
+            if ($occurrence === AnchorPlacement::OCCURRENCE_SOLE) {
+                return;
+            }
+
+            $errors[] = new ValidationError(
+                $path,
+                ValidationCode::InvalidFormat,
+                'anchor.occurrence must be "'.AnchorPlacement::OCCURRENCE_SOLE.'" or a 1-based index; got "'.$occurrence
+                    .'". "all" places one box per match, which a single field cannot represent: use one field per box.',
+            );
+
+            return;
+        }
+
+        $index = $this->asInteger($occurrence);
+
+        if ($index === null) {
+            $errors[] = new ValidationError(
+                $path,
+                ValidationCode::InvalidType,
+                'anchor.occurrence must be "'.AnchorPlacement::OCCURRENCE_SOLE.'" or an integer index.',
+            );
+
+            return;
+        }
+
+        if ($index < 1) {
+            $errors[] = new ValidationError(
+                $path,
+                ValidationCode::InvalidFormat,
+                'anchor.occurrence indexes are 1-based; got '.$index.'.',
+            );
         }
     }
 

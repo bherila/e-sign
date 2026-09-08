@@ -3,6 +3,10 @@ import Ajv2020, { type ValidateFunction } from "ajv/dist/2020";
 import fixtureJson from "../../../tests/Fixtures/schema/nda-two-signers.json";
 import schemaJson from "../../schema/field-schema-1.0.json";
 import {
+  ANCHOR_OPTIONAL,
+  ANCHOR_ORIGINS,
+  ANCHOR_REQUIRED,
+  DEFAULT_ANCHOR_ORIGIN,
   DOCUMENT_REQUIRED,
   FIELD_OPTIONAL,
   FIELD_REQUIRED,
@@ -80,6 +84,9 @@ describe("the published JSON Schema", () => {
     ["an id with illegal characters", (raw: Record<string, any>) => (raw.fields[0].id = "buyer signature!")],
     ["a malformed prefill variable", (raw: Record<string, any>) => (raw.fields[2].prefill.variable = "Recipient Name")],
     ["a zero anchor occurrence", (raw: Record<string, any>) => (raw.fields[5].anchor.occurrence = 0)],
+    ["an anchor with no occurrence", (raw: Record<string, any>) => delete raw.fields[5].anchor.occurrence],
+    ["an anchor occurrence of all", (raw: Record<string, any>) => (raw.fields[5].anchor.occurrence = "all")],
+    ["an undeclared anchor origin", (raw: Record<string, any>) => (raw.fields[5].anchor.origin = "centre")],
   ])("rejects %s", (_name, mutate) => {
     expect(errorsFor(brokenFixture(mutate)).length).toBeGreaterThan(0);
   });
@@ -127,6 +134,18 @@ describe("the TypeScript mirror", () => {
     expect(recipient.additionalProperties).toBe(false);
     expect(recipient.required).toEqual([...RECIPIENT_REQUIRED]);
     expect(Object.keys(recipient.properties)).toEqual([...RECIPIENT_REQUIRED, ...RECIPIENT_OPTIONAL]);
+  });
+
+  it("declares the same anchor shape, with no default occurrence", () => {
+    const anchor = schema["$defs"].anchor;
+
+    expect(anchor.additionalProperties).toBe(false);
+    expect(anchor.required).toEqual([...ANCHOR_REQUIRED]);
+    expect(Object.keys(anchor.properties)).toEqual([...ANCHOR_REQUIRED, ...ANCHOR_OPTIONAL]);
+    expect(anchor.properties.occurrence.default).toBeUndefined();
+    expect(anchor.properties.occurrence.oneOf).toEqual([{ const: "sole" }, { type: "integer", minimum: 1 }]);
+    expect(anchor.properties.origin.enum).toEqual([...ANCHOR_ORIGINS]);
+    expect(anchor.properties.origin.default).toBe(DEFAULT_ANCHOR_ORIGIN);
   });
 
   it("declares the same rect constraints", () => {

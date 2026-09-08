@@ -610,6 +610,46 @@ class FieldSchemaValidatorTest extends TestCase
             '/fields/5/anchor',
         ];
 
+        yield 'an anchor that does not say which match it means' => [
+            static function (array $document): array {
+                unset($document['fields'][5]['anchor']['occurrence']);
+
+                return $document;
+            },
+            ValidationCode::MissingProperty,
+            '/fields/5/anchor',
+        ];
+
+        yield 'an anchor occurrence of all, which one field cannot represent' => [
+            static function (array $document): array {
+                $document['fields'][5]['anchor']['occurrence'] = 'all';
+
+                return $document;
+            },
+            ValidationCode::InvalidFormat,
+            '/fields/5/anchor/occurrence',
+        ];
+
+        yield 'an anchor occurrence that is neither sole nor an index' => [
+            static function (array $document): array {
+                $document['fields'][5]['anchor']['occurrence'] = 1.5;
+
+                return $document;
+            },
+            ValidationCode::InvalidType,
+            '/fields/5/anchor/occurrence',
+        ];
+
+        yield 'an anchor origin that is not a declared corner' => [
+            static function (array $document): array {
+                $document['fields'][5]['anchor']['origin'] = 'centre';
+
+                return $document;
+            },
+            ValidationCode::InvalidFormat,
+            '/fields/5/anchor/origin',
+        ];
+
         yield 'a zero anchor occurrence' => [
             static function (array $document): array {
                 $document['fields'][5]['anchor']['occurrence'] = 0;

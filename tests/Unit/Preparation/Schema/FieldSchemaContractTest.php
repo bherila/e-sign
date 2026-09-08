@@ -4,13 +4,14 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Preparation\Schema;
 
-use App\Domain\Preparation\Schema\Anchor;
+use App\Domain\Preparation\Schema\AnchorPlacement;
 use App\Domain\Preparation\Schema\CoordinateSpaceDeclaration;
 use App\Domain\Preparation\Schema\FieldDefinition;
 use App\Domain\Preparation\Schema\FieldSchemaValidator;
 use App\Domain\Preparation\Schema\FieldType;
 use App\Domain\Preparation\Schema\SchemaVersion;
 use App\Domain\Preparation\Schema\ValidationCode;
+use App\Domain\Preparation\Text\AnchorOrigin;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\FieldSchemaFixture;
 
@@ -129,7 +130,10 @@ class FieldSchemaContractTest extends TestCase
 
         $this->assertSame(FieldDefinition::DEFAULT_REQUIRED, $field['properties']['required']['default']);
         $this->assertSame(FieldDefinition::DEFAULT_READ_ONLY, $field['properties']['read_only']['default']);
-        $this->assertSame(Anchor::DEFAULT_OCCURRENCE, self::definition('anchor')['properties']['occurrence']['default']);
+        $this->assertSame(
+            AnchorPlacement::DEFAULT_ORIGIN->value,
+            self::definition('anchor')['properties']['origin']['default'],
+        );
     }
 
     public function test_the_patterns_and_limits_match_the_php_importer(): void
@@ -159,10 +163,43 @@ class FieldSchemaContractTest extends TestCase
 
         $anchor = self::definition('anchor');
         $this->assertFalse($anchor['additionalProperties']);
-        $this->assertSame(['text'], $anchor['required']);
+        $this->assertSame(FieldSchemaValidator::ANCHOR_REQUIRED, $anchor['required']);
+        $this->assertSame(
+            array_merge(FieldSchemaValidator::ANCHOR_REQUIRED, FieldSchemaValidator::ANCHOR_OPTIONAL),
+            array_keys($anchor['properties']),
+        );
         $this->assertSame(FieldSchemaValidator::ANCHOR_TEXT_MAX_LENGTH, $anchor['properties']['text']['maxLength']);
         $this->assertFalse($anchor['properties']['offset']['additionalProperties']);
         $this->assertSame(['dx', 'dy'], $anchor['properties']['offset']['required']);
+    }
+
+    /**
+     * The anchor placement request is the serialised form of the Text module's own semantics.
+     *
+     * `Text\AnchorOccurrence` refuses a "first match wins" default, so `occurrence` is required
+     * here and offers exactly the two modes a single field can represent: "sole" or an index.
+     * `all` places one box per match and is deliberately absent from the schema.
+     */
+    public function test_the_anchor_shape_matches_the_text_modules_semantics(): void
+    {
+        $anchor = self::definition('anchor');
+
+        $this->assertContains('occurrence', $anchor['required'], 'An anchor must say which match it means.');
+        $this->assertArrayNotHasKey(
+            'default',
+            $anchor['properties']['occurrence'],
+            'A default occurrence would be the "first match wins" fallback the Text module refuses.',
+        );
+        $this->assertSame(
+            [['const' => AnchorPlacement::OCCURRENCE_SOLE], ['type' => 'integer', 'minimum' => 1]],
+            $anchor['properties']['occurrence']['oneOf'],
+        );
+        $this->assertStringNotContainsString('"all"', json_encode($anchor['properties']['occurrence']['oneOf']) ?: '');
+
+        $this->assertSame(
+            array_map(static fn (AnchorOrigin $corner): string => $corner->value, AnchorOrigin::cases()),
+            $anchor['properties']['origin']['enum'],
+        );
     }
 
     public function test_the_signing_order_shape_is_stages_of_recipient_ids(): void

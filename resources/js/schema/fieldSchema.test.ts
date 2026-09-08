@@ -87,14 +87,16 @@ describe("parseFieldSchema", () => {
     expect(document.fields[0]!.read_only).toBe(false);
   });
 
-  it("defaults an anchor occurrence to the first match", () => {
-    const document = parseFieldSchema(
-      brokenFixture((raw) => {
-        delete raw.fields[5].anchor.occurrence;
-      }),
-    );
+  it("keeps the anchor placement request verbatim", () => {
+    const document = parseFieldSchema(fixture());
 
-    expect(document.fields[5]!.anchor?.occurrence).toBe(1);
+    expect(document.fields[5]!.anchor).toEqual({
+      text: "Counterparty signature:",
+      occurrence: "sole",
+      origin: "bottom_left",
+      offset: { dx: 0, dy: 12.5 },
+    });
+    expect(document.fields[9]!.anchor).toEqual({ text: "Notes:", occurrence: 2 });
   });
 });
 
@@ -384,6 +386,30 @@ describe("validateFieldSchema", () => {
     ],
     ["an empty anchor text", (raw) => (raw.fields[5].anchor.text = ""), "invalid_format", "/fields/5/anchor/text"],
     ["an anchor without text", (raw) => delete raw.fields[5].anchor.text, "missing_property", "/fields/5/anchor"],
+    [
+      "an anchor that does not say which match it means",
+      (raw) => delete raw.fields[5].anchor.occurrence,
+      "missing_property",
+      "/fields/5/anchor",
+    ],
+    [
+      "an anchor occurrence of all, which one field cannot represent",
+      (raw) => (raw.fields[5].anchor.occurrence = "all"),
+      "invalid_format",
+      "/fields/5/anchor/occurrence",
+    ],
+    [
+      "an anchor occurrence that is neither sole nor an index",
+      (raw) => (raw.fields[5].anchor.occurrence = 1.5),
+      "invalid_type",
+      "/fields/5/anchor/occurrence",
+    ],
+    [
+      "an anchor origin that is not a declared corner",
+      (raw) => (raw.fields[5].anchor.origin = "centre"),
+      "invalid_format",
+      "/fields/5/anchor/origin",
+    ],
     ["a zero anchor occurrence", (raw) => (raw.fields[5].anchor.occurrence = 0), "invalid_format", "/fields/5/anchor/occurrence"],
     [
       "a non-finite anchor offset",

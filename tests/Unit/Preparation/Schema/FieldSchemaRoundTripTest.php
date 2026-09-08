@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Preparation\Schema;
 
+use App\Domain\Preparation\Schema\AnchorPlacement;
 use App\Domain\Preparation\Schema\CanonicalNumber;
 use App\Domain\Preparation\Schema\CoordinateSpaceDeclaration;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\FieldSchemaValidator;
 use App\Domain\Preparation\Schema\FieldType;
 use App\Domain\Preparation\Schema\PageSizes;
+use App\Domain\Preparation\Text\AnchorOrigin;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -153,8 +155,12 @@ class FieldSchemaRoundTripTest extends TestCase
             if (mt_rand(0, 2) === 0) {
                 $anchor = [
                     'text' => 'Anchor '.$i.':',
-                    'occurrence' => mt_rand(1, 4),
+                    'occurrence' => mt_rand(0, 3) === 0 ? AnchorPlacement::OCCURRENCE_SOLE : mt_rand(1, 4),
                 ];
+
+                if (mt_rand(0, 1) === 1) {
+                    $anchor['origin'] = AnchorOrigin::cases()[mt_rand(0, count(AnchorOrigin::cases()) - 1)]->value;
+                }
 
                 if (mt_rand(0, 1) === 1) {
                     $anchor['offset'] = [

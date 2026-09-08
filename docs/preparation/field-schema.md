@@ -63,9 +63,12 @@ facade converts its own convention into it. It is the only field vocabulary in t
 
 Every document declares it explicitly, and a document that declares anything else is **rejected,
 never reinterpreted**. Coordinates are never guessed: nothing in this module infers points versus
-percent from a number's magnitude. Converting a native rectangle to PDF user space — CropBox
-offsets, `/Rotate`, `/UserUnit` — belongs to `app/Domain/Preparation/Geometry`. This schema stores
-plain numbers and hands them over.
+percent from a number's magnitude.
+
+The space itself is defined in [coordinate-space.md](coordinate-space.md) and owned by
+`app/Domain/Preparation/Geometry`, which also holds every transform into PDF user space (CropBox
+offsets, `/Rotate`, `/UserUnit`). `Geometry\CoordinateSpace` is the single source of the five
+values above; the schema stores plain numbers and hands them over, and converts nothing itself.
 
 **`recipients`** — `id`, `name`, `email`, and an optional `role` display label. The `role` is
 cosmetic ("Buyer", "Witness"): it is not an application role and grants nothing. Application
@@ -89,7 +92,7 @@ address recorded here.
 | `label` | no | shown in the editor and to the signer |
 | `alias` | no | stable template alias, unique within the document |
 | `prefill` | no | `{"variable": "recipient.name"}` |
-| `anchor` | no | `{"text": "...", "occurrence": 1, "offset": {"dx": 0, "dy": 12}}` |
+| `anchor` | no | see [anchor placement](#anchor-placement) |
 
 An empty `fields` array is a valid draft. Requiring at least one field is a send-time gate, not a
 schema rule.
@@ -98,9 +101,40 @@ schema rule.
 byte-for-byte, and templates address fields by `alias`, so re-preparing a document keeps the
 mapping. Neither is ever rewritten by the importer.
 
-`anchor` is a placement *request*. Version 1.0 stores it; resolution is deterministic
-positioned-text extraction that writes the resolved rectangle into `rect` before send. A missing
-or ambiguous required anchor is an error, never a guess.
+### Anchor placement
+
+`anchor` is a placement *request*: find this text, then place the field's rectangle relative to
+it. Version 1.0 stores the request; resolution is deterministic positioned-text extraction
+(`app/Domain/Preparation/Text`) that writes the resolved rectangle into `rect` before send. A
+missing or ambiguous required anchor is an error, never a guess, and matching is an exact
+case-sensitive match on decoded text runs — never a regular expression over PDF bytes.
+
+```json
+{
+  "text": "Counterparty signature:",
+  "occurrence": "sole",
+  "origin": "bottom_left",
+  "offset": {"dx": 0, "dy": 12.5}
+}
+```
+
+| Property | Required | Notes |
+|---|---|---|
+| `text` | yes | exact string to locate |
+| `occurrence` | yes | `"sole"`, or a 1-based index in document order |
+| `origin` | no, default `top_left` | corner of the matched text the offset is measured from; one of `top_left`, `top_right`, `bottom_left`, `bottom_right` |
+| `offset` | no | `dx`, `dy` in the declared unit, `dy` downwards, either may be negative |
+
+`occurrence` is **required and has no default.** The resolver refuses a "first match wins"
+fallback, because silently taking the first match moves a signature box the moment the contract
+text changes; an anchor that matches twice without saying which one it means is under-specified.
+The resolver's third mode, `all`, places one box per match, which a single field with a single id
+cannot represent, so it is not a document value: a document that wants several boxes says so with
+several fields.
+
+`occurrence` and `origin` are the serialised form of `Text\AnchorOccurrence` and
+`Text\AnchorOrigin`, so the document cannot express a placement the resolver does not implement,
+and there is one definition of what each mode means.
 
 ## Field types
 
@@ -122,7 +156,8 @@ bytes on both the server and the client:
 
 1. Properties in the order above, at every level. Fixed, not alphabetical, so the emitted document
    reads like the schema file and the specification example.
-2. `required`, `read_only`, and `anchor.occurrence` always stated.
+2. `required` and `read_only` always stated. (`anchor.occurrence` is required by the schema
+   itself, so it is always present.)
 3. Coordinates rounded once to **three decimals**, half away from zero (0.001 pt is roughly a
    third of a micron; no drag can express less). Integral values are written `60`, never `60.0`.
 4. No insignificant whitespace; slashes and non-ASCII characters unescaped.
@@ -147,7 +182,7 @@ breaking change.
 | `missing_property` | a partial document, or a section or property that is absent |
 | `unknown_property` | any property the schema does not declare, at any level |
 | `invalid_type` | wrong JSON type, including a non-integer `page` and a numeric string coordinate |
-| `invalid_format` | a malformed id, prefill variable, label, or anchor occurrence |
+| `invalid_format` | a malformed id, prefill variable, label, anchor occurrence, or anchor origin |
 | `invalid_email` | a recipient email that is not usable as an address |
 | `empty_collection` | no recipients, no signing stages, or an empty stage |
 | `schema_version_unsupported` | an absent, malformed, unknown-major, or newer-minor version |

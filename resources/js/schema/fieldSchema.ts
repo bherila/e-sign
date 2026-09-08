@@ -73,9 +73,26 @@ export interface AnchorOffset {
   dy: number;
 }
 
+/**
+ * Which match an anchor binds to: `"sole"` (the text must occur exactly once in scope) or a
+ * 1-based index. Required, with no default — the resolver refuses a "first match wins" fallback,
+ * because silently taking the first match moves a signature box the moment the contract text
+ * changes. The resolver's `all` mode places one box per match, which a single field cannot
+ * represent, so it is not a value here.
+ */
+export type AnchorOccurrence = "sole" | number;
+
+/** Corner of the matched text box the offset is measured from. Nothing is inferred from its sign. */
+export const ANCHOR_ORIGINS = ["top_left", "top_right", "bottom_left", "bottom_right"] as const;
+
+export type AnchorOrigin = (typeof ANCHOR_ORIGINS)[number];
+
+export const DEFAULT_ANCHOR_ORIGIN: AnchorOrigin = "top_left";
+
 export interface Anchor {
   text: string;
-  occurrence: number;
+  occurrence: AnchorOccurrence;
+  origin?: AnchorOrigin;
   offset?: AnchorOffset;
 }
 
@@ -192,7 +209,7 @@ const NAME_MAX_LENGTH = 255;
 const ROLE_MAX_LENGTH = 128;
 const LABEL_MAX_LENGTH = 200;
 const ANCHOR_TEXT_MAX_LENGTH = 255;
-const DEFAULT_OCCURRENCE = 1;
+const ANCHOR_OCCURRENCE_SOLE = "sole";
 
 /** Property lists, in canonical order. Exported so the contract tests can pin them. */
 export const DOCUMENT_REQUIRED = [
@@ -208,6 +225,8 @@ export const RECIPIENT_OPTIONAL = ["role"] as const;
 export const FIELD_REQUIRED = ["id", "recipient_id", "type", "page", "rect"] as const;
 export const FIELD_OPTIONAL = ["required", "read_only", "label", "alias", "prefill", "anchor"] as const;
 export const RECT_REQUIRED = ["x", "y", "width", "height"] as const;
+export const ANCHOR_REQUIRED = ["text", "occurrence"] as const;
+export const ANCHOR_OPTIONAL = ["origin", "offset"] as const;
 
 /**
  * Round to the canonical precision, half away from zero.
@@ -369,8 +388,12 @@ function canonicaliseField(field: FieldDefinition): FieldDefinition {
   if (field.anchor !== undefined) {
     const anchor: Anchor = {
       text: field.anchor.text,
-      occurrence: field.anchor.occurrence ?? DEFAULT_OCCURRENCE,
+      occurrence: field.anchor.occurrence,
     };
+
+    if (field.anchor.origin !== undefined) {
+      anchor.origin = field.anchor.origin;
+    }
 
     if (field.anchor.offset !== undefined) {
       anchor.offset = {
@@ -968,19 +991,30 @@ function checkAnchor(path: string, anchor: unknown, issues: ValidationIssue[]): 
     return;
   }
 
-  checkObjectShape(path, anchor, ["text"], ["occurrence", "offset"], issues);
+  checkObjectShape(path, anchor, ANCHOR_REQUIRED, ANCHOR_OPTIONAL, issues);
 
   if ("text" in anchor) {
     checkNonEmptyString(`${path}/text`, "anchor.text", anchor["text"], ANCHOR_TEXT_MAX_LENGTH, issues);
   }
 
   if ("occurrence" in anchor) {
-    const occurrence = anchor["occurrence"];
+    checkAnchorOccurrence(`${path}/occurrence`, anchor["occurrence"], issues);
+  }
 
-    if (typeof occurrence !== "number" || !Number.isInteger(occurrence)) {
-      issues.push(issue(`${path}/occurrence`, "invalid_type", "anchor.occurrence must be an integer."));
-    } else if (occurrence < 1) {
-      issues.push(issue(`${path}/occurrence`, "invalid_format", `anchor.occurrence is 1-based; got ${occurrence}.`));
+  if ("origin" in anchor) {
+    const origin = anchor["origin"];
+
+    if (typeof origin !== "string") {
+      issues.push(issue(`${path}/origin`, "invalid_type", "anchor.origin must be a string."));
+    } else if (!(ANCHOR_ORIGINS as readonly string[]).includes(origin)) {
+      issues.push(
+        issue(
+          `${path}/origin`,
+          "invalid_format",
+          `anchor.origin must be one of ${ANCHOR_ORIGINS.join(", ")}; got "${origin}". ` +
+            "Nothing is inferred from the sign of the offset.",
+        ),
+      );
     }
   }
 
@@ -1020,6 +1054,40 @@ function checkAnchor(path: string, anchor: unknown, issues: ValidationIssue[]): 
         ),
       );
     }
+  }
+}
+
+/**
+ * `"sole"` or a 1-based index, and nothing else. See {@link AnchorOccurrence}.
+ */
+function checkAnchorOccurrence(path: string, occurrence: unknown, issues: ValidationIssue[]): void {
+  if (typeof occurrence === "string") {
+    if (occurrence === ANCHOR_OCCURRENCE_SOLE) {
+      return;
+    }
+
+    issues.push(
+      issue(
+        path,
+        "invalid_format",
+        `anchor.occurrence must be "${ANCHOR_OCCURRENCE_SOLE}" or a 1-based index; got "${occurrence}". ` +
+          '"all" places one box per match, which a single field cannot represent: use one field per box.',
+      ),
+    );
+
+    return;
+  }
+
+  if (typeof occurrence !== "number" || !Number.isInteger(occurrence)) {
+    issues.push(
+      issue(path, "invalid_type", `anchor.occurrence must be "${ANCHOR_OCCURRENCE_SOLE}" or an integer index.`),
+    );
+
+    return;
+  }
+
+  if (occurrence < 1) {
+    issues.push(issue(path, "invalid_format", `anchor.occurrence indexes are 1-based; got ${occurrence}.`));
   }
 }
 

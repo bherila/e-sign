@@ -121,7 +121,8 @@
       "alias": "counterparty_signature_block",
       "anchor": {
         "text": "Counterparty signature:",
-        "occurrence": 1,
+        "occurrence": "sole",
+        "origin": "bottom_left",
         "offset": {
           "dx": 0,
           "dy": 12.5

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Domain\Preparation\Schema;
 
+use App\Domain\Preparation\Geometry\CoordinateSpace;
+
 /**
  * The coordinate space a field document declares.
  *
@@ -12,26 +14,13 @@ namespace App\Domain\Preparation\Schema;
  * A document that declares anything else is rejected, never reinterpreted — "coordinates are
  * never guessed" (AGENTS.md), and no code here infers points versus percent from magnitude.
  *
- * This class only *records and checks the declaration*. Converting a native rectangle into PDF
- * user space, applying CropBox offsets, /Rotate, and /UserUnit, belongs to
- * `App\Domain\Preparation\Geometry` and is deliberately not duplicated here: this module stores
- * plain numbers and hands them over. The five constants below must stay identical to
- * `Geometry\CoordinateSpace`, which is the transform-side authority; a test in
- * `tests/Unit/Preparation/Schema` pins them against `resources/schema/field-schema-1.0.json`
- * so the JSON contract and the PHP importer cannot drift apart.
+ * The values come from {@see CoordinateSpace}, which is the module's authority on the space and
+ * owns every transform into PDF user space (CropBox offsets, `/Rotate`, `/UserUnit`). This class
+ * only records and checks the *declaration* so the schema can store plain numbers; it does not
+ * define the space and it does not convert anything. See docs/preparation/coordinate-space.md.
  */
 final readonly class CoordinateSpaceDeclaration
 {
-    public const UNIT = 'pt';
-
-    public const ORIGIN = 'top-left';
-
-    public const PAGE_BOX = 'crop';
-
-    public const ROTATION = 'displayed';
-
-    public const PAGE_INDEX_BASE = 1;
-
     public function __construct(
         public string $unit,
         public string $origin,
@@ -43,7 +32,13 @@ final readonly class CoordinateSpaceDeclaration
     /** The one space this version implements. */
     public static function native(): self
     {
-        return new self(self::UNIT, self::ORIGIN, self::PAGE_BOX, self::ROTATION, self::PAGE_INDEX_BASE);
+        return new self(
+            CoordinateSpace::UNIT,
+            CoordinateSpace::ORIGIN,
+            CoordinateSpace::PAGE_BOX,
+            CoordinateSpace::ROTATION,
+            CoordinateSpace::PAGE_INDEX_BASE,
+        );
     }
 
     /**
@@ -54,11 +49,11 @@ final readonly class CoordinateSpaceDeclaration
     public static function expected(): array
     {
         return [
-            'unit' => self::UNIT,
-            'origin' => self::ORIGIN,
-            'page_box' => self::PAGE_BOX,
-            'rotation' => self::ROTATION,
-            'page_index_base' => self::PAGE_INDEX_BASE,
+            'unit' => CoordinateSpace::UNIT,
+            'origin' => CoordinateSpace::ORIGIN,
+            'page_box' => CoordinateSpace::PAGE_BOX,
+            'rotation' => CoordinateSpace::ROTATION,
+            'page_index_base' => CoordinateSpace::PAGE_INDEX_BASE,
         ];
     }
 

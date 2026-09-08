@@ -4,13 +4,14 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Preparation\Schema;
 
-use App\Domain\Preparation\Schema\Anchor;
+use App\Domain\Preparation\Schema\AnchorPlacement;
 use App\Domain\Preparation\Schema\CoordinateSpaceDeclaration;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\FieldType;
 use App\Domain\Preparation\Schema\InvalidFieldSchemaException;
 use App\Domain\Preparation\Schema\Prefill;
 use App\Domain\Preparation\Schema\ValidationCode;
+use App\Domain\Preparation\Text\AnchorOrigin;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\FieldSchemaFixture;
 
@@ -84,18 +85,22 @@ class FieldSchemaDocumentTest extends TestCase
 
         $anchored = $document->field('counterparty_signature');
         $this->assertNotNull($anchored);
-        $this->assertInstanceOf(Anchor::class, $anchored->anchor);
+        $this->assertInstanceOf(AnchorPlacement::class, $anchored->anchor);
         $this->assertSame('Counterparty signature:', $anchored->anchor->text);
-        $this->assertSame(1, $anchored->anchor->occurrence);
+        $this->assertTrue($anchored->anchor->occurrence->isSole());
+        $this->assertSame(AnchorOrigin::BottomLeft, $anchored->anchor->origin);
         $this->assertNotNull($anchored->anchor->offset);
         $this->assertSame(0.0, $anchored->anchor->offset->dx);
         $this->assertSame(12.5, $anchored->anchor->offset->dy);
 
         $withoutOffset = $document->field('counterparty_notes');
         $this->assertNotNull($withoutOffset);
-        $this->assertInstanceOf(Anchor::class, $withoutOffset->anchor);
+        $this->assertInstanceOf(AnchorPlacement::class, $withoutOffset->anchor);
         $this->assertNull($withoutOffset->anchor->offset);
-        $this->assertSame(2, $withoutOffset->anchor->occurrence);
+        $this->assertNull($withoutOffset->anchor->origin, 'An absent origin stays absent, so the round trip is lossless.');
+        $this->assertSame(AnchorOrigin::TopLeft, $withoutOffset->anchor->originCorner(), 'The documented default applies when it is read.');
+        $this->assertTrue($withoutOffset->anchor->occurrence->isIndexed());
+        $this->assertSame(2, $withoutOffset->anchor->occurrence->index);
     }
 
     public function test_recipient_and_field_lookups(): void

@@ -223,25 +223,37 @@
       }
     },
     "anchor": {
-      "description": "Placeholder shape for anchor-based placement. Version 1.0 stores the request only; resolution is deterministic positioned-text extraction that writes a resolved rect back into this document before send, and a missing or ambiguous required anchor is an error.",
+      "description": "An anchor placement request: find this text, then place the field's rect relative to it. Version 1.0 stores the request only; resolution is deterministic positioned-text extraction that writes the resolved rect back into this document before send, and a missing or ambiguous required anchor is an error. Matching semantics belong to the resolver (App\\Domain\\Preparation\\Text), not to this schema.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["text"],
+      "required": ["text", "occurrence"],
       "properties": {
         "text": {
-          "description": "Exact text to locate. Matching semantics are defined by the anchor resolver, not by this schema.",
+          "description": "Exact text to locate. Matched case-sensitively against decoded text runs; never a regular expression over PDF bytes and never a fuzzy match.",
           "type": "string",
           "minLength": 1,
           "maxLength": 255
         },
         "occurrence": {
-          "description": "1-based occurrence of the text to use. Omitted means the first occurrence.",
-          "type": "integer",
-          "minimum": 1,
-          "default": 1
+          "description": "Which match to place against: \"sole\" means the text must occur exactly once in scope, an integer is a 1-based index in document order. Required, with no default: an anchor that matches twice without saying which one it means is under-specified, and silently taking the first would move a signature box the moment the contract text changes. The resolver's \"all\" mode places one box per match, which a single field cannot represent, so it is not a value here.",
+          "oneOf": [
+            {
+              "const": "sole"
+            },
+            {
+              "type": "integer",
+              "minimum": 1
+            }
+          ]
+        },
+        "origin": {
+          "description": "Corner of the matched text box the offset is measured from. Omitted means top-left; nothing is inferred from the sign of the offset.",
+          "type": "string",
+          "enum": ["top_left", "top_right", "bottom_left", "bottom_right"],
+          "default": "top_left"
         },
         "offset": {
-          "description": "Offset from the located text, in the same unit and orientation as the coordinate space.",
+          "description": "Offset from the origin corner, in the same unit and orientation as the coordinate space, so dy grows downwards. May be negative.",
           "type": "object",
           "additionalProperties": false,
           "required": ["dx", "dy"],

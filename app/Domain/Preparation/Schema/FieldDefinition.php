@@ -33,7 +33,7 @@ final readonly class FieldDefinition
         public ?string $label = null,
         public ?string $alias = null,
         public ?Prefill $prefill = null,
-        public ?Anchor $anchor = null,
+        public ?AnchorPlacement $anchor = null,
     ) {
         if ($page < 1) {
             throw new InvalidArgumentException('Page numbers are 1-based; got '.$page.'.');
@@ -45,7 +45,7 @@ final readonly class FieldDefinition
      */
     public static function fromArray(array $field): self
     {
-        /** @var array{id: string, recipient_id: string, type: string, page: int, rect: array{x: int|float, y: int|float, width: int|float, height: int|float}, required?: bool, read_only?: bool, label?: string, alias?: string, prefill?: array{variable: string}, anchor?: array{text: string, occurrence?: int, offset?: array{dx: int|float, dy: int|float}}} $field */
+        /** @var array{id: string, recipient_id: string, type: string, page: int, rect: array{x: int|float, y: int|float, width: int|float, height: int|float}, required?: bool, read_only?: bool, label?: string, alias?: string, prefill?: array{variable: string}, anchor?: array{text: string, occurrence: string|int, origin?: string, offset?: array{dx: int|float, dy: int|float}}} $field */
         return new self(
             $field['id'],
             $field['recipient_id'],
@@ -57,7 +57,7 @@ final readonly class FieldDefinition
             $field['label'] ?? null,
             $field['alias'] ?? null,
             isset($field['prefill']) ? Prefill::fromArray($field['prefill']) : null,
-            isset($field['anchor']) ? Anchor::fromArray($field['anchor']) : null,
+            isset($field['anchor']) ? AnchorPlacement::fromArray($field['anchor']) : null,
         );
     }
 
@@ -91,7 +91,7 @@ final readonly class FieldDefinition
             $field['prefill'] = $this->prefill->toArray();
         }
 
-        if ($this->anchor instanceof Anchor) {
+        if ($this->anchor instanceof AnchorPlacement) {
             $field['anchor'] = $this->anchor->toArray();
         }
 
