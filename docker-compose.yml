@@ -1,0 +1,106 @@
+# Standalone local stack for BWH eSign: the app in its three roles, MariaDB, and Mailpit.
+# Storage is the local disk (a named volume), identity is standalone local-admin mode.
+#
+#   cp .env.docker .env
+#   docker compose up -d
+#   docker compose exec esign php artisan key:generate
+#   docker compose exec esign php artisan migrate        # explicit, never automatic
+#   app -> http://localhost:8001   mail -> http://localhost:8026
+#
+# To run eSign inside the consumer's stack instead (shared MariaDB, Garage, Mailpit), use the
+# `esign` profile in that repository's docker-compose.yml; it builds this same image from a
+# sibling checkout. See DOCKER.md.
+name: esign
+
+x-esign-build: &esign-build
+  context: .
+  dockerfile: .docker/Dockerfile
+  target: dev
+
+x-esign-env: &esign-env
+  DB_CONNECTION: mariadb
+  DB_HOST: mariadb
+  DB_PORT: 3306
+  DB_DATABASE: esign
+  DB_USERNAME: esign
+  DB_PASSWORD: esign_local_dev_only
+  MAIL_MAILER: smtp
+  MAIL_HOST: mailpit
+  MAIL_PORT: 1025
+  QUEUE_CONNECTION: database
+  CACHE_STORE: database
+  SESSION_DRIVER: database
+  FILESYSTEM_DISK: local
+
+x-esign-volumes: &esign-volumes
+  - .:/var/www/html
+  - esign_storage:/var/www/html/storage/app
+
+services:
+  esign:
+    build: *esign-build
+    container_name: esign-web
+    restart: unless-stopped
+    command: ["web"]
+    environment: *esign-env
+    volumes: *esign-volumes
+    ports: ["8001:8080"]
+    depends_on:
+      mariadb: { condition: service_healthy }
+    networks: [esign]
+
+  esign-worker:
+    build: *esign-build
+    container_name: esign-worker
+    restart: unless-stopped
+    command: ["worker"]
+    environment: *esign-env
+    volumes: *esign-volumes
+    depends_on:
+      mariadb: { condition: service_healthy }
+    networks: [esign]
+
+  esign-scheduler:
+    build: *esign-build
+    container_name: esign-scheduler
+    restart: unless-stopped
+    command: ["scheduler"]
+    environment: *esign-env
+    volumes: *esign-volumes
+    depends_on:
+      mariadb: { condition: service_healthy }
+    networks: [esign]
+
+  mariadb:
+    image: mariadb:10.11
+    container_name: esign-mariadb
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: esign
+      MARIADB_USER: esign
+      MARIADB_PASSWORD: esign_local_dev_only
+      MARIADB_ROOT_PASSWORD: esign_local_dev_only
+    volumes: [esign_mariadb:/var/lib/mysql]
+    ports: ["127.0.0.1:3308:3306"]
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [esign]
+
+  mailpit:
+    image: axllent/mailpit
+    container_name: esign-mailpit
+    restart: unless-stopped
+    ports: ["8026:8025", "127.0.0.1:1026:1025"]
+    networks: [esign]
+
+volumes:
+  esign_mariadb:
+  esign_storage:
+
+networks:
+  esign:
+    driver: bridge
