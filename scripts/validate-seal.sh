@@ -20,6 +20,13 @@
 # signature, for an unparsable file, and for an environment error alike, so an
 # exit-status test would let any of the three satisfy a negative expectation.
 #
+# The manifest may list the same file more than once under different trust
+# modes. That is how the seal-rotation rows work (issue #29): an artifact sealed
+# under the retired key must be judged VALID against the retired key's anchor
+# and INVALID against the anchor of the key that replaced it, and the artifact
+# sealed under the new key must do the reverse. One row alone would not
+# distinguish "verified by its own certificate" from "verified by anything".
+#
 # Usage:
 #   scripts/validate-seal.sh                     # validate committed artifacts
 #   scripts/validate-seal.sh --regenerate        # reseal them first, then validate
@@ -34,6 +41,10 @@ cd "$repo_root"
 validation_dir='tests/Fixtures/validation'
 manifest="$validation_dir/manifest.tsv"
 trust_root='tests/Fixtures/crypto/root.test.crt'
+# The rotation target's anchor. A rotated deployment's new key chains here and its old key
+# does not, which is what lets the manifest ask pyHanko to judge each artifact against its
+# own certificate and refuse it against the other one (issue #29).
+trust_root_rotation_target='tests/Fixtures/crypto/root-b.test.crt'
 output_file="$validation_dir/pyhanko-output.txt"
 
 venv="${PYHANKO_VENV:-/tmp/pyhanko-venv}"
@@ -77,6 +88,7 @@ log() {
 log "pyHanko $pyhanko_version (CLI $pyhanko_cli_version)"
 log "openssl $(openssl version | cut -d' ' -f1-2)"
 log "trust anchor: $trust_root"
+log "rotation-target trust anchor: $trust_root_rotation_target"
 log "validated at: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 log ''
 
@@ -136,6 +148,14 @@ while IFS=$'\t' read -r file expectation trust note; do
             # The fixture root is added to the OS trust store, which is what
             # anchors a public timestamp authority's certificate.
             trust_args=(--trust "$trust_root")
+            ;;
+        rotation-target-only)
+            # Only the key a rotation moves TO is trusted. Used in both
+            # directions: the artifact sealed under the new key must be VALID
+            # here, and the one sealed under the retired key must be INVALID.
+            # The pair is the independent evidence that a rotation leaves each
+            # artifact verifiable by its own certificate and by nothing else.
+            trust_args=(--trust-replace --trust "$trust_root_rotation_target")
             ;;
         *)
             log "MISSING  $file — unknown trust mode '$trust'"

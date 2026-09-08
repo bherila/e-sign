@@ -509,6 +509,11 @@ jobs:
           # gives the library and no `pyhanko` entry point.
           /tmp/pyhanko-venv/bin/pip install --quiet pyhanko pyhanko-cli
 
+      # Reseals every artifact in tests/Fixtures/validation and checks each against the
+      # outcome tests/Fixtures/validation/manifest.tsv requires. That includes the seal-key
+      # rotation rows (issue #29): an artifact sealed under the retired key must be judged
+      # VALID against the retired key's trust anchor and INVALID against the anchor of the
+      # key that replaced it, and the artifact sealed under the new key must do the reverse.
       - name: Reseal the artifacts and validate them
         env:
           PYHANKO_VENV: /tmp/pyhanko-venv
