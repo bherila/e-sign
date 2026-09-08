@@ -26,6 +26,7 @@ use App\Domain\Identity\Credentials\IssuedServiceCredential;
 use App\Domain\Preparation\Contracts\PdfAssembler;
 use App\Domain\Preparation\Documents\DocumentBlobStore;
 use App\Domain\Preparation\Templates\Models\TemplateVersion;
+use App\Domain\Signing\Contracts\AnchorResolution;
 use App\Domain\Signing\Contracts\AssurancePolicyCheck;
 use App\Domain\Signing\Contracts\EnvelopeEventSink;
 use App\Domain\Signing\Envelopes\EnvelopeStateMachine;
@@ -483,7 +484,7 @@ final class SyntheticConsumer
         return new EnvelopeFinalizer(
             stateMachine: $sink === null
                 ? app(EnvelopeStateMachine::class)
-                : new EnvelopeStateMachine($sink, app(AssurancePolicyCheck::class)),
+                : new EnvelopeStateMachine($sink, app(AssurancePolicyCheck::class), app(AnchorResolution::class)),
             sealer: app(PdfSealer::class),
             validator: app(ArtifactValidator::class),
             sealIdentity: app(SealIdentity::class),

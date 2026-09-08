@@ -14,6 +14,7 @@ use App\Domain\Delivery\Mail\Jobs\SendOutboundMail;
 use App\Domain\Delivery\Mail\MailKind;
 use App\Domain\Delivery\Mail\Models\OutboundMail;
 use App\Domain\Delivery\Webhooks\Jobs\DispatchOutboxEvent;
+use App\Domain\Signing\Contracts\AnchorResolution;
 use App\Domain\Signing\Envelopes\EnvelopeEvent;
 use App\Domain\Signing\Envelopes\EnvelopeStateMachine;
 use App\Domain\Signing\Models\Envelope;
@@ -172,6 +173,7 @@ class EnvelopeMailSchedulerTest extends TestCase
         return new EnvelopeStateMachine(
             $this->app->make(DeliveryEnvelopeEventSink::class),
             $this->scenario->assurance,
+            $this->app->make(AnchorResolution::class),
         );
     }
 }

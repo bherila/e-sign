@@ -7,14 +7,16 @@ namespace App\Providers;
 use App\Domain\Evidence\Contracts\PdfSealer;
 use App\Domain\Signing\Assurance\ConfiguredSealAssurancePolicyCheck;
 use App\Domain\Signing\Assurance\SealMaterialAssurancePolicyCheck;
+use App\Domain\Signing\Contracts\AnchorResolution;
 use App\Domain\Signing\Contracts\AssurancePolicyCheck;
 use App\Domain\Signing\Contracts\EnvelopeEventSink;
 use App\Domain\Signing\Envelopes\AuditEnvelopeEventSink;
+use App\Domain\Signing\Envelopes\EnvelopeAnchorResolution;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
 
 /**
- * Wires the Signing module's two ports.
+ * Wires the Signing module's three ports.
  *
  * Both defaults are deliberate rather than placeholders:
  *
@@ -32,6 +34,10 @@ use Illuminate\Support\ServiceProvider;
  *   expired certificate, a key that does not match it, and an unusable timestamp authority.
  *   There is deliberately no binding that declares an assurance level available without the
  *   material behind it (docs/HANDOFF.md section 9).
+ * - {@see EnvelopeAnchorResolution} turns the envelope's anchors into stored rectangles at
+ *   send, by handing its document revision to `Preparation\Anchoring`. There is no null
+ *   binding here either, and for the same shape of reason: an envelope sent without resolving
+ *   its anchors has fields nobody agreed to the position of.
  *
  * Both are bound, not singletons: the sink and the check are cheap, and a test that swaps
  * one mid-request should not have to fight a resolved instance.
@@ -41,6 +47,8 @@ final class SigningServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->bind(EnvelopeEventSink::class, AuditEnvelopeEventSink::class);
+
+        $this->app->bind(AnchorResolution::class, EnvelopeAnchorResolution::class);
 
         $this->app->bind(
             AssurancePolicyCheck::class,

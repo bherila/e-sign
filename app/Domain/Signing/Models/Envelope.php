@@ -39,8 +39,18 @@ use RuntimeException;
  *
  * The guard is a model event rather than a database trigger, for the portability reason
  * `document_revisions` and `esign_audit_events` give. The state machine writes through the
- * query builder and so bypasses it — deliberately, since it never touches these columns and
- * a compare-and-swap must be one statement.
+ * query builder and so bypasses it — deliberately, because a compare-and-swap must be one
+ * statement.
+ *
+ * There is exactly one thing the state machine writes through that door, and it is worth
+ * naming: {@see EnvelopeStateMachine::send()} stores the anchor-resolved `field_schema` and
+ * its digest in the same statement as the transition to `sent`. That is not an edit of the
+ * snapshot, it is its completion. An anchored field arrives carrying a question — "put this
+ * box next to the words `Signature:`" — and resolution is where that question becomes a
+ * coordinate; it happens before anybody is invited, so nothing has been shown for assent yet
+ * and there is nothing an acceptance could already bind to. Afterwards the rule holds without
+ * an exception: nothing re-resolves, and a rectangle a signer saw can never move
+ * (docs/preparation/anchors.md).
  *
  * @property int $id
  * @property string $public_id
@@ -51,6 +61,7 @@ use RuntimeException;
  * @property string $document_sha256
  * @property array<string, mixed> $field_schema
  * @property string $field_schema_sha256
+ * @property list<array<string, mixed>>|null $omitted_anchor_fields
  * @property array<string, mixed> $render_settings
  * @property string $consent_policy_version
  * @property bool|null $require_otp
@@ -102,6 +113,7 @@ class Envelope extends Model
         'document_sha256',
         'field_schema',
         'field_schema_sha256',
+        'omitted_anchor_fields',
         'render_settings',
         'consent_policy_version',
         'source_template_version_id',
@@ -115,6 +127,7 @@ class Envelope extends Model
         'document_sha256',
         'field_schema',
         'field_schema_sha256',
+        'omitted_anchor_fields',
         'render_settings',
         'consent_policy_version',
         // Nullable, and null means "inherit the workspace, then the deployment default"
@@ -131,13 +144,22 @@ class Envelope extends Model
         'created_by',
     ];
 
-    /** Decoded once per instance; the copied schema cannot change under it. */
+    /**
+     * Decoded once per instance, and dropped whenever the row underneath is replaced.
+     *
+     * The cache is safe because the copied schema is immutable for the whole life a signer can
+     * see. It has to be invalidated all the same: `send()` writes the anchor-resolved schema
+     * through the query builder and then refreshes, and a stale decode would hand the rest of
+     * that transition the pre-resolution field set. `setRawAttributes()` is the one door every
+     * refresh and every `syncBack()` goes through, so clearing it there covers both.
+     */
     private ?FieldSchemaDocument $decodedSchema = null;
 
     protected function casts(): array
     {
         return [
             'field_schema' => 'array',
+            'omitted_anchor_fields' => 'array',
             'render_settings' => 'array',
             'assurance_level' => AssuranceLevel::class,
             'signing_mode' => SigningMode::class,
@@ -177,6 +199,16 @@ class Envelope extends Model
                 }
             }
         });
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    public function setRawAttributes(array $attributes, $sync = false): static
+    {
+        $this->decodedSchema = null;
+
+        return parent::setRawAttributes($attributes, $sync);
     }
 
     public function getRouteKeyName(): string
@@ -230,6 +262,30 @@ class Envelope extends Model
     public function fieldSchema(): FieldSchemaDocument
     {
         return $this->decodedSchema ??= FieldSchemaDocument::fromArray($this->field_schema);
+    }
+
+    /**
+     * Fields declared in the source but left out because an optional anchor was not in the
+     * document.
+     *
+     * Empty for almost every envelope. When it is not, each entry names the field, its
+     * recipient, the anchor text that was looked for, and the reason — see
+     * `App\Domain\Preparation\Anchoring\AnchorOmission`. This is what makes the compatibility
+     * option observable rather than merely permitted: a reader can tell a field that was
+     * intentionally omitted from one that went missing.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function omittedAnchorFields(): array
+    {
+        $omitted = $this->omitted_anchor_fields;
+
+        return is_array($omitted) ? array_values($omitted) : [];
+    }
+
+    public function hasOmittedAnchorFields(): bool
+    {
+        return $this->omittedAnchorFields() !== [];
     }
 
     /** True once the first acceptance (or send, in parallel mode) froze the content. */

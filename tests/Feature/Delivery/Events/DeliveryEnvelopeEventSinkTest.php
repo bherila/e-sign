@@ -15,6 +15,7 @@ use App\Domain\Delivery\Webhooks\Models\OutboxEvent;
 use App\Domain\Delivery\Webhooks\WebhookEventName;
 use App\Domain\Identity\Enums\WorkspaceRole;
 use App\Domain\Identity\Models\WorkspaceMembership;
+use App\Domain\Signing\Contracts\AnchorResolution;
 use App\Domain\Signing\Envelopes\EnvelopeFactory;
 use App\Domain\Signing\Envelopes\EnvelopeStateMachine;
 use App\Domain\Signing\Models\Envelope;
@@ -351,6 +352,7 @@ class DeliveryEnvelopeEventSinkTest extends TestCase
         return new EnvelopeStateMachine(
             $this->app->make(DeliveryEnvelopeEventSink::class),
             $this->scenario->assurance,
+            $this->app->make(AnchorResolution::class),
         );
     }
 

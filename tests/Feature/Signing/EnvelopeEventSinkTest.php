@@ -9,6 +9,7 @@ use App\Domain\Delivery\Events\DeliveryEnvelopeEventSink;
 use App\Domain\Delivery\Webhooks\WebhookEventName;
 use App\Domain\Evidence\Finalization\FinalizationTrigger;
 use App\Domain\Identity\Audit\AuditEvent;
+use App\Domain\Signing\Contracts\AnchorResolution;
 use App\Domain\Signing\Contracts\EnvelopeEventSink;
 use App\Domain\Signing\Envelopes\AuditEnvelopeEventSink;
 use App\Domain\Signing\Envelopes\EnvelopeEvent;
@@ -120,7 +121,7 @@ class EnvelopeEventSinkTest extends TestCase
     {
         $scenario = SigningScenario::create();
         $envelope = $scenario->preparedDraft(['field_schema' => SigningFixtures::singleSigner()]);
-        $machine = new EnvelopeStateMachine(app(EnvelopeEventSink::class), $scenario->assurance);
+        $machine = new EnvelopeStateMachine(app(EnvelopeEventSink::class), $scenario->assurance, app(AnchorResolution::class));
 
         AuditEvent::query()->delete();
 
@@ -149,7 +150,7 @@ class EnvelopeEventSinkTest extends TestCase
         // The audit sink on its own. The container's default composes it with the webhook
         // outbox, which schedules mail and belongs to the Delivery suite; this test is about
         // what one row in the audit store says.
-        $machine = new EnvelopeStateMachine(app(AuditEnvelopeEventSink::class), $scenario->assurance);
+        $machine = new EnvelopeStateMachine(app(AuditEnvelopeEventSink::class), $scenario->assurance, app(AnchorResolution::class));
 
         $machine->send($envelope);
 
@@ -165,7 +166,7 @@ class EnvelopeEventSinkTest extends TestCase
     public function test_the_null_sink_records_nothing_and_is_never_the_default(): void
     {
         $scenario = SigningScenario::create();
-        $machine = new EnvelopeStateMachine(new NullEnvelopeEventSink, FakeAssurancePolicyCheck::available());
+        $machine = new EnvelopeStateMachine(new NullEnvelopeEventSink, FakeAssurancePolicyCheck::available(), app(AnchorResolution::class));
         $envelope = $scenario->preparedDraft(['field_schema' => SigningFixtures::singleSigner()]);
 
         AuditEvent::query()->delete();
