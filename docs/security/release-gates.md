@@ -12,8 +12,8 @@ A gate that is upheld by careful code and no assertion is **not proven**, and is
 however good the code is — that distinction is the whole point of the document. Where a gate is
 partly proven, the table says which part.
 
-**State of the union.** Of fifteen gates: **seven proven** (1, 3, 4, 5, 6, 7, 10), **six partly
-proven** (8, 9, 11, 12, 14, 15), **two not yet proven** (2 PAdES profile, 13 migration).
+**State of the union.** Of fifteen gates: **nine proven** (1, 3, 4, 5, 6, 7, 8, 10, 12), **four
+partly proven** (9, 11, 14, 15), **two not yet proven** (2 PAdES profile, 13 migration).
 Nothing here should be read as a claim that this product is ready for a first production use; `docs/HANDOFF.md`'s status line and `docs/assurance.md` say what it is.
 
 ---
@@ -25,7 +25,7 @@ gating the rest by touched path:
 
 | Job | Runs when | What it does |
 |---|---|---|
-| `test` | frontend or backend changed | PHP 8.4 **and** 8.5. Frontend: `tsc --noEmit`, `eslint`, `jest`. Backend: `pint --parallel --test`, then `composer test` (`artisan test --parallel`, the `Unit` and `Feature` suites on in-memory SQLite). |
+| `test` | frontend or backend changed | PHP 8.4 **and** 8.5. Frontend: `tsc --noEmit`, `eslint`, `jest`. Backend: `pint --parallel --test`, then `composer test` (`artisan test --parallel`, the `Unit`, `Feature` and `EndToEnd` suites on in-memory SQLite). |
 | `database` | backend changed | `php artisan migrate --force` and the feature suite against disposable **MySQL 8.4**, **MariaDB 11.4**, and **MariaDB 10.6** service containers, PHP 8.5. |
 | `licenses` | dependency manifests changed | Production-only installs, `composer licenses` + `pnpm licenses`, checked against an allowlist; builds and uploads an SBOM. Not a vulnerability check. |
 | `image` | backend, frontend, or docker changed | Builds the production image and smoke-tests the **web** role (`/up`, then `esign-healthcheck`) and **role dispatch** (`artisan`, `worker --stop-when-empty`), with `APP_ENV=production APP_DEBUG=false`. |
@@ -138,6 +138,13 @@ mid-run, B-T failing closed, a wrong-state attempt recording nothing, and — wi
 log — that `markCompleted` runs **after** the digest read-back. It also greps `app/` for the word
 `etag` and fails if it appears.
 
+`tests/EndToEnd/WorkerInterruptionTest.php` adds the consequence a receiver sees: after a worker
+is killed inside the publishing transaction and the run is retried, there is exactly **one**
+logical `signing_request.completed` and the consumer processed it exactly once. Two would be
+worse than none — a receiver that files an executed agreement twice has two of them, and
+deduplicating on the event id cannot help when the ids differ because they really are two
+events.
+
 **One hole is recorded rather than closed:** `publish()` does not re-check that its uploaded
 objects still exist ([`review-2026-09.md`](review-2026-09.md) B-2). The window is now bounded by
 a one-hour floor on the staging pruner's `--older-than`, which is a mitigation and not the fix.
@@ -158,10 +165,20 @@ outbox writes; `WebhookSignerTest` and `RetryScheduleTest` cover the primitives;
 `tests/Unit/Delivery/DestinationPolicyTest.php` is the SSRF matrix, extended in this branch with
 IPv4-translated, multicast, and non-ASCII-host cases.
 
-Replay protection *inside* the receiver's window is explicitly the receiver's, and
-`docs/delivery/webhooks.md` says so.
+`tests/EndToEnd/WebhookReliabilityTest.php` re-runs the same failure modes against a **real
+receiver** on a route registered inside the test, which verifies the signature itself with an
+independent HMAC implementation and keeps its own inbox: a 500 then success, a lost response, a
+request that never arrives, three events handed over newest-first, a replay, a rotation overlap
+in both directions, and a body that cannot be verified answered 400 rather than 500. The
+difference from `DeliverWebhookTest` is that "the retry carries a fresh timestamp" is now
+asserted by something that would reject the request if it did not.
 
-### 8. Isolation — **partly proven**
+Replay protection *inside* the receiver's window is explicitly the receiver's, and
+`docs/delivery/webhooks.md` says so. Every idempotence assertion in the end-to-end suite is
+therefore an assertion about the synthetic consumer's own inbox, not a claim that the sender
+deduplicates.
+
+### 8. Isolation — **proven**
 
 > Cross-workspace access through IDs, aliases, JSON, downloads, queues, service keys, editor
 > routes, and webhook replay is denied.
@@ -173,8 +190,9 @@ Replay protection *inside* the receiver's window is explicitly the receiver's, a
 | Scope matrix over the whole `/api/v1` route surface, each route with a credential holding every *other* scope | `tests/Feature/Integration/Native/NativeApiAuthTest.php` |
 | Documents, templates, and editor routes | `DocumentHttpTest`, `TemplateHttpTest`, `FieldEditorPageTest` — each asserts another workspace's resource is a 404 |
 | Guest sessions scoped to one envelope | `tests/Feature/Signing/GuestSigningSessionScopeTest.php` |
-| **The Firma compatibility facade** | **not proven — not merged.** Issue [#33](https://github.com/bherila/e-sign/issues/33) |
-| **Artifact downloads** | **not proven** — the route returns `501` because `ArtifactLocator` is bound to `NoArtifactsYetLocator`. Issue [#30](https://github.com/bherila/e-sign/issues/30); see [`review-2026-09.md`](review-2026-09.md) E-3 |
+| The Firma compatibility facade: another workspace's id on every endpoint, the profile scope alone granting no reads, a read-only credential refused a cancel, the template scope enforced on both create routes | `tests/Feature/Integration/Firma/FirmaAuthTest.php` (12 cases) — merged as [#33](https://github.com/bherila/e-sign/issues/33) |
+| Artifact downloads: another tenant's artifact id is a 404, and an unpublished artifact is invisible and unfetchable | `tests/Feature/Integration/Native/NativeApiFinalizedArtifactTest.php`; `ArtifactLocator` is bound to `FinalizedArtifactLocator` |
+| A facade download link is a signed capability naming one document of one signing request, and no disk name or object path appears in it | `tests/Feature/Integration/Firma/FirmaDownloadTest.php`, `tests/EndToEnd/StoragePortabilityTest.php` |
 
 `NativeApiAuthTest::scopedRoutes()` is a hand-maintained list. `OpenApiContractTest` guards
 route↔document drift bidirectionally, but nothing guards route↔scope-matrix drift, so a new route
@@ -229,10 +247,11 @@ identifier ([`review-2026-09.md`](review-2026-09.md) G-3).
 | No remote signing service in the path | proven by construction — sealing is in-process; the only outbound calls are the TSA and webhooks, both through `DestinationPolicy` |
 | Docker image builds; web role answers `/up` and `esign-healthcheck`; role dispatch works | proven — the `image` job |
 | cPanel runtime diagnostics | proven — `DoctorCommandTest`, `PhpRuntimeProbeTest`, `WebPhpVersionProbeTest`, `ResourceLimitsProbeTest`, `WritablePathsProbeTest` |
-| **An end-to-end smoke test on either profile** — authenticate, upload, prepare, invite, sign, seal, download, validate, deliver a verified webhook, recover after a worker interruption | **not proven.** The `image` job checks that the container starts and answers a health probe; `docs/HANDOFF.md` section 13 is explicit that *"a deployment is not 'working' merely because its home page loads"*. Issue [#38](https://github.com/bherila/e-sign/issues/38) for Docker; the cPanel path has `scripts/build-release.sh` and a runbook but no automated smoke test. |
+| The functional flow such a smoke test would run — authenticate with a service credential, prepare, invite, sign, seal, download, validate, deliver a **verified** webhook, and recover after a worker interruption — end to end, on both PHP versions and all three database engines | proven, new in this branch — `tests/EndToEnd/` (25 cases), which runs inside the `test` and `database` jobs |
+| **That same flow on a deployment profile** | **not proven.** The `image` job checks that the container starts and answers a health probe; `docs/HANDOFF.md` section 13 is explicit that *"a deployment is not 'working' merely because its home page loads"*, and a suite inside the test process is not a deployment. Issue [#38](https://github.com/bherila/e-sign/issues/38) for Docker; the cPanel path has `scripts/build-release.sh` and a runbook but no automated smoke test. |
 | **A host without pcntl / process-spawning** | **not proven** — claimed support, no CI entry |
 
-### 12. Independence — **partly proven**
+### 12. Independence — **proven**
 
 > Block Firma/DocuSign hosts: new workflows still complete. Use local SMTP/storage configuration
 > to prove Brevo/Garage are swappable. No CDN/analytics is required.
@@ -243,8 +262,17 @@ identifier ([`review-2026-09.md`](review-2026-09.md) G-3).
 | No third-party origin **anywhere** | proven, new in this branch — `SecurityHeadersTest::test_the_emitted_policy_is_the_configured_one_and_admits_no_third_party_origin` asserts the emitted policy contains no `https://` at all |
 | PDF.js served locally | proven — bundled worker and copied runtime resources; the policy admits no CDN |
 | Storage is swappable | proven — the whole suite runs on the local driver via `Storage::fake`; `config/filesystems.php` selects s3 by configuration and no code branches on the driver |
+| The same publication runs on a **second, non-local adapter**, with identical digests and identical bytes read back through `get()` and `readStream()`, and the retained original byte-identical across both | proven, new in this branch — `tests/EndToEnd/StoragePortabilityTest.php` against `InMemoryObjectStore`, a flat key space with no directories |
 | Mail is swappable | proven — the suite runs on the array mailer; `ProductionMailerGuard` refuses a `log` mailer in production rather than counting it as delivery |
-| **A run with Firma/DocuSign hosts blocked at the network level** | **not proven** — no CI job blocks egress. Nothing in `app/` references either host, which is a weaker statement than the gate asks for. |
+| The invitation the array mailer produced carries a working signing link, and reaches `sent_to_provider` rather than `delivered` | proven, new in this branch — `tests/EndToEnd/IndependenceTest.php`, which then drives the guest flow from exactly that link |
+| **A run with Firma/DocuSign hosts blocked, in which new workflows still complete** | **proven, new in this branch** — `tests/EndToEnd/` runs entirely under `Http::preventStrayRequests()` with one fake matching the synthetic consumer's own endpoint. Firma hosts, DocuSign hosts, a CDN and an analytics beacon are each asserted to raise; a complete workflow then runs under the same fence and the only URL on the wire is the consumer's callback. |
+
+**Caveat, not a gap in this gate:** the fence is at the *process* level, not the network level. It
+cannot see a socket opened outside the HTTP client, which in this application is exactly one
+thing — `HttpTimestampAuthority`, which reaches the network through Guzzle directly. That is why
+the end-to-end suite binds a refusing timestamp authority rather than relying on the fence, and
+why B-T is not exercised there. A CI job with egress blocked at the network layer would be a
+strictly stronger statement and does not exist.
 
 ### 13. Migration — **not yet proven**
 
@@ -258,6 +286,7 @@ identifier ([`review-2026-09.md`](review-2026-09.md) G-3).
 | **Import of an executed Firma document, with the vendor hash retained separately from this application's own digest** | **not proven** — no import path exists |
 | **Reconciliation, and retaining all four artifact types for a migrated request** | **not proven** |
 | **Existing requests remaining on Firma** | **not proven** — a consumer-side property |
+| The four pilot workflows of `docs/HANDOFF.md` §15 — platform NDA, practice NDA, order form, data destruction — driven against the self-hosted provider by a synthetic consumer, including recipient-signature timing, countersigning, polling reconciliation, cancellation, download, and retention of all three published artifacts | proven, new in this branch — `tests/EndToEnd/` |
 
 **Owners:** [#42](https://github.com/bherila/e-sign/issues/42) and
 [#43](https://github.com/bherila/e-sign/issues/43) (consumer migration),
@@ -303,17 +332,16 @@ Ordered by what a first production use would most want closed.
 
 | Gap | Gate | Owner |
 |---|---|---|
-| No end-to-end smoke test on either deployment profile | 11 | [#38](https://github.com/bherila/e-sign/issues/38) |
+| No end-to-end smoke test on either deployment *profile* (the functional flow itself is now covered by `tests/EndToEnd/`) | 11 | [#38](https://github.com/bherila/e-sign/issues/38) |
 | DSS profile-conformance check not run | 2 | [#7](https://github.com/bherila/e-sign/issues/7) |
-| Published evidence has no HTTP route (`ArtifactLocator` unbound) | 8 | [#30](https://github.com/bherila/e-sign/issues/30) |
 | No aggregate decompression budget or xref-entry cap in preflight | 3 | new — [`review-2026-09.md`](review-2026-09.md) U-1, U-2 |
 | The hazard scan fails open past depth 32, and on a null-resolving xref entry | 3 | new — [`review-2026-09.md`](review-2026-09.md) U-3, U-4 |
 | **No `composer audit` / `pnpm audit` in CI, and no static analysis beyond formatting and `tsc`** | all | new — [`review-2026-09.md`](review-2026-09.md) X-13 |
+| Nothing in `app/` dispatches `FinalizeEnvelope`: an envelope that reaches `finalizing` waits for something to start the work, and in `tests/EndToEnd/` the harness plays that part | 6, 11 | new — found by [#36](https://github.com/bherila/e-sign/issues/36) |
 | `publish()` does not re-check object presence before committing | 6 | new — [`review-2026-09.md`](review-2026-09.md) B-2 |
 | `updateDraft()` races `send()` without a lock | 5 | [#33](https://github.com/bherila/e-sign/issues/33) |
 | No browser-driven accessibility or mobile check | 15 | new |
-| No egress-blocked independence run | 12 | new |
-| Facade isolation and compatibility unproven (not merged) | 8, 13 | [#33](https://github.com/bherila/e-sign/issues/33), [#36](https://github.com/bherila/e-sign/issues/36) |
+| Egress is blocked at the process level, not the network level | 12 | new — see the caveat under gate 12 |
 | Real browser SSO callback; entitlement re-check window | 9 | [#44](https://github.com/bherila/e-sign/issues/44) |
 | Restore drill and key rotation never exercised on a deployment | 14 | operations |
 | Counsel review of consent, authority, access/copy, retention | 15 | not a software gate |
@@ -326,4 +354,6 @@ Ordered by what a first production use would most want closed.
 - [`docs/security/review-2026-09.md`](review-2026-09.md) — the adversarial review behind the new
   entries above.
 - [`docs/HANDOFF.md`](../HANDOFF.md) section 14 — the gate table this document answers.
+- [`tests/EndToEnd/README.md`](../../tests/EndToEnd/README.md) — the synthetic-consumer suite: what it
+  proves, and the six things it explicitly does not.
 - [`TESTING.AGENTS.md`](../../TESTING.AGENTS.md) — the local validation contract.
