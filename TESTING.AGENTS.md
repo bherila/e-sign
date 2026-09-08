@@ -20,7 +20,7 @@ All four must pass. Fix type errors and lint violations before pushing — do no
 Run before committing PHP changes:
 
 ```bash
-./vendor/bin/pint --test
+./vendor/bin/pint --parallel --test
 composer test
 ```
 

@@ -53,7 +53,7 @@ migrations unless you mean to: `php artisan migrate --database=sqlite --no-inter
 Validation:
 
 ```bash
-./vendor/bin/pint --test && composer test
+./vendor/bin/pint --parallel --test && composer test
 pnpm run type-check && pnpm run lint && pnpm run test && pnpm run build
 ```
 

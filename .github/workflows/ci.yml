@@ -133,7 +133,7 @@ jobs:
         if: needs.changes.outputs.backend == 'true'
         timeout-minutes: 8
         run: |
-          ./vendor/bin/pint --test
+          ./vendor/bin/pint --parallel --test
           composer test
 
   image:

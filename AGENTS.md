@@ -77,7 +77,7 @@ pnpm run test
 pnpm run build
 
 # Backend checks
-./vendor/bin/pint --test
+./vendor/bin/pint --parallel --test
 composer test
 ```
 
