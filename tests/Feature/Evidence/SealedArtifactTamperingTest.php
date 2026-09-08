@@ -74,6 +74,30 @@ final class SealedArtifactTamperingTest extends TestCase
         $this->assertStringContainsString('truncated', implode(' ', $report->failures));
     }
 
+    /**
+     * The coverage rule, on a file a validator can actually open.
+     *
+     * truncate() takes the trailer with the tail, so an external validator
+     * refuses the file before it reaches the signature — a real refusal, but no
+     * evidence about the byte range. This case leaves the document intact and
+     * inflates the range instead, so the coverage check is the only thing that
+     * can reject it. pyHanko agrees: "The signature does not cover the entire
+     * file", judged INVALID.
+     */
+    public function test_a_byte_range_claiming_past_the_end_of_file_is_rejected(): void
+    {
+        $overclaimed = SealingFixtures::overclaimByteRange(self::$artifact->pdf);
+
+        $this->assertSame(strlen(self::$artifact->pdf), strlen($overclaimed));
+        $this->assertSame(1, substr_count($overclaimed, '%%EOF'), 'the document must still be intact');
+
+        $report = (new TcLibPdfArtifactValidator)->validate($overclaimed);
+
+        $this->assertFalse($report->isValid());
+        $this->assertFalse($report->coversWholeFile);
+        $this->assertStringContainsString('the file is truncated or the range is forged', implode(' ', $report->failures));
+    }
+
     public function test_an_unexpected_incremental_update_is_rejected(): void
     {
         $updated = SealingFixtures::appendIncrementalUpdate(self::$artifact->pdf);
