@@ -43,13 +43,30 @@ final class TsaProbe
      */
     public static function firstReachable(int $timeoutSeconds = 5): ?string
     {
+        return self::allReachable($timeoutSeconds)[0] ?? null;
+    }
+
+    /**
+     * Every candidate that accepts a TCP connection, in candidate order.
+     *
+     * A caller that needs a token rather than a socket tries them in turn: an
+     * authority that is answering can still refuse a particular request, for
+     * its own reasons and without saying which, and that is not the same event
+     * as having no egress at all.
+     *
+     * @return list<string>
+     */
+    public static function allReachable(int $timeoutSeconds = 5): array
+    {
+        $reachable = [];
+
         foreach (self::candidateUrls() as $url) {
             if (self::isReachable($url, $timeoutSeconds)) {
-                return $url;
+                $reachable[] = $url;
             }
         }
 
-        return null;
+        return $reachable;
     }
 
     /**
