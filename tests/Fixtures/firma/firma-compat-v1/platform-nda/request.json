@@ -1,0 +1,60 @@
+{
+  "id": "2f754c55-354a-5599-90d2-67f3007bbf69",
+  "name": "Synthetic platform-nda agreement",
+  "template_description": null,
+  "companies_workspaces_id": "2216ab4a-8a01-55ab-b390-def697e5d0fe",
+  "document_url": "https://files.example.test/document/9080d9b8-581c-5fa6-bfde-49cde6e71823?token=REDACTED",
+  "document_url_expires_at": "2026-09-08T08:48:02.260Z",
+  "document_page_count": 10,
+  "use_signing_order": 1,
+  "allow_download": 1,
+  "allow_editing_before_sending": 0,
+  "hand_drawn_only": 0,
+  "attach_pdf_on_finish": 1,
+  "settings": {
+    "allow_download": true,
+    "allow_presigning_download": null,
+    "allow_editing_before_sending": false,
+    "hand_drawn_only": false,
+    "attach_pdf_on_finish": true,
+    "use_signing_order": true,
+    "send_signing_email": true,
+    "send_finish_email": true,
+    "send_expiration_email": true,
+    "send_cancellation_email": true,
+    "require_otp_verification": null,
+    "disable_guided_navigation": null,
+    "identity_editable_fields": null,
+    "notify_identity_change_email": false
+  },
+  "expiration_hours": null,
+  "expires_at": null,
+  "credit_cost": 1,
+  "status": {
+    "sent": true,
+    "finished": false,
+    "cancelled": false,
+    "declined": false,
+    "expired": false
+  },
+  "timestamps": {
+    "created_on": "2026-06-26T15:25:50.595619+00:00",
+    "sent_on": "2026-06-26T15:25:55.617+00:00",
+    "finished_on": null,
+    "cancelled_on": null,
+    "declined_on": null,
+    "last_changed_on": "2026-09-07T13:00:40.573993+00:00",
+    "last_signing_action_on": null
+  },
+  "certificate": {
+    "generated": false,
+    "generated_on": null,
+    "has_error": false
+  },
+  "final_document_download_url": null,
+  "final_document_download_error": null,
+  "document_only_download_url": null,
+  "document_only_download_error": null,
+  "certificate_only_download_url": null,
+  "certificate_only_download_error": null
+}

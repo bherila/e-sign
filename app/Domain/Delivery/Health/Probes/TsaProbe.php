@@ -22,7 +22,7 @@ final class TsaProbe implements HealthProbe
 
     public function check(): ProbeResult
     {
-        $url = config('esign.tsa_url');
+        $url = config('esign.tsa.url');
 
         if (! is_string($url) || $url === '') {
             return ProbeResult::ok($this->name(), 'No TSA configured; PAdES B-B only.');

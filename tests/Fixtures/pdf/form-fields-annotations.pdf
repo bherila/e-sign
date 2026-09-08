@@ -1,0 +1,58 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding /FirstChar 32 /LastChar 126 /Widths [600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600] >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [4 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Annot /Subtype /Widget /FT /Tx /T (full_name) /Rect [72 300 300 324] /F 4 /P 4 0 R /DA (/Helv 0 Tf 0 g) /V () >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /CropBox [0 0 612 792] /Rotate 0 /Resources << /Font << /F1 1 0 R >> >> /Contents 7 0 R /Annots [3 0 R 5 0 R 6 0 R] >>
+endobj
+5 0 obj
+<< /Type /Annot /Subtype /Link /Rect [72 250 200 270] /Border [0 0 0] /A << /S /URI /URI (https://example.test/synthetic) >> >>
+endobj
+6 0 obj
+<< /Type /Annot /Subtype /Square /Rect [400 250 500 300] /C [0 0 1] /F 4 >>
+endobj
+7 0 obj
+<<  /Length 172 >>
+stream
+q
+0 g
+72.0000 708.0000 24.0000 12.0000 re f
+Q
+BT
+/F1 12.0 Tf
+72.0000 700.0000 Td
+(Form fields and annotations.) Tj
+ET
+BT
+/F1 12.0 Tf
+72.0000 200.0000 Td
+(Signature:) Tj
+ET
+
+endstream
+endobj
+8 0 obj
+<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [3 0 R] /DA (/Helv 0 Tf 0 g) >> >>
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000015 00000 n 
+0000000528 00000 n 
+0000000585 00000 n 
+0000000723 00000 n 
+0000000910 00000 n 
+0000001053 00000 n 
+0000001144 00000 n 
+0000001368 00000 n 
+trailer <</Size 9 /Root 8 0 R /ID [<00112233445566778899AABBCCDDEEFF> <00112233445566778899AABBCCDDEEFF>]>>
+startxref
+1470
+%%EOF

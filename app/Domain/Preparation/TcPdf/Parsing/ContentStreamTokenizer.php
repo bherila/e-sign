@@ -1,0 +1,358 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Domain\Preparation\TcPdf\Parsing;
+
+/**
+ * Lexes a decoded PDF content stream into operators and their operands.
+ *
+ * This is a lexer over already-decompressed content, which is the only way to read
+ * positions correctly: a regular expression over compressed bytes cannot see the text
+ * matrix, and a regular expression over decompressed bytes still cannot tell a `(Tj)`
+ * inside a string from the operator that follows it.
+ *
+ * Operand shapes returned in `operands`:
+ *   ['num', float] ['str', string] ['hex', string] ['name', string]
+ *   ['array', array<int, operand>] ['dict', array<int, operand>] ['bool', bool] ['null', null]
+ */
+final class ContentStreamTokenizer
+{
+    private const WHITESPACE = " \t\r\n\f\0";
+
+    private const DELIMITERS = '()<>[]{}/%';
+
+    /** Bounded so a malformed stream cannot grow the operand list without limit. */
+    private const MAX_OPERANDS = 4096;
+
+    private int $offset = 0;
+
+    private int $length;
+
+    public function __construct(private readonly string $data)
+    {
+        $this->length = strlen($data);
+    }
+
+    /**
+     * @return \Generator<int, ContentStreamOperation>
+     */
+    public function operations(): \Generator
+    {
+        $operands = [];
+        while (($token = $this->nextToken()) !== null) {
+            if ($token[0] === 'operator') {
+                /** @var string $name */
+                $name = $token[1];
+                yield new ContentStreamOperation($name, $operands);
+                $operands = [];
+
+                if ($name === 'BI') {
+                    $this->skipInlineImage();
+                }
+
+                continue;
+            }
+
+            // A pathological stream of operands with no operator must not grow forever.
+            if (count($operands) < self::MAX_OPERANDS) {
+                $operands[] = $token;
+            }
+        }
+    }
+
+    /** @return array{string, mixed}|null */
+    private function nextToken(): ?array
+    {
+        $this->skipWhitespaceAndComments();
+        if ($this->offset >= $this->length) {
+            return null;
+        }
+
+        $char = $this->data[$this->offset];
+
+        return match (true) {
+            $char === '(' => ['str', $this->readLiteralString()],
+            $char === '<' && ($this->data[$this->offset + 1] ?? '') === '<' => $this->readDictionary(),
+            $char === '<' => ['hex', $this->readHexString()],
+            $char === '/' => ['name', $this->readName()],
+            $char === '[' => $this->readArray(),
+            $char === ']' || $char === '>' || $char === '}' || $char === ')' => $this->skipOne(),
+            $char === '{' => $this->skipOne(),
+            default => $this->readKeywordOrNumber(),
+        };
+    }
+
+    /** @return array{string, mixed} */
+    private function skipOne(): array
+    {
+        $this->offset++;
+
+        return ['null', null];
+    }
+
+    private function skipWhitespaceAndComments(): void
+    {
+        while ($this->offset < $this->length) {
+            $char = $this->data[$this->offset];
+            if (str_contains(self::WHITESPACE, $char)) {
+                $this->offset++;
+
+                continue;
+            }
+
+            if ($char === '%') {
+                while ($this->offset < $this->length && $this->data[$this->offset] !== "\n" && $this->data[$this->offset] !== "\r") {
+                    $this->offset++;
+                }
+
+                continue;
+            }
+
+            return;
+        }
+    }
+
+    private function readName(): string
+    {
+        $this->offset++;
+        $start = $this->offset;
+        while ($this->offset < $this->length) {
+            $char = $this->data[$this->offset];
+            if (str_contains(self::WHITESPACE, $char) || str_contains(self::DELIMITERS, $char)) {
+                break;
+            }
+            $this->offset++;
+        }
+
+        $raw = substr($this->data, $start, $this->offset - $start);
+
+        return str_contains($raw, '#')
+            ? (string) preg_replace_callback(
+                '/#([0-9A-Fa-f]{2})/',
+                static fn (array $m): string => chr((int) hexdec($m[1])),
+                $raw,
+            )
+            : $raw;
+    }
+
+    /** Returns the decoded bytes of a literal string, escapes applied. */
+    private function readLiteralString(): string
+    {
+        $this->offset++;
+        $depth = 1;
+        $out = '';
+        while ($this->offset < $this->length) {
+            $char = $this->data[$this->offset++];
+
+            if ($char === '\\') {
+                $out .= $this->readEscape();
+
+                continue;
+            }
+
+            if ($char === '(') {
+                $depth++;
+                $out .= $char;
+
+                continue;
+            }
+
+            if ($char === ')') {
+                if (--$depth === 0) {
+                    return $out;
+                }
+                $out .= $char;
+
+                continue;
+            }
+
+            $out .= $char;
+        }
+
+        return $out;
+    }
+
+    private function readEscape(): string
+    {
+        if ($this->offset >= $this->length) {
+            return '';
+        }
+
+        $char = $this->data[$this->offset++];
+
+        return match ($char) {
+            'n' => "\n",
+            'r' => "\r",
+            't' => "\t",
+            'b' => "\x08",
+            'f' => "\x0C",
+            '(' => '(',
+            ')' => ')',
+            '\\' => '\\',
+            "\n" => '',
+            "\r" => $this->consumeIf("\n"),
+            default => $this->readOctalEscape($char),
+        };
+    }
+
+    private function consumeIf(string $expected): string
+    {
+        if (($this->data[$this->offset] ?? '') === $expected) {
+            $this->offset++;
+        }
+
+        return '';
+    }
+
+    private function readOctalEscape(string $first): string
+    {
+        if ($first < '0' || $first > '7') {
+            return $first;
+        }
+
+        $digits = $first;
+        while (strlen($digits) < 3) {
+            $next = $this->data[$this->offset] ?? '';
+            if ($next < '0' || $next > '7' || $next === '') {
+                break;
+            }
+            $digits .= $next;
+            $this->offset++;
+        }
+
+        return chr(octdec($digits) & 0xFF);
+    }
+
+    /** Returns the raw bytes decoded from a hexadecimal string. */
+    private function readHexString(): string
+    {
+        $this->offset++;
+        $hex = '';
+        while ($this->offset < $this->length) {
+            $char = $this->data[$this->offset++];
+            if ($char === '>') {
+                break;
+            }
+            if (ctype_xdigit($char)) {
+                $hex .= $char;
+            }
+        }
+
+        if (strlen($hex) % 2 === 1) {
+            $hex .= '0';
+        }
+
+        return (string) hex2bin($hex);
+    }
+
+    /** @return array{string, array<int, array{string, mixed}>} */
+    private function readArray(): array
+    {
+        $this->offset++;
+        $items = [];
+        while ($this->offset < $this->length) {
+            $this->skipWhitespaceAndComments();
+            if (($this->data[$this->offset] ?? '') === ']') {
+                $this->offset++;
+                break;
+            }
+
+            $token = $this->nextToken();
+            if ($token === null) {
+                break;
+            }
+
+            if (count($items) < 4096) {
+                $items[] = $token;
+            }
+        }
+
+        return ['array', $items];
+    }
+
+    /** @return array{string, array<int, array{string, mixed}>} */
+    private function readDictionary(): array
+    {
+        $this->offset += 2;
+        $items = [];
+        while ($this->offset < $this->length) {
+            $this->skipWhitespaceAndComments();
+            if (substr($this->data, $this->offset, 2) === '>>') {
+                $this->offset += 2;
+                break;
+            }
+
+            $token = $this->nextToken();
+            if ($token === null) {
+                break;
+            }
+
+            if (count($items) < 1024) {
+                $items[] = $token;
+            }
+        }
+
+        return ['dict', $items];
+    }
+
+    /** @return array{string, mixed} */
+    private function readKeywordOrNumber(): array
+    {
+        $start = $this->offset;
+        while ($this->offset < $this->length) {
+            $char = $this->data[$this->offset];
+            if (str_contains(self::WHITESPACE, $char) || str_contains(self::DELIMITERS, $char)) {
+                break;
+            }
+            $this->offset++;
+        }
+
+        if ($this->offset === $start) {
+            $this->offset++;
+
+            return ['null', null];
+        }
+
+        $word = substr($this->data, $start, $this->offset - $start);
+
+        if (is_numeric($word)) {
+            return ['num', (float) $word];
+        }
+
+        return match ($word) {
+            'true' => ['bool', true],
+            'false' => ['bool', false],
+            'null' => ['null', null],
+            default => ['operator', $word],
+        };
+    }
+
+    /**
+     * Inline images (BI ... ID <binary> EI) carry raw bytes that are not lexable, so the
+     * whole run is skipped rather than being tokenised as garbage operators.
+     */
+    private function skipInlineImage(): void
+    {
+        $idPos = strpos($this->data, 'ID', $this->offset);
+        if ($idPos === false) {
+            $this->offset = $this->length;
+
+            return;
+        }
+
+        $search = $idPos + 3;
+        while (($eiPos = strpos($this->data, 'EI', $search)) !== false) {
+            $before = $this->data[$eiPos - 1] ?? '';
+            $after = $this->data[$eiPos + 2] ?? ' ';
+            if (str_contains(self::WHITESPACE, $before) && (str_contains(self::WHITESPACE, $after) || str_contains(self::DELIMITERS, $after))) {
+                $this->offset = $eiPos + 2;
+
+                return;
+            }
+            $search = $eiPos + 2;
+        }
+
+        $this->offset = $this->length;
+    }
+}

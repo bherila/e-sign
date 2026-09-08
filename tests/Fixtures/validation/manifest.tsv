@@ -1,0 +1,14 @@
+# Artifacts for scripts/validate-seal.sh. Regenerate with
+#   ESIGN_WRITE_VALIDATION_FIXTURES=1 php artisan test --filter=ValidationFixturesTest
+# Columns: file<TAB>expectation<TAB>trust-mode<TAB>note
+#   expectation: valid | invalid  (pyHanko exit status 0 | non-zero)
+#   trust-mode:  fixture-only          --trust-replace --trust root.test.crt
+#                fixture-plus-system   --trust root.test.crt, OS trust kept
+sealed-b-b.pdf	valid	fixture-only	PAdES B-B, sealed by the fixture leaf under the fixture root.
+negative-modified-content.pdf	invalid	fixture-only	Page geometry changed inside the signed byte range, same file length.
+negative-truncated.pdf	invalid	fixture-only	Tail removed, so the /ByteRange over-claims the file.
+negative-incremental-update.pdf	invalid	fixture-only	An unexpected revision appended, redefining the page object.
+negative-forged-cms.pdf	invalid	fixture-only	The CMS of another sealed document spliced into /Contents.
+negative-untrusted-signer.pdf	invalid	fixture-only	Cryptographically sound but sealed with a key outside the trusted root.
+sealed-b-t.pdf	valid	fixture-plus-system	PAdES B-T. The TSA certificate chains to a publicly trusted root, so the timestamp is trusted as well as sound.
+sealed-b-t-untrusted-tsa.pdf	invalid	fixture-only	PAdES B-T with a cryptographically sound timestamp from an authority whose root is trusted nowhere: judged invalid on TSA trust alone.

@@ -1,0 +1,60 @@
+{
+  "id": "78028d9a-d795-5357-a4ff-ca35ad96c6ca",
+  "name": "Synthetic practice-nda agreement",
+  "template_description": null,
+  "companies_workspaces_id": "2216ab4a-8a01-55ab-b390-def697e5d0fe",
+  "document_url": "https://files.example.test/document/9080d9b8-581c-5fa6-bfde-49cde6e71823?token=REDACTED",
+  "document_url_expires_at": "2026-09-08T08:48:10.630Z",
+  "document_page_count": 10,
+  "use_signing_order": 1,
+  "allow_download": 1,
+  "allow_editing_before_sending": 1,
+  "hand_drawn_only": 0,
+  "attach_pdf_on_finish": 1,
+  "settings": {
+    "allow_download": true,
+    "allow_presigning_download": null,
+    "allow_editing_before_sending": true,
+    "hand_drawn_only": false,
+    "attach_pdf_on_finish": true,
+    "use_signing_order": true,
+    "send_signing_email": true,
+    "send_finish_email": true,
+    "send_expiration_email": true,
+    "send_cancellation_email": true,
+    "require_otp_verification": null,
+    "disable_guided_navigation": null,
+    "identity_editable_fields": null,
+    "notify_identity_change_email": false
+  },
+  "expiration_hours": null,
+  "expires_at": null,
+  "credit_cost": 1,
+  "status": {
+    "sent": true,
+    "finished": true,
+    "cancelled": false,
+    "declined": false,
+    "expired": false
+  },
+  "timestamps": {
+    "created_on": "2026-06-27T16:17:43.628176+00:00",
+    "sent_on": "2026-06-27T16:17:44.219+00:00",
+    "finished_on": "2026-06-27T16:21:41.061+00:00",
+    "cancelled_on": null,
+    "declined_on": null,
+    "last_changed_on": "2026-06-27T16:22:00.112128+00:00",
+    "last_signing_action_on": null
+  },
+  "certificate": {
+    "generated": true,
+    "generated_on": "2026-06-27T16:21:59.966+00:00",
+    "has_error": false
+  },
+  "final_document_download_url": "https://files.example.test/document/9080d9b8-581c-5fa6-bfde-49cde6e71823?token=REDACTED",
+  "final_document_download_error": null,
+  "document_only_download_url": "https://files.example.test/document/9080d9b8-581c-5fa6-bfde-49cde6e71823?token=REDACTED",
+  "document_only_download_error": null,
+  "certificate_only_download_url": "https://files.example.test/certificate/9080d9b8-581c-5fa6-bfde-49cde6e71823?token=REDACTED",
+  "certificate_only_download_error": null
+}
