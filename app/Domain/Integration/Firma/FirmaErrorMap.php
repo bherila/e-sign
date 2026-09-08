@@ -7,7 +7,6 @@ namespace App\Domain\Integration\Firma;
 use App\Domain\Evidence\Finalization\Exceptions\FinalizationException;
 use App\Domain\Integration\Native\ApiException;
 use App\Domain\Integration\Native\ErrorCode;
-use App\Domain\Preparation\Documents\DocumentStorageException;
 use App\Domain\Preparation\Geometry\InvalidGeometryException;
 use App\Domain\Preparation\Geometry\UndeclaredCoordinateConventionException;
 use App\Domain\Preparation\Schema\InvalidFieldSchemaException;
@@ -132,10 +131,14 @@ final class FirmaErrorMap
                 $exception->getMessage(),
             ),
 
-            $exception instanceof DocumentStorageException => FirmaException::of(
-                FirmaErrorCode::InvalidRequest,
-                $exception->getMessage(),
-            ),
+            // Deliberately **not** mapped: App\Domain\Preparation\Documents\
+            // DocumentStorageException. Its messages interpolate the disk name, the object
+            // path, and the driver's own error text, so putting one on the wire would leak a
+            // storage key from a public endpoint — and a storage outage answered as a client
+            // error would have the caller retry a body that was never wrong. It falls to the
+            // default arm: a fixed sentence, a 500, and a `report()`. The native
+            // App\Domain\Integration\Native\ApiErrorMap leaves it unmapped for the same
+            // reason.
 
             $exception instanceof ApiException => self::fromNative($exception),
 

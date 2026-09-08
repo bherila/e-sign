@@ -98,6 +98,59 @@ class FirmaLifecycleTest extends TestCase
         $this->assertSame($version->public_id, $envelope->source_template_version_id);
     }
 
+    /**
+     * The `template_id` in a create response is one the facade will accept back.
+     *
+     * The envelope records the template *version* it copied, which is the right thing to
+     * record. But a version id is not something a caller can hand back as `template_id`, so
+     * echoing it would give a consumer the one id in the response it would naturally store
+     * and then get a `404` for on its next create.
+     */
+    public function test_the_created_template_id_round_trips(): void
+    {
+        $scenario = FirmaFacadeScenario::create();
+        $issued = $scenario->credential();
+        $version = $scenario->publishedTemplate();
+
+        $body = [
+            'template_id' => $version->template->public_id,
+            'name' => 'Synthetic round trip',
+            'recipients' => [
+                ['order' => 1, 'first_name' => 'Dana', 'email' => 'dana@buyer.example.test'],
+                ['order' => 2, 'first_name' => 'Sam', 'email' => 'sam@seller.example.test'],
+            ],
+        ];
+
+        $first = $this->postJson(self::BASE, $body, FirmaFacadeScenario::headers($issued))->assertStatus(201);
+
+        $this->assertSame($version->template->public_id, $first->json('template_id'));
+
+        // The value the response gave is a value the next create accepts.
+        $this->postJson(
+            self::BASE,
+            array_replace($body, ['template_id' => $first->json('template_id')]),
+            FirmaFacadeScenario::headers($issued),
+        )->assertStatus(201);
+    }
+
+    /**
+     * A template *version* id resolves too, so anything already stored keeps working.
+     */
+    public function test_a_template_version_id_also_resolves(): void
+    {
+        $scenario = FirmaFacadeScenario::create();
+        $issued = $scenario->credential();
+        $version = $scenario->publishedTemplate();
+
+        $this->postJson(self::BASE, [
+            'template_id' => $version->public_id,
+            'name' => 'Synthetic from a version id',
+            'recipients' => [['order' => 1, 'first_name' => 'Dana', 'email' => 'dana@buyer.example.test']],
+        ], FirmaFacadeScenario::headers($issued))
+            ->assertStatus(201)
+            ->assertJsonPath('template_id', $version->template->public_id);
+    }
+
     public function test_an_unknown_template_id_is_not_found(): void
     {
         $scenario = FirmaFacadeScenario::create();

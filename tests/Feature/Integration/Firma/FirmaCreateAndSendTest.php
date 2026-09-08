@@ -5,13 +5,17 @@ declare(strict_types=1);
 namespace Tests\Feature\Integration\Firma;
 
 use App\Domain\Identity\Credentials\IssuedServiceCredential;
+use App\Domain\Preparation\Documents\DocumentBlobStore;
 use App\Domain\Preparation\Documents\Models\Document;
 use App\Domain\Signing\Envelopes\EnvelopeState;
 use App\Domain\Signing\Models\Envelope;
 use App\Domain\Signing\Sessions\Models\RecipientInvitation;
 use App\Domain\Signing\Sessions\OtpRequirement;
+use Illuminate\Filesystem\FilesystemManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
+use Mockery;
+use RuntimeException;
 use Tests\Support\FirmaFacadeScenario;
 use Tests\Support\PdfFixtures;
 use Tests\TestCase;
@@ -241,6 +245,91 @@ class FirmaCreateAndSendTest extends TestCase
         $this->assertEqualsWithDelta(582.4, $field->rect->y, 0.01);
         $this->assertEqualsWithDelta(170.0, $field->rect->width, 0.01);
         $this->assertEqualsWithDelta(36.0, $field->rect->height, 0.01);
+    }
+
+    /**
+     * An anchor offset cannot push a field off the page.
+     *
+     * The percent path is bounded by `x + width <= 100`, but an anchored rectangle is built
+     * from where the text turned out to be plus the caller's offset, so nothing before the
+     * resolution knows whether it fits — and nothing after it checks either: the native
+     * schema validator's page-fit rule needs `PageSizes`, which `FieldSchemaDocument` does
+     * not supply on this path. Without an explicit check a field lands past the edge, is
+     * drawn nowhere a signer can reach, and is then reported by `/fields` as a percentage
+     * over 100 — a value this same facade refuses on the way in.
+     */
+    public function test_an_anchor_offset_that_leaves_the_page_is_refused(): void
+    {
+        [, $issued] = $this->scenario();
+
+        $this->postJson(self::BASE.'/create-and-send', [
+            'name' => 'Synthetic anchored off the page',
+            'document' => base64_encode(PdfFixtures::bytes('single-page-letter')),
+            'recipients' => [['first_name' => 'Dana', 'email' => 'dana@buyer.example.test', 'order' => 1]],
+            'fields' => [[
+                'type' => 'signature',
+                'page_number' => 1,
+                'anchor' => ['text' => 'Signature:', 'offset_x' => 90.0],
+                'position' => ['x' => 0.0, 'y' => 0.0, 'width' => 27.0, 'height' => 4.5],
+            ]],
+        ], FirmaFacadeScenario::headers($issued))
+            ->assertStatus(400)
+            ->assertJsonPath('error', 'invalid_request')
+            ->assertJsonPath('details.page_number', 1);
+
+        $this->assertSame(0, Envelope::query()->count());
+    }
+
+    /** An offset outside the percent range is refused before the document is even read. */
+    public function test_an_anchor_offset_outside_the_percent_range_is_refused(): void
+    {
+        [, $issued] = $this->scenario();
+
+        $this->postJson(self::BASE.'/create-and-send', [
+            'name' => 'Synthetic anchored with a points offset',
+            'document' => base64_encode(PdfFixtures::bytes('single-page-letter')),
+            'recipients' => [['first_name' => 'Dana', 'email' => 'dana@buyer.example.test', 'order' => 1]],
+            'fields' => [[
+                'type' => 'signature',
+                'page_number' => 1,
+                // Reads as points, which is what a caller who skipped the docs would send.
+                'anchor' => ['text' => 'Signature:', 'offset_y' => 900],
+                'position' => ['x' => 0.0, 'y' => 0.0, 'width' => 27.0, 'height' => 4.5],
+            ]],
+        ], FirmaFacadeScenario::headers($issued))
+            ->assertStatus(400)
+            ->assertJsonPath('error', 'invalid_request')
+            ->assertJsonPath('details.property', 'anchor.offset_y');
+    }
+
+    /**
+     * A non-numeric offset is refused, not cast to zero.
+     *
+     * `(float) "not-a-number"` is `0.0`, which would place the field at the bare anchor
+     * origin and report success — the same silent reinterpretation the percent path already
+     * refuses for `position.x`. There is no reason for the two coordinate inputs to fail
+     * differently.
+     */
+    public function test_a_non_numeric_anchor_offset_is_refused_rather_than_coerced(): void
+    {
+        [, $issued] = $this->scenario();
+
+        $this->postJson(self::BASE.'/create-and-send', [
+            'name' => 'Synthetic anchored with a nonsense offset',
+            'document' => base64_encode(PdfFixtures::bytes('single-page-letter')),
+            'recipients' => [['first_name' => 'Dana', 'email' => 'dana@buyer.example.test', 'order' => 1]],
+            'fields' => [[
+                'type' => 'signature',
+                'page_number' => 1,
+                'anchor' => ['text' => 'Signature:', 'offset_x' => 'not-a-number'],
+                'position' => ['x' => 0.0, 'y' => 0.0, 'width' => 27.0, 'height' => 4.5],
+            ]],
+        ], FirmaFacadeScenario::headers($issued))
+            ->assertStatus(400)
+            ->assertJsonPath('error', 'invalid_request')
+            ->assertJsonPath('details.property', 'anchor.offset_x');
+
+        $this->assertSame(0, Envelope::query()->count());
     }
 
     /**
@@ -575,6 +664,57 @@ class FirmaCreateAndSendTest extends TestCase
         // only evidence of what was uploaded — but no signing request exists.
         $this->assertSame(0, Envelope::query()->count());
         $this->assertSame(1, $this->ingestedCount());
+    }
+
+    /**
+     * A storage failure is a 500, is reported, and leaks nothing.
+     *
+     * `DocumentStorageException` messages interpolate the disk name, the object path, and the
+     * driver's own error text, so this is the one exception on the create path that must not
+     * reach a body. It is deliberately *not* in `FirmaErrorMap`: it falls to the default arm,
+     * which answers a fixed sentence and a `500`. A `400` would be worse than the leak on its
+     * own — it would have the caller retry a body that was never wrong — and a mapped
+     * exception would also be classified as an expected refusal and dropped from the error
+     * log, so a storage outage would vanish.
+     *
+     * Asserted with `app.debug` off, the way
+     * `Tests\Feature\Integration\Native\NativeApiErrorShapeTest` does: the debug arm adds
+     * the exception class and message on purpose for a failing local test, and production is
+     * the configuration the promise is about.
+     */
+    public function test_a_storage_failure_is_an_internal_error_that_leaks_nothing(): void
+    {
+        [, $issued] = $this->scenario();
+
+        config(['app.debug' => false]);
+
+        // A disk whose writes fail the way an S3-compatible store fails. Swapped at the
+        // filesystem manager, so the real DocumentBlobStore builds the real
+        // DocumentStorageException — path, disk name, driver text and all.
+        $filesystems = Mockery::mock(FilesystemManager::class);
+        $filesystems->shouldReceive('disk')->andThrow(
+            new RuntimeException('AccessDenied for bucket esign-prod-docs'),
+        );
+        $this->app->instance(DocumentBlobStore::class, new DocumentBlobStore($filesystems));
+
+        $response = $this->postJson(self::BASE.'/create-and-send', [
+            'name' => 'Synthetic agreement with a broken disk',
+            'document' => base64_encode(PdfFixtures::bytes('single-page-letter')),
+            'recipients' => [['first_name' => 'Dana', 'email' => 'dana@buyer.example.test', 'order' => 1]],
+            'fields' => [[
+                'type' => 'signature',
+                'page_number' => 1,
+                'position' => ['x' => 10.0, 'y' => 80.0, 'width' => 25.0, 'height' => 4.0],
+            ]],
+        ], FirmaFacadeScenario::headers($issued));
+
+        $response->assertStatus(500)->assertJsonPath('error', 'internal_error');
+
+        $body = (string) $response->getContent();
+        $this->assertStringNotContainsString('esign-prod-docs', $body);
+        $this->assertStringNotContainsString('AccessDenied', $body);
+        $this->assertStringNotContainsString('.pdf', $body);
+        $this->assertStringNotContainsString('DocumentStorageException', $body);
     }
 
     /** Not base64 at all. */

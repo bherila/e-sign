@@ -84,12 +84,17 @@ Two gates, and a caller passes both.
 | `compat:firma-v1` | **Admission to this surface.** Required on every route here. Grants no resource authority of its own. |
 | `envelopes:read` | `GET /signing-requests/{id}`, `/users`, `/fields`, `/download` |
 | `envelopes:write` | `POST /signing-requests`, `/create-and-send`, `PATCH`, `/send`, `/cancel` |
-| `templates:read` | additionally required by `/create-and-send` |
+| `templates:read` | additionally required by **any create that supplies `template_id`**, on either create route |
 
 **Nothing is implied.** A credential issued for `/api/v1` does not gain a second HTTP surface
 by accident, and a credential admitted here still needs `envelopes:read` to read an
 agreement. Missing `compat:firma-v1` is `403` with `details.required_scope`, as is a missing
 resource scope.
+
+`templates:read` is the one conditional scope, because both create routes accept either a
+`template_id` or an inline `document` — so whether a call reads a template is a property of
+the body, not of the endpoint. It is required whenever `template_id` is supplied, on either
+route, and a caller that only ever posts its own PDFs does not need it.
 
 ### Tenancy
 
@@ -132,6 +137,11 @@ The native id is tried first. `docs/HANDOFF.md` §6 keeps the two in separate fi
 what lets both work without either ever becoming the other. Add an alias with
 `POST /templates/{template}/aliases` on the workspace UI.
 
+The `template_id` a create response returns is the **template's** public id, so you can hand
+it straight back on the next create. A template *version* id also resolves, because an
+integration that read one from somewhere else should not get a `404` for naming something
+real — but nothing on this surface emits one.
+
 ---
 
 ## Errors
@@ -162,7 +172,7 @@ appears only when there is something structured to say. This is **not** the nati
 | `unprocessable_entity` | 422 | Not sendable, or a template with no published version (`details.problems`) |
 | `validation_failed` | 422 | `create-and-send` two-phase validation; see below |
 | `unsupported` | 501 | Declared upstream, not implemented here (`details.unsupported_option`) |
-| `internal_error` | 500 | Something unanticipated; the detail is in the server's log, not your body |
+| `internal_error` | 500 | Something unanticipated — including a storage failure. The detail is in the server's log, never in your body, and a `500` means retrying the same request later is the right move rather than changing it |
 
 `create-and-send` has its **own** envelope, because upstream's document does not use one
 (matrix disagreement D1):
@@ -268,9 +278,15 @@ Here there is one unit — the profile's own, percentages of the page.
 - `occurrence` is `"sole"` (the text appears exactly once) or a 1-based number. `"all"` is
   refused: one field cannot be in two places.
 - `origin` is `top_left` (default), `top_right`, `bottom_left`, or `bottom_right`.
-- `offset_x` / `offset_y` are percentages of the page, added to the chosen corner.
+- `offset_x` / `offset_y` are percentages of the page, added to the chosen corner, in the
+  range `-100..100` — an offset is a displacement, so nudging a field *above* its anchor text
+  is an ordinary thing to ask for. A non-numeric offset is a `400`, not a silent zero.
 - `position.width` and `position.height` are **still required**. An anchor says where a field
   goes and never how big it is.
+- **The resolved rectangle still has to fit the page.** Where an anchored field ends up
+  depends on where the text turned out to be, so it is checked after resolution: an offset
+  that pushes it past an edge is a `400` carrying the resolved rectangle and the page size. A
+  field a signer cannot reach is refused rather than stored.
 - An anchor that matches nothing, or matches ambiguously, is a `400`. A field placed at a
   fallback position is a field nobody agreed to sign there.
 

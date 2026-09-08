@@ -8,6 +8,7 @@ use App\Domain\Identity\Credentials\Scope;
 use App\Domain\Integration\Firma\FirmaProfile;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Support\FirmaFacadeScenario;
+use Tests\Support\PdfFixtures;
 use Tests\TestCase;
 
 /**
@@ -126,6 +127,58 @@ class FirmaAuthTest extends TestCase
         )
             ->assertStatus(403)
             ->assertJsonPath('details.required_scope', 'envelopes:write');
+    }
+
+    /**
+     * `templates:read` gates every create that uses a template, not just one route.
+     *
+     * Both create routes accept either a `template_id` or an inline `document`, so whether a
+     * call reads a template is a property of the body. Naming the scope on `create-and-send`
+     * alone left it bypassable: the same credential could build the same agreement from the
+     * same template through `POST /signing-requests` and then call `/send`.
+     */
+    public function test_building_from_a_template_requires_the_template_scope_on_both_routes(): void
+    {
+        $scenario = FirmaFacadeScenario::create();
+        $issued = $scenario->credential([Scope::CompatFirmaV1, Scope::EnvelopesRead, Scope::EnvelopesWrite]);
+        $version = $scenario->publishedTemplate();
+
+        $body = [
+            'template_id' => $version->template->public_id,
+            'name' => 'Synthetic template-based request',
+            'recipients' => [['order' => 1, 'first_name' => 'Dana', 'email' => 'dana@buyer.example.test']],
+        ];
+
+        foreach ([self::BASE.'/signing-requests', self::BASE.'/signing-requests/create-and-send'] as $url) {
+            $this->postJson($url, $body, FirmaFacadeScenario::headers($issued))
+                ->assertStatus(403)
+                ->assertJsonPath('error', 'forbidden')
+                ->assertJsonPath('details.required_scope', 'templates:read');
+        }
+    }
+
+    /**
+     * The same credential can still post its own PDF.
+     *
+     * Which is why the scope is enforced where the condition is known rather than named on
+     * both routes: a caller that only ever uploads documents should not have to hold a
+     * template scope it never uses.
+     */
+    public function test_a_document_only_create_does_not_need_the_template_scope(): void
+    {
+        $scenario = FirmaFacadeScenario::create();
+        $issued = $scenario->credential([Scope::CompatFirmaV1, Scope::EnvelopesRead, Scope::EnvelopesWrite]);
+
+        $this->postJson(self::BASE.'/signing-requests', [
+            'name' => 'Synthetic document-based request',
+            'document' => base64_encode(PdfFixtures::bytes('single-page-letter')),
+            'recipients' => [['order' => 1, 'first_name' => 'Dana', 'email' => 'dana@buyer.example.test']],
+            'fields' => [[
+                'type' => 'signature',
+                'page_number' => 1,
+                'position' => ['x' => 10.0, 'y' => 80.0, 'width' => 25.0, 'height' => 4.0],
+            ]],
+        ], FirmaFacadeScenario::headers($issued))->assertStatus(201);
     }
 
     /**

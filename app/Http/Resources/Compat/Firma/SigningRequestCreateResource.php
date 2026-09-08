@@ -9,6 +9,7 @@ use App\Domain\Integration\Firma\FirmaProfile;
 use App\Domain\Integration\Firma\SigningRequestDownloads;
 use App\Domain\Integration\Firma\SigningRequestFields;
 use App\Domain\Integration\Firma\SigningRequestSettings;
+use App\Domain\Preparation\Templates\Models\TemplateVersion;
 use App\Domain\Signing\Envelopes\EnvelopeState;
 use App\Domain\Signing\Models\Envelope;
 use App\Domain\Signing\Models\EnvelopeRecipient;
@@ -63,7 +64,7 @@ class SigningRequestCreateResource extends JsonResource
             'id' => $envelope->public_id,
             'name' => $envelope->title,
             'status' => $envelope->state === EnvelopeState::Draft ? 'draft' : $envelope->state->value,
-            'template_id' => $envelope->source_template_version_id,
+            'template_id' => self::templateId($envelope),
             'document_url' => $this->downloads->documentUrl($envelope, $expiresAt),
             'page_count' => $envelope->documentRevision?->page_count,
             'expiration_hours' => $envelope->expiration_hours,
@@ -77,6 +78,28 @@ class SigningRequestCreateResource extends JsonResource
             'cancelled_date' => $envelope->cancelled_at?->toIso8601String(),
             'warnings' => [],
         ];
+    }
+
+    /**
+     * The id a caller can hand back as `template_id`.
+     *
+     * The envelope records the template **version** it copied, which is the right thing to
+     * record — an agreement is bound to one version of its text. But a version id is not
+     * something `SigningRequestLocator` resolves, so echoing it here would give a consumer a
+     * value it would naturally store and then get a `404` for on its next create. The
+     * template's own public id is what goes on the wire, and the locator additionally accepts
+     * a version id so anything already stored keeps working.
+     */
+    private static function templateId(Envelope $envelope): ?string
+    {
+        if ($envelope->source_template_version_id === null) {
+            return null;
+        }
+
+        return TemplateVersion::query()
+            ->where('public_id', $envelope->source_template_version_id)
+            ->with('template')
+            ->first()?->template?->public_id;
     }
 
     /**

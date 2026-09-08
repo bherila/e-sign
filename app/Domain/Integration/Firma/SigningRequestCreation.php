@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace App\Domain\Integration\Firma;
 
 use App\Domain\Identity\Audit\AuditActor;
+use App\Domain\Identity\Credentials\CurrentPrincipal;
+use App\Domain\Identity\Credentials\MissingScope;
+use App\Domain\Identity\Credentials\Scope;
 use App\Domain\Identity\Credentials\ServiceCredential;
 use App\Domain\Identity\Models\Workspace;
 use App\Domain\Integration\Native\EnvelopeService;
@@ -79,6 +82,7 @@ final readonly class SigningRequestCreation
         private FieldPlacement $placement,
         private PageGeometryReader $pages,
         private DocumentIntake $intake,
+        private CurrentPrincipal $principal,
     ) {}
 
     /**
@@ -119,6 +123,8 @@ final readonly class SigningRequestCreation
         array $body,
         string $templateId,
     ): Envelope {
+        $this->requireTemplateScope();
+
         $version = $this->locator->templateVersion($workspace, $templateId);
         $schema = $version->fieldSchemaDocument();
 
@@ -135,6 +141,37 @@ final readonly class SigningRequestCreation
             ),
             $credential,
         );
+    }
+
+    /**
+     * Reading a template is a distinct authority from creating an agreement.
+     *
+     * Enforced here rather than only on the route, because whether a create *uses* a template
+     * is a property of the body and not of the endpoint: both `POST /signing-requests` and
+     * `POST /signing-requests/create-and-send` accept either `template_id` or an inline
+     * `document`. Naming `templates:read` on one route and not the other left the gate
+     * bypassable — a credential without it could build the same agreement from the same
+     * template through the other route and then call `/send`. Naming it on both would have
+     * demanded a template scope of a caller that only ever posts its own PDFs.
+     *
+     * `routes/compat-firma.php` points at this method so the authority is still findable from
+     * the route definitions.
+     *
+     * @throws FirmaException
+     */
+    private function requireTemplateScope(): void
+    {
+        try {
+            $this->principal->requireScope(Scope::TemplatesRead);
+        } catch (MissingScope) {
+            throw FirmaException::of(
+                FirmaErrorCode::Forbidden,
+                "This API key is not granted '".Scope::TemplatesRead->value."', which building a signing "
+                .'request from a template requires. Supply `document` instead, or have the credential '
+                .'reissued with that scope.',
+                ['required_scope' => Scope::TemplatesRead->value],
+            );
+        }
     }
 
     /**

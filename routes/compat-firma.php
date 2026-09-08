@@ -97,15 +97,22 @@ Route::prefix(FirmaProfile::BASE_PATH)
             ->name('signing-requests.')
             ->group(function (): void {
 
+                /*
+                 * `templates:read` is **not** named here, and that is deliberate. Both create
+                 * routes accept either a `template_id` or an inline `document`, so whether a
+                 * call reads a template is a property of the body rather than of the
+                 * endpoint. Naming the scope on one route and not the other would leave the
+                 * gate bypassable through the other; naming it on both would demand a
+                 * template scope of a caller that only ever posts its own PDFs. It is
+                 * therefore enforced where the condition is known, by
+                 * App\Domain\Integration\Firma\SigningRequestCreation::requireTemplateScope(),
+                 * and a request that supplies `template_id` without it is a 403 naming the
+                 * scope exactly as this middleware would.
+                 */
                 Route::middleware('require-scope:envelopes:write')->group(function (): void {
                     Route::post('/', [SigningRequestController::class, 'store'])->name('store');
 
-                    // Also `templates:read`: this route may be handed a `template_id`, and
-                    // reading a template is a distinct authority from creating an agreement.
-                    // Naming both here rather than deciding inside the controller keeps the
-                    // route's full authority visible in one place.
                     Route::post('/create-and-send', [SigningRequestController::class, 'createAndSend'])
-                        ->middleware('require-scope:templates:read')
                         ->name('create-and-send');
 
                     Route::patch('/{id}', [SigningRequestController::class, 'update'])->name('update');

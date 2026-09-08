@@ -87,6 +87,11 @@ final readonly class FinalizedArtifactLocator implements ArtifactLocator
             ->where('envelope_id', $envelope->getKey())
             ->whereNotNull('published_at')
             ->where('kind', $kind->value)
+            // `artifacts` has a unique index on (envelope_id, kind), so there is at most one
+            // row today. Ordered anyway: if a re-finalization ever relaxes that, three
+            // callers of this method picking different rows on different reads would be a
+            // very quiet bug, and the sibling `published()` orders for the same reason.
+            ->orderBy('id')
             ->first();
 
         return $artifact instanceof Artifact ? $artifact : null;

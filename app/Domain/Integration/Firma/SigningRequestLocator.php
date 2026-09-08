@@ -45,6 +45,12 @@ use App\Domain\Signing\Models\Envelope;
  * provider aliases to stay separate fields, which is what makes this possible without
  * either id ever becoming the other.
  *
+ * A template **version** public id is accepted as a third form. Nothing on this surface
+ * emits one — the create response echoes the template's id, precisely so that a round trip
+ * works — but an integration that read `envelopes.source_template_version_id` from anywhere
+ * else should not get a `404` for naming something real, and a version resolves to exactly
+ * one template.
+ *
  * A template that resolves but has no published version is a `422`, not a `404`: the caller
  * named something real and it is not ready, and telling them it does not exist would send
  * them looking for a typo.
@@ -106,11 +112,21 @@ final readonly class SigningRequestLocator
 
         $byAlias = $this->templateService->resolveAlias($workspace, $templateId);
 
-        if (! $byAlias instanceof Template) {
-            throw FirmaException::notFound('template');
+        if ($byAlias instanceof Template) {
+            return $byAlias->load(['versions' => static fn ($query) => $query->published()]);
         }
 
-        return $byAlias->load(['versions' => static fn ($query) => $query->published()]);
+        // Constrained by workspace before the id is compared, like every other lookup here.
+        $byVersion = TemplateVersion::query()
+            ->whereIn('template_id', Template::query()->inWorkspace($workspace)->select('id'))
+            ->where('public_id', $templateId)
+            ->first();
+
+        if ($byVersion instanceof TemplateVersion) {
+            return $this->templates->find($workspace, (string) $byVersion->template()->value('public_id'));
+        }
+
+        throw FirmaException::notFound('template');
     }
 
     /**

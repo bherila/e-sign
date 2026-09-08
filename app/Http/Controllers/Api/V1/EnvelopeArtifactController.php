@@ -124,9 +124,13 @@ class EnvelopeArtifactController extends ApiController
      * reader is not evidence of anything.
      *
      * The archive is written to a temporary file rather than held in memory — it is the one
-     * response whose size is the sum of every artifact plus the original upload — and the
-     * file is unlinked as soon as the last byte has been sent, in a `finally`, so a client
-     * that disconnects mid-transfer does not leave it behind.
+     * response whose size is the sum of every artifact plus the original upload — and it is
+     * removed on every path out, including the ones a `finally` does not cover. PHP terminates
+     * the script at the first write after the peer has gone, and that termination does not
+     * unwind the stack, so a client that disconnects mid-transfer would otherwise leave the
+     * file behind; the same is true if the response is built and never sent. A shutdown
+     * function is what actually holds, so the `finally` is the fast path and the shutdown
+     * function is the guarantee.
      */
     public function bundle(EnvelopeRequest $request): StreamedResponse
     {
@@ -147,6 +151,12 @@ class EnvelopeArtifactController extends ApiController
             Str::slug(Str::limit((string) $envelope->title, 80, '')) ?: 'agreement',
             $envelope->public_id,
         );
+
+        // Registered before the response is returned, so it holds even if the callback never
+        // runs or is cut short. Idempotent: whichever path gets there first wins.
+        register_shutdown_function(static function () use ($path): void {
+            @unlink($path);
+        });
 
         return new StreamedResponse(
             static function () use ($path): void {

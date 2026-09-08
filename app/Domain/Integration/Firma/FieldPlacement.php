@@ -478,8 +478,8 @@ final readonly class FieldPlacement
 
         // Offsets are percentages of the page, like every other number in this profile.
         // A second unit switch is how a signature lands in the wrong place.
-        $offsetPercentX = (float) ($anchor['offset_x'] ?? 0.0);
-        $offsetPercentY = (float) ($anchor['offset_y'] ?? 0.0);
+        $offsetPercentX = self::offset($anchor, 'offset_x', $index);
+        $offsetPercentY = self::offset($anchor, 'offset_y', $index);
 
         $resolved = $this->resolve($runs, new Anchor(
             text: $text,
@@ -492,7 +492,91 @@ final readonly class FieldPlacement
             origin: self::origin($anchor, $index),
         ), $index);
 
-        return $resolved->resolvedRect;
+        return self::assertOnPage($resolved->resolvedRect, $page, $index);
+    }
+
+    /**
+     * One anchor offset, in percent of the page.
+     *
+     * Read and checked rather than cast. `(float) "not-a-number"` is `0.0`, which would place
+     * the field at the bare anchor origin and report success — the same silent
+     * reinterpretation `assertPercentages()` refuses for `position.x`, and there is no reason
+     * for the two coordinate inputs to fail differently.
+     *
+     * The range is `-100..100` rather than `0..100`: an offset is a displacement, and nudging
+     * a field *above* the text it is anchored to is an ordinary thing to ask for. Where the
+     * field ends up is then checked against the page by {@see assertOnPage()}.
+     *
+     * @param  array<string, mixed>  $anchor
+     *
+     * @throws FirmaException
+     */
+    private static function offset(array $anchor, string $key, int $index): float
+    {
+        if (! array_key_exists($key, $anchor) || $anchor[$key] === null) {
+            return 0.0;
+        }
+
+        $value = $anchor[$key];
+
+        if (! is_int($value) && ! is_float($value)) {
+            throw FirmaException::of(
+                FirmaErrorCode::InvalidRequest,
+                'Field '.($index + 1).' has a non-numeric `anchor.'.$key.'`. An anchor offset is a '
+                .'percentage of the page and is never guessed from a value this service cannot read.',
+                ['field_index' => $index + 1, 'property' => 'anchor.'.$key],
+            );
+        }
+
+        if ($value < -100.0 || $value > 100.0) {
+            throw FirmaException::of(
+                FirmaErrorCode::InvalidRequest,
+                'Field '.($index + 1).' has `anchor.'.$key.'` = '.$value.'. An anchor offset is a '
+                .'percentage of the page and must be between -100 and 100.',
+                ['field_index' => $index + 1, 'property' => 'anchor.'.$key, 'value' => (float) $value],
+            );
+        }
+
+        return (float) $value;
+    }
+
+    /**
+     * An anchored field still has to land on the page.
+     *
+     * The percent path is bounded by {@see assertPercentages()}, but an anchored rectangle is
+     * built from where the text turned out to be plus the caller's offset, so nothing upstream
+     * of here knows whether it fits. And nothing downstream checks either: the native schema
+     * validator's page-fit rule needs `PageSizes`, which
+     * `FieldSchemaDocument::fromArray()` does not supply, so a field placed past the edge
+     * would be stored, drawn nowhere a signer can reach, and then reported by `/fields` as a
+     * percentage over 100 — a value this same facade refuses on the way in.
+     *
+     * @throws FirmaException
+     */
+    private static function assertOnPage(NativeRect $rect, PageGeometry $page, int $index): NativeRect
+    {
+        $width = $page->nativeWidth();
+        $height = $page->nativeHeight();
+        $tolerance = 1.0e-6;
+
+        if ($rect->x < -$tolerance
+            || $rect->y < -$tolerance
+            || $rect->right() > $width + $tolerance
+            || $rect->bottom() > $height + $tolerance) {
+            throw FirmaException::of(
+                FirmaErrorCode::InvalidRequest,
+                'Field '.($index + 1).' is anchored to text on page '.$page->pageNumber.' but its offset '
+                .'puts it off the page. A field a signer cannot reach is refused rather than stored.',
+                [
+                    'field_index' => $index + 1,
+                    'page_number' => $page->pageNumber,
+                    'resolved_rect' => $rect->toArray(),
+                    'page_size' => [$width, $height],
+                ],
+            );
+        }
+
+        return $rect;
     }
 
     /**
