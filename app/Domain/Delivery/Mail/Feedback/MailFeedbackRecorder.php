@@ -41,6 +41,15 @@ final class MailFeedbackRecorder
 
     /**
      * @param  array<string, mixed>  $payload  The provider body; redacted here, not by the caller.
+     * @param  list<string|null>  $alternateMessageIds  Other spellings the same message may be
+     *                                                  known by, tried in order after
+     *                                                  `$messageId`. SES needs this: its
+     *                                                  `mail.messageId` and the RFC 5322
+     *                                                  `Message-ID` header are two different
+     *                                                  identifiers for one message, and which
+     *                                                  one this application stored depends on
+     *                                                  the transport. See
+     *                                                  SesFeedbackProcessor::messageIds().
      */
     public function record(
         MailEventSource $source,
@@ -49,14 +58,18 @@ final class MailFeedbackRecorder
         ?MailState $state,
         array $payload = [],
         ?Carbon $occurredAt = null,
+        array $alternateMessageIds = [],
     ): OutboundMailEvent {
         $normalized = MessageId::normalize($messageId);
         $redacted = $this->redactor->payload($payload);
         $occurredAt ??= Carbon::now();
 
-        $mail = $normalized === null
-            ? null
-            : OutboundMail::query()->forMessageId($normalized)->first();
+        $mail = $this->match($normalized, $alternateMessageIds);
+
+        // The stored identifier is the one that matched, so the event log says which
+        // spelling this deployment actually knows the message by. On an orphan it is the
+        // provider's primary id, which is the only thing there is to record.
+        $normalized = $mail?->message_id ?? $normalized;
 
         if ($mail === null) {
             return OutboundMailEvent::create([
@@ -84,5 +97,38 @@ final class MailFeedbackRecorder
             'state_after' => $mail->state->value,
             'state_changed' => $moved,
         ] + $redacted, $occurredAt);
+    }
+
+    /**
+     * The first candidate that names a row, or null.
+     *
+     * Ordered, not "best match": the caller decides which identifier it trusts most, and a
+     * later candidate is consulted only because the earlier ones found nothing. Each lookup
+     * is an indexed equality on `outbound_mails.message_id`, and the list is two or three
+     * entries long, so this is bounded work per webhook.
+     *
+     * @param  list<string|null>  $alternates
+     */
+    private function match(?string $primary, array $alternates): ?OutboundMail
+    {
+        $seen = [];
+
+        foreach ([$primary, ...$alternates] as $candidate) {
+            $normalized = is_string($candidate) ? MessageId::normalize($candidate) : $candidate;
+
+            if ($normalized === null || isset($seen[$normalized])) {
+                continue;
+            }
+
+            $seen[$normalized] = true;
+
+            $mail = OutboundMail::query()->forMessageId($normalized)->first();
+
+            if ($mail !== null) {
+                return $mail;
+            }
+        }
+
+        return null;
     }
 }
