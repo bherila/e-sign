@@ -1,0 +1,2766 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "BWH eSign native API",
+    "version": "1.0.0",
+    "summary": "Prepare, send, track, and retrieve signed PDF agreements.",
+    "description": "The native HTTP surface of BWH eSign. It and the Firma-compatible facade under `/functions/v1/signing-request-api` call the same domain services; signing rules live in the state machine and never in an HTTP controller.\n\n**Tenancy.** There is no workspace parameter anywhere in this API. The credential presented in `Authorization` belongs to exactly one workspace, and that is the tenant for every lookup. An id belonging to another workspace answers `404`, identical to an id that does not exist, so a caller cannot probe for the existence of another tenant's records.\n\n**Errors.** Every failure is `{\"error\": {\"code\", \"message\", \"details\"}}`. Switch on `code`; the message is for a human reading a log. Codes are stable and renaming one is a breaking change.\n\n**Honest language.** Humans provide electronic signatures and assent; the service seals the finished PDF under its own certificate. Nothing here is a per-signer certificate, and no assurance level beyond the PAdES baselines named in `assurance_level` is claimed.",
+    "license": {
+      "name": "MIT",
+      "identifier": "MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "/api/v1",
+      "description": "This deployment."
+    }
+  ],
+  "security": [
+    {
+      "serviceCredential": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Principal",
+      "description": "What the presented credential is."
+    },
+    {
+      "name": "Templates",
+      "description": "Published template versions an envelope can be built from."
+    },
+    {
+      "name": "Envelopes",
+      "description": "The agreement lifecycle: create, send, track, cancel."
+    },
+    {
+      "name": "Artifacts",
+      "description": "The finished, sealed PDF and its companions."
+    },
+    {
+      "name": "Events",
+      "description": "The pull half of the webhook feed."
+    },
+    {
+      "name": "Webhooks",
+      "description": "Endpoint administration."
+    },
+    {
+      "name": "Meta",
+      "description": "This document."
+    }
+  ],
+  "paths": {
+    "/openapi.json": {
+      "get": {
+        "tags": [
+          "Meta"
+        ],
+        "operationId": "getOpenApiDocument",
+        "summary": "This document.",
+        "description": "Unauthenticated: a client generator needs the contract before anyone has issued a credential, and the document names no workspace, no envelope, and no secret.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The OpenAPI 3.1 description of this API.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me": {
+      "get": {
+        "tags": [
+          "Principal"
+        ],
+        "operationId": "getPrincipal",
+        "summary": "The credential, its workspace, and its scopes.",
+        "description": "Requires authentication and no scope: every credential may ask what it is, and the answer contains nothing the caller did not already hold. This is how an integration confirms which workspace it is talking to, since the workspace is never a parameter.",
+        "responses": {
+          "200": {
+            "description": "The authenticated service principal.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Principal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credential, or one that is unknown, revoked, or expired. `error.code` is `invalid_credential`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is valid but was not granted the scope this endpoint requires. `error.code` is `insufficient_scope`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected failure. The body carries no stack trace, no file path, and no SQL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/templates": {
+      "get": {
+        "tags": [
+          "Templates"
+        ],
+        "operationId": "listTemplates",
+        "summary": "Templates in this workspace.",
+        "description": "Cursor-paginated. Retired templates are listed with `retired_at` set rather than hidden, so an integration holding an id can tell 'retired' from 'deleted'. Only published versions are ever reported.",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from a previous response's `meta.next_cursor`. Omit for the first page. A value this API did not issue is `422 invalid_cursor`.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size. Clamped to 100 rather than rejected, because a client asking for more wants as many as it can have.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of templates.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Template"
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/PageMeta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The cursor is not one this API issued.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credential, or one that is unknown, revoked, or expired. `error.code` is `invalid_credential`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is valid but was not granted the scope this endpoint requires. `error.code` is `insufficient_scope`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected failure. The body carries no stack trace, no file path, and no SQL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/templates/{template}": {
+      "get": {
+        "tags": [
+          "Templates"
+        ],
+        "operationId": "getTemplate",
+        "summary": "One template with its published version history.",
+        "description": "`versions` lists every published version, oldest first. Drafts never appear: a draft can still change, and `POST /envelopes` refuses one.",
+        "parameters": [
+          {
+            "name": "template",
+            "in": "path",
+            "required": true,
+            "description": "The template's public id (ULID).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The template.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No template with that id exists in this credential's workspace. Another tenant's id is indistinguishable from one that does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credential, or one that is unknown, revoked, or expired. `error.code` is `invalid_credential`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is valid but was not granted the scope this endpoint requires. `error.code` is `insufficient_scope`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected failure. The body carries no stack trace, no file path, and no SQL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/envelopes": {
+      "post": {
+        "tags": [
+          "Envelopes"
+        ],
+        "operationId": "createEnvelope",
+        "summary": "Create a draft envelope.",
+        "description": "From a published `template_version_id`, or from a `document_id` plus the `field_schema` to place on it. Exactly one of the two; sending both is a `422` rather than one silently winning.\n\nThe envelope copies its source. A template edited afterwards can never change an agreement already out for signature.\n\n`recipients[].id` is the **schema** recipient id (`buyer`, `seller`) — the handle fields use to find their owner. The name and email given here are written into the copied schema before anything is persisted, so the envelope, its recipients, and their identity snapshots agree from the first row. An id the schema does not declare is `422 unknown_recipient`, never ignored.\n\n`expires_in_hours` is tri-state: omit it for the seven-day default, give a number of hours, or send `null` for an envelope that never expires.\n\nCreation does not send. The envelope is a draft until `POST /envelopes/{envelope}/send`.",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Replay protection. Retrying with the same key and the same request replays the first response byte for byte, with `Idempotency-Replayed: true`. The same key with a different request is `422 idempotency_key_reused`. Keys expire 24 hours after their first use.",
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewEnvelope"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The draft envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No template version or document with that id exists in this credential's workspace. Another tenant's id is indistinguishable from one that does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A request with this Idempotency-Key is still running.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The body did not validate, a recipient id is not in the schema, a prefilled value was refused, or the snapshot is unusable. `error.code` distinguishes them.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credential, or one that is unknown, revoked, or expired. `error.code` is `invalid_credential`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is valid but was not granted the scope this endpoint requires. `error.code` is `insufficient_scope`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected failure. The body carries no stack trace, no file path, and no SQL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/envelopes/{envelope}": {
+      "get": {
+        "tags": [
+          "Envelopes"
+        ],
+        "operationId": "getEnvelope",
+        "summary": "Read an envelope.",
+        "description": "The polling endpoint. `state` is the native lifecycle as a single string; `version` is the compare-and-swap token, not a document version.",
+        "parameters": [
+          {
+            "name": "envelope",
+            "in": "path",
+            "required": true,
+            "description": "The envelope's public id (ULID).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No envelope with that id exists in this credential's workspace. Another tenant's id is indistinguishable from one that does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credential, or one that is unknown, revoked, or expired. `error.code` is `invalid_credential`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is valid but was not granted the scope this endpoint requires. `error.code` is `insufficient_scope`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected failure. The body carries no stack trace, no file path, and no SQL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Envelopes"
+        ],
+        "operationId": "updateEnvelope",
+        "summary": "Correct a draft.",
+        "description": "Drafts only. Two things are correctable before an envelope goes out: what the sender prefilled, and who the parties are. A non-draft envelope is `409 illegal_transition` — after send an invitation has been addressed and material content is on its way to being signed, so a correction is a new envelope with renewed signatures.\n\nPrefills go through the state machine as the sender, which is what decides whether a given field is the sender's to write: a read-only field is, a signature never is, and a service-supplied field is nobody's. The copied field schema itself is immutable and is never touched.",
+        "parameters": [
+          {
+            "name": "envelope",
+            "in": "path",
+            "required": true,
+            "description": "The envelope's public id (ULID).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Replay protection. Retrying with the same key and the same request replays the first response byte for byte, with `Idempotency-Replayed: true`. The same key with a different request is `422 idempotency_key_reused`. Keys expire 24 hours after their first use.",
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnvelopePatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated draft.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No envelope with that id exists in this credential's workspace. Another tenant's id is indistinguishable from one that does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The envelope is not a draft.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A value or a recipient id was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credential, or one that is unknown, revoked, or expired. `error.code` is `invalid_credential`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is valid but was not granted the scope this endpoint requires. `error.code` is `insufficient_scope`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected failure. The body carries no stack trace, no file path, and no SQL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/envelopes/{envelope}/send": {
+      "post": {
+        "tags": [
+          "Envelopes"
+        ],
+        "operationId": "sendEnvelope",
+        "summary": "Issue the invitations.",
+        "description": "Legal from `draft` only; sending twice is `409 illegal_transition`.\n\nThis is the last cheap moment: after it, correcting material content means a new envelope. The gate is strict and reports **every** problem at once under `details.problems`, so a caller fixing an envelope sees the whole list rather than discovering the next problem after fixing the previous one.\n\nA requested assurance level the deployment cannot actually meet is a problem here, never a silent downgrade.",
+        "parameters": [
+          {
+            "name": "envelope",
+            "in": "path",
+            "required": true,
+            "description": "The envelope's public id (ULID).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Replay protection. Retrying with the same key and the same request replays the first response byte for byte, with `Idempotency-Replayed: true`. The same key with a different request is `422 idempotency_key_reused`. Keys expire 24 hours after their first use.",
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The sent envelope, with the first stage released.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No envelope with that id exists in this credential's workspace. Another tenant's id is indistinguishable from one that does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The envelope is not a draft.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`details.problems` lists every reason it cannot be sent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credential, or one that is unknown, revoked, or expired. `error.code` is `invalid_credential`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is valid but was not granted the scope this endpoint requires. `error.code` is `insufficient_scope`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected failure. The body carries no stack trace, no file path, and no SQL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/envelopes/{envelope}/cancel": {
+      "post": {
+        "tags": [
+          "Envelopes"
+        ],
+        "operationId": "cancelEnvelope",
+        "summary": "Withdraw the envelope.",
+        "description": "Legal from `draft`, `sent`, and `in_progress`. Not from `finalizing`: everybody has signed by then and an artifact is being produced from their acceptances. Not from a terminal state either — cancelling a completed envelope is `409`.\n\nExpiry is a fact about the clock, not a button. An envelope a sender wants to stop early is cancelled, which records a reason and says honestly what happened.",
+        "parameters": [
+          {
+            "name": "envelope",
+            "in": "path",
+            "required": true,
+            "description": "The envelope's public id (ULID).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Replay protection. Retrying with the same key and the same request replays the first response byte for byte, with `Idempotency-Replayed: true`. The same key with a different request is `422 idempotency_key_reused`. Keys expire 24 hours after their first use.",
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelEnvelope"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The cancelled envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No envelope with that id exists in this credential's workspace. Another tenant's id is indistinguishable from one that does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The envelope cannot be cancelled from its current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The reason is longer than 500 characters.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credential, or one that is unknown, revoked, or expired. `error.code` is `invalid_credential`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is valid but was not granted the scope this endpoint requires. `error.code` is `insufficient_scope`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected failure. The body carries no stack trace, no file path, and no SQL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/envelopes/{envelope}/recipients": {
+      "get": {
+        "tags": [
+          "Envelopes"
+        ],
+        "operationId": "listEnvelopeRecipients",
+        "summary": "The parties, in signing order.",
+        "description": "Returned whole — the count is bounded by the envelope's own field schema — and still carries `meta.next_cursor: null` so one paging loop works for every list. Do not rely on array order for identity: match on `schema_recipient_id`.",
+        "parameters": [
+          {
+            "name": "envelope",
+            "in": "path",
+            "required": true,
+            "description": "The envelope's public id (ULID).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The recipients.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Recipient"
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/PageMeta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No envelope with that id exists in this credential's workspace. Another tenant's id is indistinguishable from one that does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credential, or one that is unknown, revoked, or expired. `error.code` is `invalid_credential`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is valid but was not granted the scope this endpoint requires. `error.code` is `insufficient_scope`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected failure. The body carries no stack trace, no file path, and no SQL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/envelopes/{envelope}/values": {
+      "get": {
+        "tags": [
+          "Envelopes"
+        ],
+        "operationId": "listEnvelopeValues",
+        "summary": "Field values.",
+        "description": "Every field of the schema, in schema order, with the value it currently holds. Readable at any point in the lifecycle, not only after completion.\n\n`signature` and `initials` fields are **described** rather than dumped: `signature` carries the media type, the digest of the image bytes, and their length, and `value` is null. That is the default because an image returned unasked ends up in the caller's request logs, proxy caches, and error reports. `?include=images` adds `signature.data`, the captured value verbatim.\n\n`signing_date` is supplied by the service from the owning recipient's attestation and is never submitted by anyone.",
+        "parameters": [
+          {
+            "name": "envelope",
+            "in": "path",
+            "required": true,
+            "description": "The envelope's public id (ULID).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include",
+            "in": "query",
+            "required": false,
+            "description": "`images` to include signature bytes. Any other value is refused rather than ignored.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "images"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The values.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/FieldValue"
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/PageMeta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No envelope with that id exists in this credential's workspace. Another tenant's id is indistinguishable from one that does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unrecognised `include` value.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credential, or one that is unknown, revoked, or expired. `error.code` is `invalid_credential`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is valid but was not granted the scope this endpoint requires. `error.code` is `insufficient_scope`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected failure. The body carries no stack trace, no file path, and no SQL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/envelopes/{envelope}/events": {
+      "get": {
+        "tags": [
+          "Events"
+        ],
+        "operationId": "listEnvelopeEvents",
+        "summary": "The envelope's events, oldest first.",
+        "description": "The pull half of the webhook feed, with a cursor a caller can persist. An integration that cannot accept inbound HTTP, or whose receiver was down, reads the same events here in the same order. `id` is the event id a webhook receiver deduplicates on.",
+        "parameters": [
+          {
+            "name": "envelope",
+            "in": "path",
+            "required": true,
+            "description": "The envelope's public id (ULID).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from a previous response's `meta.next_cursor`. Omit for the first page. A value this API did not issue is `422 invalid_cursor`.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size. Clamped to 100 rather than rejected, because a client asking for more wants as many as it can have.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of events.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Event"
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/PageMeta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No envelope with that id exists in this credential's workspace. Another tenant's id is indistinguishable from one that does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The cursor is not one this API issued.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credential, or one that is unknown, revoked, or expired. `error.code` is `invalid_credential`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is valid but was not granted the scope this endpoint requires. `error.code` is `insufficient_scope`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected failure. The body carries no stack trace, no file path, and no SQL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/envelopes/{envelope}/artifacts": {
+      "get": {
+        "tags": [
+          "Artifacts"
+        ],
+        "operationId": "listEnvelopeArtifacts",
+        "summary": "The finished artifacts.",
+        "description": "Two different refusals, and they mean different things. An envelope that has not completed is `409 not_completed` — a statement about the envelope. A **completed** envelope with no artifacts is `501 unsupported` — a statement about this build, where finalization is not implemented yet. Neither is ever a `200` with an empty list, which would tell a caller an agreement has no PDF.",
+        "parameters": [
+          {
+            "name": "envelope",
+            "in": "path",
+            "required": true,
+            "description": "The envelope's public id (ULID).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The artifacts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Artifact"
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/PageMeta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No envelope with that id exists in this credential's workspace. Another tenant's id is indistinguishable from one that does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The envelope has not completed, so no artifact exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "The envelope completed but artifact retrieval is not implemented in this build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credential, or one that is unknown, revoked, or expired. `error.code` is `invalid_credential`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is valid but was not granted the scope this endpoint requires. `error.code` is `insufficient_scope`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected failure. The body carries no stack trace, no file path, and no SQL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/envelopes/{envelope}/artifacts/{artifact}/download": {
+      "get": {
+        "tags": [
+          "Artifacts"
+        ],
+        "operationId": "downloadEnvelopeArtifact",
+        "summary": "Stream an artifact's bytes.",
+        "description": "Streamed through the application, never a presigned storage URL, on any driver. `X-Artifact-Sha256` carries the digest recorded at finalization so a caller can verify the transfer without a second request.",
+        "parameters": [
+          {
+            "name": "envelope",
+            "in": "path",
+            "required": true,
+            "description": "The envelope's public id (ULID).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "artifact",
+            "in": "path",
+            "required": true,
+            "description": "The artifact's public id, as listed by `GET /envelopes/{envelope}/artifacts`.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The artifact's bytes.",
+            "headers": {
+              "X-Artifact-Sha256": {
+                "description": "Digest recorded at finalization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "`attachment` with an ASCII filename.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No artifact of this envelope with that id exists in this credential's workspace. Another tenant's id is indistinguishable from one that does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The envelope has not completed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Artifact retrieval is not implemented in this build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credential, or one that is unknown, revoked, or expired. `error.code` is `invalid_credential`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is valid but was not granted the scope this endpoint requires. `error.code` is `insufficient_scope`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected failure. The body carries no stack trace, no file path, and no SQL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks/endpoints": {
+      "get": {
+        "tags": [
+          "Webhooks"
+        ],
+        "operationId": "listWebhookEndpoints",
+        "summary": "Endpoints in this workspace.",
+        "description": "Cursor-paginated. Secrets are never included; there is no route that reads one back.",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from a previous response's `meta.next_cursor`. Omit for the first page. A value this API did not issue is `422 invalid_cursor`.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size. Clamped to 100 rather than rejected, because a client asking for more wants as many as it can have.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of endpoints.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/WebhookEndpoint"
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/PageMeta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The cursor is not one this API issued.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credential, or one that is unknown, revoked, or expired. `error.code` is `invalid_credential`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is valid but was not granted the scope this endpoint requires. `error.code` is `insufficient_scope`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected failure. The body carries no stack trace, no file path, and no SQL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "operationId": "createWebhookEndpoint",
+        "summary": "Register an endpoint.",
+        "description": "The response carries `secret` **once**. Only ciphertext is stored and there is no route that returns it again: a lost secret is rotated, never recovered.\n\nThe URL is validated against the deployment's outbound destination policy at creation rather than at delivery time, so a destination that would be refused is a `422` on this call instead of a silent queue failure later.\n\nOmit `event_filter` (or send `null`) for every event.",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Replay protection. Retrying with the same key and the same request replays the first response byte for byte, with `Idempotency-Replayed: true`. The same key with a different request is `422 idempotency_key_reused`. Keys expire 24 hours after their first use.",
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewWebhookEndpoint"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The endpoint and its secret.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpointWithSecret"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The URL is not a destination this deployment will call, or an event name is unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credential, or one that is unknown, revoked, or expired. `error.code` is `invalid_credential`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is valid but was not granted the scope this endpoint requires. `error.code` is `insufficient_scope`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected failure. The body carries no stack trace, no file path, and no SQL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks/endpoints/{endpoint}": {
+      "patch": {
+        "tags": [
+          "Webhooks"
+        ],
+        "operationId": "updateWebhookEndpoint",
+        "summary": "Change an endpoint.",
+        "description": "Only the keys present are applied, so correcting a description cannot blank an event filter. `event_filter: null` means every event; omitting it leaves the filter alone. `enabled: true` re-enables an endpoint that auto-disabled after a run of failures and clears the failure streak.",
+        "parameters": [
+          {
+            "name": "endpoint",
+            "in": "path",
+            "required": true,
+            "description": "The webhook endpoint's public id (ULID).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Replay protection. Retrying with the same key and the same request replays the first response byte for byte, with `Idempotency-Replayed: true`. The same key with a different request is `422 idempotency_key_reused`. Keys expire 24 hours after their first use.",
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookEndpointPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated endpoint.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpoint"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No webhook endpoint with that id exists in this credential's workspace. Another tenant's id is indistinguishable from one that does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The new URL is refused, or an event name is unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credential, or one that is unknown, revoked, or expired. `error.code` is `invalid_credential`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is valid but was not granted the scope this endpoint requires. `error.code` is `insufficient_scope`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected failure. The body carries no stack trace, no file path, and no SQL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Webhooks"
+        ],
+        "operationId": "retireWebhookEndpoint",
+        "summary": "Retire an endpoint.",
+        "description": "Disables the endpoint and returns it with `enabled: false`. The row is **retained**: delivery history references it, and a delivery record naming an endpoint that no longer exists is not a record of anything. A bare `204` would imply an erasure that does not happen.",
+        "parameters": [
+          {
+            "name": "endpoint",
+            "in": "path",
+            "required": true,
+            "description": "The webhook endpoint's public id (ULID).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Replay protection. Retrying with the same key and the same request replays the first response byte for byte, with `Idempotency-Replayed: true`. The same key with a different request is `422 idempotency_key_reused`. Keys expire 24 hours after their first use.",
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The retired endpoint.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpoint"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No webhook endpoint with that id exists in this credential's workspace. Another tenant's id is indistinguishable from one that does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credential, or one that is unknown, revoked, or expired. `error.code` is `invalid_credential`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is valid but was not granted the scope this endpoint requires. `error.code` is `insufficient_scope`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected failure. The body carries no stack trace, no file path, and no SQL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks/endpoints/{endpoint}/rotate-secret": {
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "operationId": "rotateWebhookEndpointSecret",
+        "summary": "Issue a new signing secret.",
+        "description": "Mints a successor and keeps the predecessor verifying for a grace window, during which both secrets sign every attempt so a receiver can be reconfigured without dropping an event. `grace_hours: 0` cuts over immediately, which is the right value when the rotation is happening because a secret leaked. The new secret is shown once.",
+        "parameters": [
+          {
+            "name": "endpoint",
+            "in": "path",
+            "required": true,
+            "description": "The webhook endpoint's public id (ULID).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Replay protection. Retrying with the same key and the same request replays the first response byte for byte, with `Idempotency-Replayed: true`. The same key with a different request is `422 idempotency_key_reused`. Keys expire 24 hours after their first use.",
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RotateWebhookSecret"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The endpoint and its new secret.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpointWithSecret"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No webhook endpoint with that id exists in this credential's workspace. Another tenant's id is indistinguishable from one that does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credential, or one that is unknown, revoked, or expired. `error.code` is `invalid_credential`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is valid but was not granted the scope this endpoint requires. `error.code` is `insufficient_scope`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected failure. The body carries no stack trace, no file path, and no SQL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "serviceCredential": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A service credential in `Authorization`. Both syntaxes authenticate and are equivalent:\n\n    Authorization: esk_<prefix>_<secret>\n    Authorization: Bearer esk_<prefix>_<secret>\n\nThe raw form is accepted because the API this application is compatible with sends its key with no scheme. Native callers should use `Bearer`. Credentials are issued, rotated, and revoked from the console (`docs/operations/service-credentials.md`); there is no self-service route and no way to read a secret back."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "description": "Every failure on this API. Switch on `error.code`; the message is for a human reading a log.",
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "invalid_credential",
+                  "insufficient_scope",
+                  "not_found",
+                  "method_not_allowed",
+                  "illegal_transition",
+                  "conflict",
+                  "not_completed",
+                  "idempotency_key_in_flight",
+                  "validation_failed",
+                  "idempotency_key_reused",
+                  "invalid_cursor",
+                  "send_preconditions_failed",
+                  "field_rejected",
+                  "invalid_snapshot",
+                  "unknown_recipient",
+                  "template_state",
+                  "destination_refused",
+                  "unknown_event_name",
+                  "unsupported",
+                  "internal_error"
+                ],
+                "description": "Stable machine code. Renaming one is a breaking change."
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": true,
+                "description": "Present when there is something structured to say: `fields` for validation, `problems` for a send gate, `required_scope` for a 403."
+              }
+            }
+          }
+        }
+      },
+      "PageMeta": {
+        "type": "object",
+        "required": [
+          "next_cursor"
+        ],
+        "description": "There is no total and no page number. Counting a tenant's rows on every request buys a number that is stale before it renders, and there are no pages to number in a keyset scheme.",
+        "properties": {
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass back as `?cursor=` for the next page. Null means this is the last."
+          }
+        }
+      },
+      "Principal": {
+        "type": "object",
+        "required": [
+          "credential",
+          "workspace",
+          "scopes"
+        ],
+        "properties": {
+          "credential": {
+            "type": "object",
+            "properties": {
+              "prefix": {
+                "type": "string",
+                "description": "The public half of the key. Safe to quote in a ticket; it is what every console command identifies a credential by."
+              },
+              "label": {
+                "type": "string"
+              },
+              "expires_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "last_used_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time",
+                "description": "Written at most once a minute, so a read-only request is not also a write."
+              },
+              "created_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          },
+          "workspace": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "slug": {
+                "type": "string"
+              }
+            }
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "envelopes:read",
+                "envelopes:write",
+                "templates:read",
+                "templates:write",
+                "webhooks:manage",
+                "compat:firma-v1"
+              ]
+            },
+            "description": "Exactly what was granted. Nothing is implied: `envelopes:write` does not grant `envelopes:read`."
+          }
+        }
+      },
+      "Template": {
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "retired_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Set on a template that should no longer be chosen for new work. Still listed, so a stored id can be told from a deleted one."
+          },
+          "current_version": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TemplateVersion"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The published version a caller gets by picking this template. Null until the first publish; a template with only drafts is deliberately not sendable."
+          },
+          "created_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "TemplateDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Template"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "versions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/TemplateVersion"
+                },
+                "description": "Every published version, oldest first. Drafts never appear."
+              }
+            }
+          }
+        ]
+      },
+      "TemplateVersion": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Pass as `template_version_id` to `POST /envelopes`."
+          },
+          "version": {
+            "type": "integer"
+          },
+          "published_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "document": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sha256": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The digest of the PDF this version will copy."
+              },
+              "page_count": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            }
+          },
+          "field_schema_sha256": {
+            "type": "string"
+          },
+          "consent_policy_version": {
+            "type": "string"
+          },
+          "recipients": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "description": "The roles to be addressed. Each entry's `id` is the `recipients[].id` `POST /envelopes` expects."
+          }
+        }
+      },
+      "NewEnvelope": {
+        "type": "object",
+        "description": "Exactly one of `template_version_id` or `document_id`.",
+        "properties": {
+          "template_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A published version id from the template catalogue."
+          },
+          "document_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A document with a review revision. Requires `field_schema`."
+          },
+          "field_schema": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true,
+            "description": "A native field schema 1.0 document. Refused with `template_version_id`, which already carries one."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 255,
+            "description": "Defaults to the template's name, or the document's title."
+          },
+          "consent_policy_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          },
+          "assurance_level": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "pades-b-b",
+              "pades-b-t",
+              null
+            ],
+            "description": "An unrecognised value is an error, never a silent downgrade."
+          },
+          "signing_mode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "sequential",
+              "parallel",
+              null
+            ],
+            "description": "`parallel` requires a single-stage signing order; a multi-stage schema in parallel mode is refused rather than having its order quietly ignored."
+          },
+          "expires_in_hours": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 87600,
+            "description": "Omit for the seven-day default; `null` for an envelope that never expires."
+          },
+          "recipients": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecipientContact"
+            }
+          },
+          "values": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Sender prefills, schema field id to value. A signature is never the sender's to supply."
+          }
+        }
+      },
+      "RecipientContact": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The **schema** recipient id, not the recipient's own public id. An id the schema does not declare is `422 unknown_recipient`."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "email"
+          }
+        }
+      },
+      "EnvelopePatch": {
+        "type": "object",
+        "properties": {
+          "values": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Sender prefills to write or correct."
+          },
+          "recipients": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecipientContact"
+            },
+            "description": "Contact corrections. Drafts only."
+          }
+        }
+      },
+      "CancelEnvelope": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 500,
+            "description": "Recorded on the envelope and in the cancellation event. Refused if too long rather than truncated: half a reason is a misleading reason."
+          }
+        }
+      },
+      "Envelope": {
+        "type": "object",
+        "required": [
+          "id",
+          "state",
+          "version"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "sent",
+              "in_progress",
+              "finalizing",
+              "completed",
+              "cancelled",
+              "declined",
+              "expired",
+              "finalization_failed"
+            ],
+            "description": "`finalizing` is not `completed`: completion is asserted only once a validated final PDF is durably stored and retrievable. `finalization_failed` is visibly failed and retryable, never quietly complete."
+          },
+          "version": {
+            "type": "integer",
+            "description": "The envelope's compare-and-swap token, not a document version. It moves on every transition."
+          },
+          "signing_mode": {
+            "type": "string",
+            "enum": [
+              "sequential",
+              "parallel"
+            ]
+          },
+          "assurance_level": {
+            "type": "string",
+            "enum": [
+              "pades-b-b",
+              "pades-b-t"
+            ]
+          },
+          "consent_policy_version": {
+            "type": "string"
+          },
+          "source_template_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Provenance only. The envelope copied the version and never dereferences it again."
+          },
+          "document_sha256": {
+            "type": "string",
+            "description": "What every attestation binds. Published so a caller can prove which document this envelope is."
+          },
+          "field_schema_sha256": {
+            "type": "string"
+          },
+          "expires_in_hours": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Computed at send, never before."
+          },
+          "content_frozen_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When material content stopped being editable: the first acceptance, or send in parallel mode. After it, a prefill correction is refused rather than applied."
+          },
+          "cancel_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "finalization_failure_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "sent_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "cancelled_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "declined_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "expired_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "recipients": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Recipient"
+            }
+          }
+        }
+      },
+      "Recipient": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "This party's own public id, as named in event payloads."
+          },
+          "schema_recipient_id": {
+            "type": "string",
+            "description": "The handle the field schema uses. Fields find their owner by this, never by signing order and never by email."
+          },
+          "name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "order_index": {
+            "type": "integer",
+            "description": "Signing stage, from 1. In sequential mode a recipient stays `pending` until the stage before theirs finishes."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "active",
+              "signed",
+              "declined"
+            ]
+          },
+          "signed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "declined_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "decline_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "invited_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the invitation was actually written to this party. A delivery fact, not signing state: nothing in the state machine reads it, and a recipient's eligibility never depends on whether their mail was sent."
+          },
+          "last_reminded_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When they were last nudged. Null means never reminded, which is a different fact from reminded long ago."
+          }
+        }
+      },
+      "FieldValue": {
+        "type": "object",
+        "properties": {
+          "field_id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "signature",
+              "initials",
+              "text",
+              "name",
+              "company",
+              "title",
+              "agreement_date",
+              "signing_date",
+              "checkbox"
+            ]
+          },
+          "recipient_id": {
+            "type": "string",
+            "description": "The schema recipient who owns this field."
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "read_only": {
+            "type": "boolean",
+            "description": "Read-only to the recipient. The sender may still prefill it — that is what read-only means here."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "sender",
+              "recipient",
+              "service"
+            ],
+            "description": "`service` is only `signing_date`, derived from the owning recipient's attestation."
+          },
+          "value": {
+            "description": "The value, or null for a field nobody has completed. Always null for `signature` and `initials`, which are described under `signature` instead."
+          },
+          "signature": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SignatureValue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "frozen_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "SignatureValue": {
+        "type": "object",
+        "required": [
+          "type",
+          "sha256",
+          "bytes"
+        ],
+        "description": "A description of a captured mark. Bytes appear only when the request asked for them with `?include=images`.",
+        "properties": {
+          "type": {
+            "type": "string",
+            "examples": [
+              "image/png"
+            ],
+            "description": "The captured media type, or `application/octet-stream` for an opaque reference."
+          },
+          "sha256": {
+            "type": "string",
+            "description": "Digest of the decoded image bytes, so it is comparable with anything else that hashed the same image."
+          },
+          "bytes": {
+            "type": "integer"
+          },
+          "data": {
+            "type": "string",
+            "description": "The captured value verbatim. Present only with `?include=images`."
+          }
+        }
+      },
+      "Event": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The event identity a webhook receiver deduplicates on. The same id appears in the delivered body."
+          },
+          "event": {
+            "type": "string",
+            "examples": [
+              "signing_request.sent"
+            ],
+            "description": "Names from the compatibility profile are reproduced verbatim; anything of ours is prefixed `esign.`."
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the transition happened, not when this row was read."
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "The event's data object, exactly as recorded. Never rebuilt from current state."
+          }
+        }
+      },
+      "Artifact": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "examples": [
+              "sealed_pdf"
+            ]
+          },
+          "filename": {
+            "type": "string"
+          },
+          "content_type": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string",
+            "description": "Recorded and validated at finalization."
+          },
+          "bytes": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "download": {
+            "type": "string",
+            "description": "A path on this API. Never a storage URL: bytes stream through the application on every driver."
+          }
+        }
+      },
+      "NewWebhookEndpoint": {
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 255
+          },
+          "event_filter": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            },
+            "description": "Omit or null for every event. An empty array is refused: it describes an endpoint that wants nothing, which is a disabled endpoint spelled confusingly."
+          }
+        }
+      },
+      "WebhookEndpointPatch": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 255
+          },
+          "event_filter": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "`true` re-enables and clears the failure streak; `false` pauses deliveries."
+          }
+        }
+      },
+      "RotateWebhookSecret": {
+        "type": "object",
+        "properties": {
+          "grace_hours": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 8760,
+            "description": "How long the previous secret keeps verifying. `0` cuts over immediately."
+          }
+        }
+      },
+      "WebhookEndpoint": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "event_filter": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "disabled_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "disabled_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "consecutive_failures": {
+            "type": "integer",
+            "description": "An endpoint auto-disables after a run of failed deliveries."
+          },
+          "secret_previous_expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "End of a rotation's overlap window, during which both secrets sign every attempt."
+          },
+          "created_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "WebhookEndpointWithSecret": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/WebhookEndpoint"
+          },
+          {
+            "type": "object",
+            "required": [
+              "secret"
+            ],
+            "properties": {
+              "secret": {
+                "type": "string",
+                "description": "Shown exactly once. Only ciphertext is stored and there is no route that returns it again."
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -63,6 +63,44 @@ Staged, never a pretend cross-store transaction:
    completion evidence, and the completion outbox event together.
 4. On retry, reuse the selected completed artifact. Never garbage-collect evidence by prefix age.
 
+## HTTP surfaces call the same services
+
+Both surfaces are adapters over `app/Domain/Integration/Native/*`, and neither is allowed to
+be the only caller of anything:
+
+| | |
+|---|---|
+| Native API | `/api/v1` — `routes/api.php`, `app/Http/Controllers/Api/V1`, [docs/api/native-v1.md](api/native-v1.md) |
+| Firma facade | `/functions/v1/signing-request-api`, profile `firma-compat-v1` |
+| Shared services | `EnvelopeService`, `TemplateCatalog`, `EnvelopeValueReader`, `EnvelopeEventFeed`, `WebhookEndpointService`, `IdempotencyStore`, `ArtifactLocator` |
+
+**The facade calls those same services.** It translates shapes — status vocabularies,
+coordinate conventions, field names, error bodies — and it must not reach past them into the
+state machine, the envelope factory, or the models, and must not grow a second way to create,
+send, or cancel an envelope. Section 10 of `docs/HANDOFF.md` requires the facade to preserve
+somebody else's response shapes, which is a *presentation* obligation; the moment it becomes a
+behaviour obligation there are two state machines, and the second one is the one nobody tests.
+
+Concretely: `EnvelopeService::create()` is the only path from a request to an envelope, and it
+is the only place that turns a template version or a document plus a field schema into an
+`EnvelopeSourceSnapshot`. Recipient contacts are written into the copied schema there, before
+anything is persisted. If the facade needs a behaviour the native API does not have, the
+behaviour is added to the service and both surfaces get it.
+
+Two things are deliberately *not* shared, because they are per-surface contracts rather than
+behaviour:
+
+- **Error bodies.** `App\Http\Middleware\Api\ApiErrorBoundary` applies the native
+  `{error: {code, message, details}}` envelope to `/api/v1` only. The facade owes different
+  bodies on its own routes. The mapping from a domain exception to a meaning is shared
+  (`ApiErrorMap`); only the rendering differs.
+- **Pagination and identifiers.** The native API pages with an opaque keyset cursor and
+  reports public ULIDs. The facade reproduces whatever the profile documents.
+
+`ArtifactLocator` is the seam between this and finalization: the API is written against it and
+ships with `NoArtifactsYetLocator`, so artifact routes fail closed until a real locator is
+bound.
+
 ## Deployment shape
 
 The same application runs in three roles: web, queue worker, scheduler. In Docker, signing key

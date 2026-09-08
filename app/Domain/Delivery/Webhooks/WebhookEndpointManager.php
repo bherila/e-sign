@@ -75,6 +75,67 @@ final class WebhookEndpointManager
     }
 
     /**
+     * Change where an endpoint points, what it is called, and which events it wants.
+     *
+     * Only the keys present in `$changes` are applied, so a caller correcting a description
+     * cannot blank an event filter by omitting it. Passing `event_filter => null` is
+     * different from omitting it and means "every event", which is the filter's own null.
+     *
+     * A new URL is validated the same way a new endpoint's is, before it is stored: an
+     * operator finds out from the call they just made rather than from a queue log, and an
+     * endpoint cannot be edited into a destination the outbound policy would refuse.
+     *
+     * The secret is untouched. Rotating it is a separate, separately audited operation,
+     * because a receiver that moved to a new URL has not necessarily lost its secret.
+     *
+     * @param  array{url?: string, description?: string|null, event_filter?: list<string>|null}  $changes
+     *
+     * @throws DestinationRefusedException
+     * @throws Exceptions\UnknownEventNameException
+     */
+    public function update(WebhookEndpoint $endpoint, array $changes, ?AuditActor $actor = null): WebhookEndpoint
+    {
+        if (array_key_exists('url', $changes) && $changes['url'] !== $endpoint->url) {
+            $this->transport->validate($changes['url']);
+            $endpoint->url = $changes['url'];
+        }
+
+        if (array_key_exists('description', $changes)) {
+            $endpoint->description = $changes['description'];
+        }
+
+        if (array_key_exists('event_filter', $changes)) {
+            foreach ($changes['event_filter'] ?? [] as $eventName) {
+                WebhookEventName::assertKnown($eventName);
+            }
+
+            $endpoint->event_filter = $changes['event_filter'];
+        }
+
+        $applied = array_keys($endpoint->getDirty());
+
+        if ($applied === []) {
+            return $endpoint;
+        }
+
+        $endpoint->save();
+
+        $this->audit->record(
+            $actor ?? AuditActor::system('webhook-administration'),
+            'webhook.endpoint.updated',
+            $endpoint,
+            [
+                'endpoint' => $endpoint->public_id,
+                'changed' => $applied,
+                'url' => $endpoint->url,
+                'event_filter' => $endpoint->event_filter,
+            ],
+        );
+
+        return $endpoint;
+    }
+
+    /**
      * Issue a new secret and keep the old one verifying for a grace period.
      *
      * Both secrets sign every attempt during the overlap, so a receiver can be

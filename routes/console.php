@@ -38,3 +38,16 @@ Schedule::command(RemindCommand::class)
     ->daily()
     ->withoutOverlapping()
     ->name('signing:remind');
+
+/*
+ * Native API idempotency keys expire after 24 hours
+ * (App\Domain\Integration\Native\IdempotencyStore::TTL_HOURS) and are removed here.
+ *
+ * The table is operational scratch: without a prune it grows with every mutating API call
+ * forever, and the replay guarantee only ever covers a day, so nothing of value is lost.
+ * Hourly rather than daily so a busy deployment never carries more than an hour of dead rows.
+ */
+Schedule::command('esign:api:prune-idempotency-keys')
+    ->hourly()
+    ->withoutOverlapping()
+    ->name('api:prune-idempotency-keys');
