@@ -30,6 +30,14 @@ use InvalidArgumentException;
  * `$reason` and `$failureSummary` are operator- or sender-authored prose that will be shown
  * to a human. They are escaped by Blade like any other view data and are never a place to
  * put a stack trace, an address, or a token.
+ *
+ * `$otpCode` is the one exception to "there is nowhere in it for a secret to hide", and it
+ * is a deliberate, bounded one. A one-time code has to reach a queue worker to be rendered,
+ * and the worker renders from the persisted context — that is what makes delivery survive a
+ * crash (docs/delivery/mail.md). So a live code is readable in `outbound_mails.context` by
+ * anyone with database access, for the ten minutes it is worth anything. The check it backs
+ * is aimed at somebody holding a forwarded invitation, not at the host administrator, and
+ * docs/signing/guest-access.md states that limit rather than implying otherwise.
  */
 final class MailContext
 {
@@ -46,6 +54,7 @@ final class MailContext
         public readonly ?string $reason = null,
         public readonly ?string $failureSummary = null,
         public readonly ?string $reference = null,
+        public readonly ?string $otpCode = null,
     ) {
         if (trim($recipientName) === '') {
             throw new InvalidArgumentException('A mail context needs a recipient name to address the message to.');
@@ -90,6 +99,7 @@ final class MailContext
             reason: self::string($context, 'reason'),
             failureSummary: self::string($context, 'failure_summary'),
             reference: self::string($context, 'reference'),
+            otpCode: self::string($context, 'otp_code'),
         );
     }
 
@@ -108,6 +118,7 @@ final class MailContext
             'reason' => $this->reason,
             'failure_summary' => $this->failureSummary,
             'reference' => $this->reference,
+            'otp_code' => $this->otpCode,
         ];
     }
 
@@ -134,6 +145,7 @@ final class MailContext
                 'reason' => $this->reason,
                 'failureSummary' => $this->failureSummary,
                 'reference' => $this->reference,
+                'otpCode' => $this->otpCode,
                 default => throw new InvalidArgumentException("Unknown mail context field '{$field}'."),
             };
 
