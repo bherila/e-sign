@@ -12,6 +12,7 @@ use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\FieldSchemaValidator;
 use App\Domain\Preparation\Schema\FieldType;
 use App\Domain\Preparation\Schema\PageSizes;
+use App\Domain\Preparation\Schema\SchemaVersion;
 use App\Domain\Preparation\Text\AnchorOrigin;
 use PHPUnit\Framework\TestCase;
 
@@ -186,7 +187,9 @@ class FieldSchemaRoundTripTest extends TestCase
                     $anchor['required'] = false;
                 }
 
-                if ($crossCheck && mt_rand(0, 1) === 1) {
+                // A cross-check that carries a receipt has to state the tolerance the check
+                // passed by, so the receipt is a record of something rather than an assertion.
+                if ($crossCheck) {
                     $anchor['tolerance'] = self::generateNumber(0.0, 8.0);
                 }
 
@@ -201,8 +204,9 @@ class FieldSchemaRoundTripTest extends TestCase
                         // A measurement, so it may start above the top of the page the way a
                         // heading's ascender does; the field's own rect never can.
                         'anchor_rect' => self::generateMeasuredRect(),
-                        // In `replace` mode the receipt records where the field went, so it is
-                        // the field's own rectangle.
+                        // The receipt records where the field went, which in `replace` mode is
+                        // the field's own rectangle and in `cross_check` mode has to be within
+                        // the stated tolerance of it. Reproducing it exactly satisfies both.
                         'rect' => $field['rect'],
                     ];
                 }
@@ -214,7 +218,9 @@ class FieldSchemaRoundTripTest extends TestCase
         }
 
         return [
-            'schema_version' => '1.0',
+            // The anchors below use members that arrived in 1.1, and a document may only use
+            // what the version it declares declares.
+            'schema_version' => SchemaVersion::CURRENT,
             'document_id' => 'doc'.$index,
             'coordinate_space' => CoordinateSpaceDeclaration::expected(),
             'recipients' => $recipients,

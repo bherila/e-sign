@@ -180,13 +180,17 @@ the Firma profile's two-phase validation surfaces them.
 | `anchor_occurrence_out_of_range` | an anchor asked for occurrence *n* and fewer exist |
 | `anchor_cross_check_failed` | a `cross_check` anchor resolved further than its tolerance from the declared rectangle |
 | `anchor_resolved_off_page` | an anchor's offset put the rectangle off the page it was found on |
-| `anchor_text_unreadable` | the document's text could not be extracted, so no anchor in it can be resolved |
+| `anchor_text_unreadable` | the document's bytes were read and could not be parsed |
 | `no_recipients` | an envelope nobody is asked to sign |
 | `recipient_missing_email` | a recipient row with no usable address |
 | `recipient_has_no_required_field` | a recipient with nothing required of them |
 | `required_read_only_field_missing_value` | a required read-only field nobody can fill |
 | `required_material_field_unfillable` | a required material field its owner will never be allowed to fill |
 | `assurance_material_unavailable` | the requested assurance level's material is not declared available |
+
+Bytes that could not be *read* are not in this table: a disk that is down is not an envelope that
+is not ready, so it raises `document_unavailable` (a retryable 503) rather than telling a sender to
+correct a field set that needs no correcting.
 
 The six anchor codes come from the `AnchorResolution` port and are the send-time half of
 [preparation/anchors.md](../preparation/anchors.md). Resolution runs **first**, before the rest of

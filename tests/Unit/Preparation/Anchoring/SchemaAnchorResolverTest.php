@@ -9,6 +9,7 @@ use App\Domain\Preparation\Anchoring\SchemaAnchorResolver;
 use App\Domain\Preparation\Schema\AnchorPlacementMode;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\PageSizes;
+use App\Domain\Preparation\Schema\SchemaVersion;
 use App\Domain\Preparation\Schema\ValidationCode;
 use App\Domain\Preparation\TcPdf\TcPdfTextLocator;
 use App\Domain\Preparation\Text\Anchor;
@@ -459,7 +460,8 @@ final class SchemaAnchorResolverTest extends TestCase
     private function documentArray(array $fields): array
     {
         return [
-            'schema_version' => '1.0',
+            // These documents use anchor members that arrived in 1.1.
+            'schema_version' => SchemaVersion::CURRENT,
             'document_id' => 'doc_anchor_unit',
             'coordinate_space' => [
                 'unit' => 'pt',

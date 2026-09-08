@@ -118,6 +118,10 @@ both fixed — and it is the last point at which a template is cheap to fix. An 
 not in that document, or is in it twice, is therefore reported while the sender is still
 authoring, as an ordinary 422 with a JSON Pointer to the offending field.
 
+Resolution runs before the publish transaction opens, so the private-disk read and the
+content-stream parse never happen while the version row is locked; the outcome carries the digest
+of the field set it ran against, and a locked row that disagrees is resolved again under the lock.
+
 The resolved rectangle is written into the field's `rect` and a receipt into `anchor.resolved`
 (which page, which occurrence, where the matched text sat, and the digest of the bytes it was
 measured in), and `field_schema_sha256` moves with them. So a published version is already placed:

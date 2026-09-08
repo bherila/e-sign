@@ -9,6 +9,7 @@ use App\Domain\Identity\Audit\AuditEvent;
 use App\Domain\Identity\Credentials\IssuedServiceCredential;
 use App\Domain\Identity\Credentials\Scope;
 use App\Domain\Identity\Credentials\ServiceCredentialIssuer;
+use App\Domain\Preparation\Anchoring\AnchorDocumentUnavailable;
 use App\Domain\Preparation\Anchoring\AnchorResolutionOutcome;
 use App\Domain\Preparation\Schema\AnchorPlacementMode;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
@@ -299,6 +300,50 @@ class EnvelopeAnchorResolutionTest extends TestCase
 
         $this->assertSame(EnvelopeState::Sent, $envelope->refresh()->state);
         $this->assertSame($before, [$envelope->fieldSchema()->canonicalJson(), $envelope->field_schema_sha256]);
+    }
+
+    // ------------------------------------------------------------------------ storage failure
+
+    /**
+     * A disk that is down is not a field set that is wrong.
+     *
+     * Reporting it as a send precondition would tell a sender to correct a document that needs no
+     * correcting, and would put a transient failure in the bucket clients never retry.
+     */
+    public function test_bytes_that_cannot_be_read_are_a_retryable_server_failure_not_a_bad_document(): void
+    {
+        $envelope = $this->scenario->preparedDraft(['field_schema' => $this->anchoredSchema()]);
+
+        Storage::disk('documents')->delete($this->scenario->revision->path);
+
+        try {
+            $this->scenario->machine()->send($envelope);
+            $this->fail('Expected the send to fail because the document could not be read.');
+        } catch (AnchorDocumentUnavailable $unavailable) {
+            $this->assertSame('anchor_document_unavailable', $unavailable->code());
+            // No storage handle in what a caller is shown.
+            $this->assertStringNotContainsString($this->scenario->revision->path, $unavailable->getMessage());
+            $this->assertStringNotContainsString('documents', $unavailable->getMessage());
+        }
+
+        $this->assertSame(EnvelopeState::Draft, $envelope->refresh()->state);
+    }
+
+    public function test_the_native_api_reports_unreadable_bytes_as_a_retryable_503(): void
+    {
+        $issued = $this->credential();
+        $envelope = $this->scenario->preparedDraft(['field_schema' => $this->anchoredSchema()]);
+
+        Storage::disk('documents')->delete($this->scenario->revision->path);
+
+        $this->postJson(
+            '/api/v1/envelopes/'.$envelope->public_id.'/send',
+            [],
+            ['Authorization' => 'Bearer '.$issued->secret],
+        )
+            ->assertStatus(503)
+            ->assertJsonPath('error.code', 'document_unavailable')
+            ->assertJsonPath('error.details.retryable', true);
     }
 
     // ------------------------------------------------------------------------ over HTTP

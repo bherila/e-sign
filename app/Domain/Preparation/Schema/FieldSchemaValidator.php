@@ -105,6 +105,17 @@ final class FieldSchemaValidator
     public const RESOLVED_ANCHOR_REQUIRED = ['document_sha256', 'page', 'occurrence_index', 'anchor_rect', 'rect'];
 
     /**
+     * Anchor members that arrived after 1.0, and the minor that declares them.
+     *
+     * @var list<string>
+     */
+    public const ANCHOR_MEMBERS_SINCE_1_1 = ['placement', 'required', 'tolerance', 'resolved'];
+
+    public const ANCHOR_MEMBERS_MINOR = 1;
+
+    private const MAJOR_MINOR_1_1 = '1.1';
+
+    /**
      * @param  array<string, mixed>  $document  A decoded document (`json_decode(..., true)`).
      * @param  PageSizes|null  $pageSizes  Displayed page sizes of the target PDF, when known.
      * @param  list<string>|null  $variables  Prefill variables the sending context can resolve.
@@ -121,7 +132,14 @@ final class FieldSchemaValidator
 
         $recipientIds = $this->checkRecipients($document, $errors);
         $this->checkSigningOrder($document, $recipientIds, $errors);
-        $this->checkFields($document, $recipientIds, $pageSizes, $variables, $errors);
+        $this->checkFields(
+            $document,
+            $recipientIds,
+            $pageSizes,
+            $variables,
+            $this->declaredVersion($document),
+            $errors,
+        );
 
         return new ValidationResult($errors);
     }
@@ -458,6 +476,7 @@ final class FieldSchemaValidator
         ?array $recipientIds,
         ?PageSizes $pageSizes,
         ?array $variables,
+        ?SchemaVersion $version,
         array &$errors,
     ): void {
         if (! array_key_exists('fields', $document)) {
@@ -568,6 +587,7 @@ final class FieldSchemaValidator
                         ? $field['required']
                         : FieldDefinition::DEFAULT_REQUIRED,
                     $field['rect'] ?? null,
+                    $version,
                     $errors,
                 );
             }
@@ -772,6 +792,7 @@ final class FieldSchemaValidator
         mixed $anchor,
         bool $fieldRequired,
         mixed $fieldRect,
+        ?SchemaVersion $version,
         array &$errors,
     ): void {
         if (! $this->isObject($anchor)) {
@@ -781,6 +802,7 @@ final class FieldSchemaValidator
         }
 
         $this->checkObjectShape($path, $anchor, self::ANCHOR_REQUIRED, self::ANCHOR_OPTIONAL, $errors);
+        $this->checkAnchorMembersAreDeclared($path, $anchor, $version, $errors);
 
         if (array_key_exists('text', $anchor)) {
             $this->checkNonEmptyString($path.'/text', 'anchor.text', $anchor['text'], self::ANCHOR_TEXT_MAX_LENGTH, $errors);
@@ -796,7 +818,16 @@ final class FieldSchemaValidator
         $this->checkAnchorTolerance($path.'/tolerance', $anchor, $mode, $errors);
 
         if (array_key_exists('resolved', $anchor)) {
-            $this->checkResolvedAnchor($path.'/resolved', $anchor['resolved'], $mode, $fieldRect, $errors);
+            $declaredTolerance = $anchor['tolerance'] ?? null;
+
+            $this->checkResolvedAnchor(
+                $path.'/resolved',
+                $anchor['resolved'],
+                $mode,
+                is_int($declaredTolerance) || is_float($declaredTolerance) ? (float) $declaredTolerance : null,
+                $fieldRect,
+                $errors,
+            );
         }
 
         if (array_key_exists('origin', $anchor)) {
@@ -850,6 +881,58 @@ final class FieldSchemaValidator
                     'anchor.offset.'.$name.' must be a finite number; got '.var_export($value, true).'.',
                 );
             }
+        }
+    }
+
+    /**
+     * The version a document declares, or null when it does not declare a usable one.
+     *
+     * Only used to decide which members a document is allowed to contain; every other check is
+     * version-independent, and a document with no readable version has already been reported.
+     *
+     * @param  array<string, mixed>  $document
+     */
+    private function declaredVersion(array $document): ?SchemaVersion
+    {
+        $declared = $document['schema_version'] ?? null;
+
+        return is_string($declared) ? SchemaVersion::parse($declared) : null;
+    }
+
+    /**
+     * An anchor may only use members the version it declares actually declares.
+     *
+     * Without this the version string is a label rather than a contract: a generator could stamp
+     * `1.0` and emit a `resolved` receipt, and every consumer holding `field-schema-1.0.json` —
+     * which forbids undeclared properties — would reject a document this service called valid.
+     * The error is `unknown_property` because that is exactly what such a consumer would say.
+     *
+     * @param  array<string, mixed>  $anchor
+     * @param  list<ValidationError>  $errors
+     */
+    private function checkAnchorMembersAreDeclared(
+        string $path,
+        array $anchor,
+        ?SchemaVersion $version,
+        array &$errors,
+    ): void {
+        if (! $version instanceof SchemaVersion || $version->minor >= self::ANCHOR_MEMBERS_MINOR) {
+            return;
+        }
+
+        foreach (self::ANCHOR_MEMBERS_SINCE_1_1 as $member) {
+            if (! array_key_exists($member, $anchor)) {
+                continue;
+            }
+
+            $errors[] = new ValidationError(
+                $path.'/'.$member,
+                ValidationCode::UnknownProperty,
+                'anchor.'.$member.' arrived in schema '.self::MAJOR_MINOR_1_1.', and this document declares '
+                    .$version->toString().'. Declare '.self::MAJOR_MINOR_1_1.' to use it: a document that says '
+                    .$version->toString().' is read against a contract that does not have it, and refusing an '
+                    .'undeclared property is what that contract does.',
+            );
         }
     }
 
@@ -1023,6 +1106,7 @@ final class FieldSchemaValidator
         string $path,
         mixed $resolved,
         AnchorPlacementMode $mode,
+        ?float $anchorTolerance,
         mixed $fieldRect,
         array &$errors,
     ): void {
@@ -1095,38 +1179,129 @@ final class FieldSchemaValidator
         // mode is required to be this same rectangle.
         $this->checkRect($path.'/rect', $resolved['rect'], null, null, $errors);
 
-        if ($mode !== AnchorPlacementMode::Replace || ! $this->isObject($fieldRect) || ! $this->isObject($resolved['rect'])) {
+        if (! $this->isObject($fieldRect) || ! $this->isObject($resolved['rect'])) {
             return;
         }
 
-        // In `replace` mode the receipt's rectangle is where the field went, so the two must
-        // agree. Enforcing it keeps the receipt honest: a document whose field sits somewhere its
-        // own receipt does not describe is a document nobody can check.
+        if ($mode === AnchorPlacementMode::Replace) {
+            $this->checkReplaceReceiptMatchesRect($path, $resolved['rect'], $fieldRect, $errors);
+
+            return;
+        }
+
+        $this->checkCrossCheckReceiptAgrees($path, $anchorTolerance, $resolved['rect'], $fieldRect, $errors);
+    }
+
+    /**
+     * In `replace` mode the receipt's rectangle is where the field went, so the two must agree
+     * exactly. A document whose field sits somewhere its own receipt does not describe is a
+     * document nobody can check.
+     *
+     * @param  array<string, mixed>  $recorded
+     * @param  array<string, mixed>  $declared
+     * @param  list<ValidationError>  $errors
+     */
+    private function checkReplaceReceiptMatchesRect(
+        string $path,
+        array $recorded,
+        array $declared,
+        array &$errors,
+    ): void {
         foreach (self::RECT_REQUIRED as $name) {
-            $declared = $fieldRect[$name] ?? null;
-            $recorded = $resolved['rect'][$name] ?? null;
+            $pair = $this->numericPair($declared[$name] ?? null, $recorded[$name] ?? null);
 
-            if (! is_int($declared) && ! is_float($declared)) {
+            if ($pair === null) {
                 return;
             }
 
-            if (! is_int($recorded) && ! is_float($recorded)) {
-                return;
-            }
-
-            if (abs((float) $declared - (float) $recorded) > CanonicalNumber::TOLERANCE) {
+            if (abs($pair[0] - $pair[1]) > CanonicalNumber::TOLERANCE) {
                 $errors[] = new ValidationError(
                     $path.'/rect/'.$name,
                     ValidationCode::InvalidFormat,
                     'anchor.resolved.rect must be the field\'s own rect when anchor.placement is "'
                         .AnchorPlacementMode::Replace->value.'": the receipt records where the field was placed, and '
-                        .'this one says '.$this->describeNumber((float) $recorded).' where the field says '
-                        .$this->describeNumber((float) $declared).'.',
+                        .'this one says '.$this->describeNumber($pair[1]).' where the field says '
+                        .$this->describeNumber($pair[0]).'.',
                 );
 
                 return;
             }
         }
+    }
+
+    /**
+     * A `cross_check` receipt has to prove the check it claims to be.
+     *
+     * This is the whole feature. The stored receipt is what lets resolution be skipped — a field
+     * whose receipt names the document's own digest is not looked up again — so if nothing here
+     * compared the resolved corner against the declared one, a receipt could record any
+     * disagreement at all and the cross-check would never run against it. That is worse than not
+     * having the mode: the document would carry a record saying it had been checked.
+     *
+     * The comparison uses the anchor's *own* `tolerance`, which is why one is required alongside
+     * a cross-check receipt: the deployment default can change, and a receipt whose standard has
+     * to be looked up elsewhere proves nothing about what was actually applied.
+     *
+     * @param  array<string, mixed>  $recorded
+     * @param  array<string, mixed>  $declared
+     * @param  list<ValidationError>  $errors
+     */
+    private function checkCrossCheckReceiptAgrees(
+        string $path,
+        ?float $tolerance,
+        array $recorded,
+        array $declared,
+        array &$errors,
+    ): void {
+        if ($tolerance === null) {
+            $errors[] = new ValidationError(
+                $path,
+                ValidationCode::MissingProperty,
+                'A "'.AnchorPlacementMode::CrossCheck->value.'" anchor carrying anchor.resolved must also state '
+                    .'anchor.tolerance: the receipt is the record that the check passed, and without the distance '
+                    .'it passed by there is nothing to check it against.',
+            );
+
+            return;
+        }
+
+        foreach (['x', 'y'] as $name) {
+            $pair = $this->numericPair($declared[$name] ?? null, $recorded[$name] ?? null);
+
+            if ($pair === null) {
+                return;
+            }
+
+            $distance = abs($pair[0] - $pair[1]);
+
+            if ($distance > $tolerance + CanonicalNumber::TOLERANCE) {
+                $errors[] = new ValidationError(
+                    $path.'/rect/'.$name,
+                    ValidationCode::AnchorCrossCheckFailed,
+                    'anchor.resolved records a '.$name.' of '.$this->describeNumber($pair[1]).' against a declared '
+                        .$name.' of '.$this->describeNumber($pair[0]).', which is '.$this->describeNumber($distance)
+                        .' pt apart and outside the '.$this->describeNumber($tolerance).' pt tolerance the anchor '
+                        .'states. A receipt that records a failed check is not a record that the check passed.',
+                );
+
+                return;
+            }
+        }
+    }
+
+    /**
+     * Two numbers to compare, or null when either is not a number — in which case the type error
+     * has already been reported and there is nothing useful to say about the difference.
+     *
+     * @return array{float, float}|null
+     */
+    private function numericPair(mixed $declared, mixed $recorded): ?array
+    {
+        if ((! is_int($declared) && ! is_float($declared)) || (! is_int($recorded) && ! is_float($recorded))) {
+            return null;
+        }
+
+        return [(float) $declared, (float) $recorded];
     }
 
     /**

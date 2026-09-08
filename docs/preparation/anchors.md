@@ -81,7 +81,13 @@ be handed a document that calls itself 1.0 while carrying members its contract d
 A document keeps the version it arrived with. One that uses none of the new members stays a 1.0
 document — byte for byte, digest for digest — and this build reads both. The only thing that moves
 a version is the service *rewriting* a field set, which in practice means resolving its anchors:
-the result is stamped 1.1 because that is what it was written as.
+the result is stamped 1.1 because that is what it was written as. A generator that builds a field
+document from scratch — the Firma facade does — stamps `SchemaVersion::CURRENT` for the same
+reason.
+
+The importer enforces it rather than trusting every generator to remember: an anchor member that
+arrived in 1.1 is refused in a document declaring 1.0, with `unknown_property`, which is exactly
+what a consumer holding `field-schema-1.0.json` would say.
 
 **`required`** is the field-level rule applied to the anchor: an unstated requirement fails
 closed.
@@ -122,8 +128,13 @@ is no declared rectangle for it to be a tolerance of.
 
 `anchor.required: false` is a validation error here too, for the mirror-image reason: in this mode
 the rectangle is authoritative and the anchor only confirms it, so an absent anchor has no
-placement waiting on it to omit. Honouring it would delete a field the document positioned
-itself.
+placement waiting on it to omit. Honouring it would delete a field the document positioned itself.
+
+A cross-check that carries a `resolved` receipt **must** state its `tolerance`, and the importer
+re-checks the receipt against the declared rectangle every time it reads the document. Without
+that the mode would be worse than absent: a receipt naming the document's own digest is what stops
+resolution running again, so a stored disagreement of any size would never be looked at and the
+document would carry a record saying it had been verified.
 
 ## Scope: one page, the field's own
 
@@ -158,11 +169,11 @@ coordinate. It happens before anybody is invited, so nothing has been shown for 
 is nothing an acceptance could already bind to. Afterwards the rule holds without an exception:
 **nothing re-resolves**, and a rectangle a signer saw can never move.
 
-Resolution runs before `send()` opens its transaction, so a PDF parse never happens while the
-envelope row is locked. That is safe because resolution is a pure function of the copied field
-schema and the document's bytes, and the version compare-and-swap pins both: the outcome records
-the digest of the field set it ran against, and a locked row that disagrees is resolved again
-under the lock rather than trusted.
+Resolution runs **before** either transaction opens — `send()`'s and `publish()`'s alike — so a
+private-disk read and a content-stream parse never happen while a row is locked. That is safe
+because resolution is a pure function of the field set and the document's bytes: the outcome
+records the digest of the field set it ran against, and a locked row that disagrees is resolved
+again under the lock rather than trusted.
 
 Two things make that guarantee checkable rather than a matter of care. Every receipt names the
 digest of the bytes it was measured in, so a field already resolved against an envelope's own
@@ -240,7 +251,14 @@ sender fixing one does not discover the next afterwards.
 | `anchor_occurrence_out_of_range` | `occurrence: n` and fewer than *n* matches exist |
 | `anchor_cross_check_failed` | a `cross_check` anchor resolved further than `tolerance` from the declared rectangle |
 | `anchor_resolved_off_page` | the offset put the rectangle off the page it was found on |
-| `anchor_text_unreadable` | the document's text could not be extracted at all. The *cause* goes to the service log, never to the caller: a storage adapter's message carries the private disk and object path, and no response reveals those |
+| `anchor_text_unreadable` | the bytes were **read** and could not be parsed. The *cause* goes to the service log, never to the caller: a parser's message carries engine internals, and no response reveals those |
+
+A document whose bytes cannot be read *at all* is not in that table, and deliberately so. A disk
+that is down is not a field set that is wrong: reporting it as a 422 would tell a sender to
+correct a document that needs no correcting, and would put a transient failure in the bucket
+clients never retry. It raises `AnchorDocumentUnavailable` instead — `document_unavailable`, a
+**503** on the native API with `details.retryable` — and the disk name and object path go to the
+log rather than to the caller.
 | `anchor_optional_on_required_field` | `anchor.required: false` on a field whose own `required` is true |
 | `invalid_format` | `anchor.required: false` with `cross_check`, `tolerance` with `replace`, or a `replace` receipt whose `rect` is not the field's |
 

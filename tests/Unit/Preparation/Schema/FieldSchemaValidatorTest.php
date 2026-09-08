@@ -89,6 +89,104 @@ class FieldSchemaValidatorTest extends TestCase
      * @return iterable<string, array{0: callable(array<string, mixed>): array<string, mixed>, 1: ValidationCode, 2: string}>
      */
     /**
+     * The version string has to be a contract, not a label.
+     *
+     * A generator that stamped `1.0` and emitted a `resolved` receipt would produce a document
+     * every consumer holding `field-schema-1.0.json` rejects — that file forbids undeclared
+     * properties — while this service called it valid. So the members are refused in a document
+     * that does not declare the version which declares them, with the code such a consumer would
+     * use.
+     */
+    public function test_a_1_0_document_may_not_use_the_anchor_members_1_1_introduced(): void
+    {
+        foreach (FieldSchemaValidator::ANCHOR_MEMBERS_SINCE_1_1 as $member) {
+            $document = FieldSchemaFixture::asArray();
+            $document['schema_version'] = '1.0';
+            unset($document['fields'][9]['anchor']['required']);
+            $document['fields'][5]['anchor'][$member] = self::sampleAnchorMember($member);
+
+            $result = (new FieldSchemaValidator)->validate($document);
+            $undeclared = array_values(array_filter(
+                $result->at('/fields/5/anchor/'.$member),
+                static fn ($error): bool => $error->code === ValidationCode::UnknownProperty,
+            ));
+
+            // `tolerance` also draws the "only with cross_check" error here, which is a separate
+            // and equally correct complaint; what matters is that the version refusal is one of
+            // them.
+            $this->assertCount(1, $undeclared, 'anchor.'.$member.' should be refused in a 1.0 document.');
+            $this->assertStringContainsString('1.1', $undeclared[0]->message);
+        }
+    }
+
+    public function test_the_same_members_are_accepted_once_the_document_declares_1_1(): void
+    {
+        $document = FieldSchemaFixture::asArray();
+        $document['fields'][5]['anchor']['placement'] = 'replace';
+
+        $this->assertTrue((new FieldSchemaValidator)->validate($document)->isValid());
+    }
+
+    /**
+     * A cross-check receipt is the record that the check passed, so it has to survive the check.
+     *
+     * Without this the mode is worse than absent: a receipt naming the document's own digest
+     * stops resolution running again, so a stored disagreement of any size would never be looked
+     * at, and the document would carry a record saying it had been verified.
+     */
+    public function test_a_cross_check_receipt_that_disagrees_with_the_rect_is_refused(): void
+    {
+        $document = FieldSchemaFixture::asArray();
+        $document['fields'][5]['anchor']['placement'] = 'cross_check';
+        $document['fields'][5]['anchor']['tolerance'] = 1;
+        $document['fields'][5]['anchor']['resolved'] = self::receipt([
+            // The field's rect is at x 330; this says the anchor resolved 60 pt away.
+            'rect' => ['x' => 390, 'y' => 650, 'width' => 170, 'height' => 36],
+        ]);
+
+        $result = (new FieldSchemaValidator)->validate($document);
+
+        $this->assertTrue($result->hasCode(ValidationCode::AnchorCrossCheckFailed));
+        $this->assertSame('/fields/5/anchor/resolved/rect/x', $result->at('/fields/5/anchor/resolved/rect/x')[0]->path);
+    }
+
+    public function test_a_cross_check_receipt_within_the_stated_tolerance_is_accepted(): void
+    {
+        $document = FieldSchemaFixture::asArray();
+        $document['fields'][5]['anchor']['placement'] = 'cross_check';
+        $document['fields'][5]['anchor']['tolerance'] = 2;
+        $document['fields'][5]['anchor']['resolved'] = self::receipt([
+            'rect' => ['x' => 331.5, 'y' => 650, 'width' => 170, 'height' => 36],
+        ]);
+
+        $this->assertTrue((new FieldSchemaValidator)->validate($document)->isValid());
+    }
+
+    public function test_a_cross_check_receipt_without_a_tolerance_has_nothing_to_prove(): void
+    {
+        $document = FieldSchemaFixture::asArray();
+        $document['fields'][5]['anchor']['placement'] = 'cross_check';
+        $document['fields'][5]['anchor']['resolved'] = self::receipt();
+
+        $result = (new FieldSchemaValidator)->validate($document);
+
+        $this->assertSame(
+            [ValidationCode::MissingProperty],
+            array_map(static fn ($error) => $error->code, $result->at('/fields/5/anchor/resolved')),
+        );
+    }
+
+    private static function sampleAnchorMember(string $member): mixed
+    {
+        return match ($member) {
+            'placement' => 'replace',
+            'required' => true,
+            'tolerance' => 2,
+            default => self::receipt(),
+        };
+    }
+
+    /**
      * The reason 1.1 is a new contract file rather than an edit to 1.0.
      *
      * A document written before the anchor members existed says `"1.0"`, and this build still

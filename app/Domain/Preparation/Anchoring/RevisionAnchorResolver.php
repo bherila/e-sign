@@ -11,6 +11,7 @@ use App\Domain\Preparation\Documents\Models\DocumentRevision;
 use App\Domain\Preparation\Documents\PreflightPageSizes;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\ValidationCode;
+use App\Domain\Preparation\Text\TextExtractionException;
 use App\Domain\Preparation\Text\TextRun;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -83,41 +84,63 @@ final readonly class RevisionAnchorResolver
      */
     private function runs(FieldSchemaDocument $schema, string $documentSha256, DocumentRevision $revision): array
     {
+        $bytes = $this->bytes($revision);
+
         try {
-            return $this->text->extract($this->bytes($revision));
-        } catch (Throwable $failure) {
-            // The cause goes to the log, where an operator can see all of it. It does not go to
-            // the caller: a filesystem adapter's message routinely carries the private disk name
-            // and object path, and a parser's carries engine internals — neither of which any
-            // other document response is allowed to reveal (docs/BLOB_STORAGE.md). What the
-            // sender gets is the stable code and a sentence they can act on.
-            Log::error('Anchor resolution could not read a document revision.', [
-                'document_revision_id' => $revision->public_id,
-                'exception' => $failure::class,
-                'message' => $failure->getMessage(),
-            ]);
+            return $this->text->extract($bytes);
+        } catch (TextExtractionException $failure) {
+            // Read, and not parseable. That *is* something about this document, so it is reported
+            // to the sender — but only as the stable code. A parser's message carries engine
+            // internals, and no document response reveals those (docs/BLOB_STORAGE.md).
+            $this->log($revision, $failure);
 
             throw new AnchorResolutionFailed($this->unreadableProblems($schema, $documentSha256));
         }
     }
 
     /**
-     * @throws DocumentStorageException
+     * The revision's stored bytes.
+     *
+     * A failure here is the storage layer's, not the caller's, so it leaves as
+     * {@see AnchorDocumentUnavailable} rather than as something that tells a sender to correct a
+     * field set that is perfectly valid.
+     *
+     * @throws AnchorDocumentUnavailable
      */
     private function bytes(DocumentRevision $revision): string
     {
-        $bytes = $this->blobs->disk((string) $revision->disk)->get((string) $revision->path);
+        try {
+            $bytes = $this->blobs->disk((string) $revision->disk)->get((string) $revision->path);
+        } catch (Throwable $failure) {
+            $this->log($revision, $failure);
+
+            throw AnchorDocumentUnavailable::forRevision((string) $revision->public_id, $failure);
+        }
 
         if (! is_string($bytes) || $bytes === '') {
-            // Caught by the caller, logged, and never returned: the disk name is a storage
-            // handle, and those do not appear in responses.
-            throw new DocumentStorageException(
-                'Document revision '.$revision->public_id.' has no readable bytes on disk ['.$revision->disk.'], '
-                .'so no anchor in it can be resolved.',
-            );
+            $this->log($revision, new DocumentStorageException(
+                'Document revision '.$revision->public_id.' has no readable bytes on disk ['.$revision->disk.'].',
+            ));
+
+            throw AnchorDocumentUnavailable::forRevision((string) $revision->public_id);
         }
 
         return $bytes;
+    }
+
+    /**
+     * The whole cause, in the log, where an operator can see it.
+     *
+     * A filesystem adapter's message routinely carries the private disk name and object path, and
+     * a parser's carries engine internals. Neither reaches a response.
+     */
+    private function log(DocumentRevision $revision, Throwable $failure): void
+    {
+        Log::error('Anchor resolution could not read a document revision.', [
+            'document_revision_id' => $revision->public_id,
+            'exception' => $failure::class,
+            'message' => $failure->getMessage(),
+        ]);
     }
 
     /**

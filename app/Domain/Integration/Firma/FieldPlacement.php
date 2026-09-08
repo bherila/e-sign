@@ -12,6 +12,7 @@ use App\Domain\Preparation\Geometry\PageGeometry;
 use App\Domain\Preparation\Schema\AnchorPlacementMode;
 use App\Domain\Preparation\Schema\CanonicalNumber;
 use App\Domain\Preparation\Schema\CoordinateSpaceDeclaration;
+use App\Domain\Preparation\Schema\SchemaVersion;
 use App\Domain\Preparation\Text\Anchor;
 use App\Domain\Preparation\Text\AnchorOccurrence;
 use App\Domain\Preparation\Text\AnchorOrigin;
@@ -307,7 +308,11 @@ final readonly class FieldPlacement
         }
 
         return [
-            'schema_version' => '1.0',
+            // The version this build writes, not a literal. An anchored field carries a
+            // `resolved` receipt, which is a 1.1 member, and a generated document that called
+            // itself 1.0 while containing one would violate the unchanged 1.0 contract's
+            // `additionalProperties: false` the moment a consumer validated it.
+            'schema_version' => SchemaVersion::CURRENT,
             'document_id' => $documentId,
             // Always the native tuple. The schema records the space its numbers are in, and
             // by the time a definition reaches here they are native points.

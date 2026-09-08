@@ -6,6 +6,7 @@ namespace App\Domain\Integration\Native;
 
 use App\Domain\Delivery\Outbound\Exceptions\DestinationRefusedException;
 use App\Domain\Delivery\Webhooks\Exceptions\UnknownEventNameException;
+use App\Domain\Preparation\Anchoring\AnchorDocumentUnavailable;
 use App\Domain\Preparation\Schema\InvalidFieldSchemaException;
 use App\Domain\Preparation\Templates\TemplateStateException;
 use App\Domain\Signing\Exceptions\FieldSubmissionRejected;
@@ -66,6 +67,15 @@ final class ApiErrorMap
                 ErrorCode::Conflict,
                 $exception->getMessage(),
                 ['subject' => $exception->subject, 'expected_version' => $exception->expectedVersion],
+            ),
+
+            // Not a validation failure: the field set is fine and the storage is not. A 422 here
+            // would tell the caller to correct a document that needs no correcting, and would
+            // land in the bucket clients never retry.
+            $exception instanceof AnchorDocumentUnavailable => ApiException::of(
+                ErrorCode::DocumentUnavailable,
+                $exception->getMessage(),
+                ['retryable' => true],
             ),
 
             // Every reason at once, because send is the last cheap moment to fix any of them.

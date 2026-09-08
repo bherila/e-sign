@@ -504,6 +504,47 @@ describe("validateFieldSchema", () => {
       "/fields/5/anchor/required",
     ],
     [
+      "a 1.1 anchor member in a document that declares 1.0",
+      (raw) => {
+        raw.schema_version = "1.0";
+        delete raw.fields[9].anchor.required;
+        raw.fields[5].anchor.placement = "replace";
+      },
+      "unknown_property",
+      "/fields/5/anchor/placement",
+    ],
+    [
+      "a cross-check receipt that disagrees with the declared rectangle",
+      (raw) => {
+        raw.fields[5].anchor.placement = "cross_check";
+        raw.fields[5].anchor.tolerance = 1;
+        raw.fields[5].anchor.resolved = {
+          document_sha256: "d".repeat(64),
+          page: 2,
+          occurrence_index: 1,
+          anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
+          rect: { x: 390, y: 650, width: 170, height: 36 },
+        };
+      },
+      "anchor_cross_check_failed",
+      "/fields/5/anchor/resolved/rect/x",
+    ],
+    [
+      "a cross-check receipt with no tolerance to have passed by",
+      (raw) => {
+        raw.fields[5].anchor.placement = "cross_check";
+        raw.fields[5].anchor.resolved = {
+          document_sha256: "d".repeat(64),
+          page: 2,
+          occurrence_index: 1,
+          anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
+          rect: { x: 330, y: 650, width: 170, height: 36 },
+        };
+      },
+      "missing_property",
+      "/fields/5/anchor/resolved",
+    ],
+    [
       "an optional anchor that only cross-checks a rectangle it cannot omit",
       (raw) => {
         raw.fields[9].anchor.placement = "cross_check";

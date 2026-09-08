@@ -109,6 +109,16 @@ enum ErrorCode: string
 
     /* ------------------------------------------------------------------------ 500 */
 
+    /**
+     * A document this service holds could not be read, so its anchors could not be resolved.
+     *
+     * Separate from `internal_error` because it says something a client can act on: nothing about
+     * the request is wrong, and the same call may succeed on a retry. Reporting it as a 422
+     * instead would tell a sender to correct a field set that is perfectly valid, and would put a
+     * transient storage failure in the bucket clients never retry.
+     */
+    case DocumentUnavailable = 'document_unavailable';
+
     case InternalError = 'internal_error';
 
     public function status(): int
@@ -134,6 +144,7 @@ enum ErrorCode: string
             self::UnknownEventName => Response::HTTP_UNPROCESSABLE_ENTITY,
             self::TooManyRequests => Response::HTTP_TOO_MANY_REQUESTS,
             self::Unsupported => Response::HTTP_NOT_IMPLEMENTED,
+            self::DocumentUnavailable => Response::HTTP_SERVICE_UNAVAILABLE,
             self::InternalError => Response::HTTP_INTERNAL_SERVER_ERROR,
         };
     }

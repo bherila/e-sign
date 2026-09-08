@@ -8,6 +8,8 @@ use App\Domain\Identity\Credentials\IssuedServiceCredential;
 use App\Domain\Preparation\Documents\DocumentBlobStore;
 use App\Domain\Preparation\Documents\Models\Document;
 use App\Domain\Preparation\Schema\AnchorPlacementMode;
+use App\Domain\Preparation\Schema\FieldSchemaValidator;
+use App\Domain\Preparation\Schema\SchemaVersion;
 use App\Domain\Signing\Envelopes\EnvelopeState;
 use App\Domain\Signing\Models\Envelope;
 use App\Domain\Signing\Sessions\Models\RecipientInvitation;
@@ -271,6 +273,47 @@ class FirmaCreateAndSendTest extends TestCase
             $envelope->field_schema_sha256,
         );
         $this->assertNull($envelope->omitted_anchor_fields);
+    }
+
+    /**
+     * A generated document has to declare the version it was generated as.
+     *
+     * The emitted anchor carries a `resolved` receipt, which is a 1.1 member. A document that
+     * said 1.0 while containing one would be rejected by every consumer holding the unchanged
+     * 1.0 contract — it forbids undeclared properties — and the envelope persists that document
+     * verbatim, because send finds the receipt already matches its digest and rewrites nothing.
+     */
+    public function test_a_generated_schema_declares_the_version_it_was_generated_as(): void
+    {
+        [, $issued] = $this->scenario();
+
+        $response = $this->postJson(self::BASE.'/create-and-send', [
+            'name' => 'Synthetic anchored agreement',
+            'document' => base64_encode(PdfFixtures::bytes('single-page-letter')),
+            'recipients' => [['first_name' => 'Dana', 'email' => 'dana@buyer.example.test', 'order' => 1]],
+            'fields' => [[
+                'type' => 'signature',
+                'page_number' => 1,
+                'anchor' => ['text' => 'Signature:', 'occurrence' => 'sole'],
+                'position' => [
+                    'x' => 0.0,
+                    'y' => 0.0,
+                    'width' => 170.0 / self::PAGE_WIDTH * 100,
+                    'height' => 36.0 / self::PAGE_HEIGHT * 100,
+                ],
+            ]],
+        ], FirmaFacadeScenario::headers($issued))->assertStatus(201);
+
+        $envelope = Envelope::query()->where('public_id', $response->json('id'))->firstOrFail();
+
+        $this->assertSame(SchemaVersion::CURRENT, $envelope->field_schema['schema_version']);
+        $this->assertNotNull($envelope->fieldSchema()->fields[0]->anchor?->resolved);
+
+        // And it is a document the published contract for that version accepts.
+        $this->assertTrue(
+            (new FieldSchemaValidator)->validate($envelope->field_schema)->isValid(),
+            'The stored schema must re-import cleanly; an envelope carries it on every request.',
+        );
     }
 
     /**

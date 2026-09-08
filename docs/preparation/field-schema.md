@@ -149,7 +149,10 @@ field-schema digest every attestation is bound to — unchanged.
 
 `placement`, `required`, `tolerance` and `resolved` are additive optional members and therefore
 arrive in **schema 1.1**. `resources/schema/field-schema-1.0.json` is unchanged and still
-published; a 1.0 document keeps its version and its bytes, and this build reads both.
+published; a 1.0 document keeps its version and its bytes, and this build reads both. Using one of
+those members in a document that declares 1.0 is `unknown_property` — exactly what a consumer
+holding the 1.0 contract would say — so the version string is enforced rather than merely
+written.
 
 `occurrence` and `origin` are the serialised form of `Text\AnchorOccurrence` and
 `Text\AnchorOrigin`, so the document cannot express a placement the resolver does not implement,
@@ -224,7 +227,7 @@ breaking change.
 | `anchor_not_found` | a required anchor's text is not on the field's page |
 | `anchor_ambiguous` | `occurrence: "sole"` matched more than once |
 | `anchor_occurrence_out_of_range` | `occurrence: n` with fewer than *n* matches |
-| `anchor_text_unreadable` | the document's text could not be extracted, so no anchor in it can be resolved |
+| `anchor_text_unreadable` | the document's bytes were read and could not be parsed. Bytes that could not be *read* are a retryable server failure instead, never a validation error |
 | `anchor_cross_check_failed` | a `cross_check` anchor resolved further than its tolerance from the declared rect |
 | `anchor_resolved_off_page` | an anchor's offset put the rectangle off the page it was found on |
 

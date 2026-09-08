@@ -376,7 +376,14 @@ final readonly class TemplateService
             throw TemplateStateException::templateRetired($template);
         }
 
-        return DB::transaction(function () use ($version, $actor, $template): TemplateVersion {
+        // Outside the transaction, for the reason EnvelopeStateMachine::send() gives: resolving
+        // means reading a document object and parsing its content streams, and doing that under
+        // `lockForUpdate()` would hold the template-version row for the length of a PDF parse.
+        // It is safe out here because the result is confirmed against the locked row below, and
+        // a draft nobody else is editing will simply match.
+        $prepared = $this->resolveAnchors($version);
+
+        return DB::transaction(function () use ($version, $actor, $template, $prepared): TemplateVersion {
             /** @var TemplateVersion $locked */
             $locked = TemplateVersion::query()
                 ->whereKey($version->getKey())
@@ -387,7 +394,7 @@ final readonly class TemplateService
                 throw TemplateStateException::versionAlreadyPublished($locked->public_id);
             }
 
-            $resolution = $this->resolveAnchors($locked);
+            $resolution = $this->resolutionFor($locked, $prepared);
 
             if ($resolution->changed()) {
                 $schema = $resolution->schema;
@@ -603,6 +610,26 @@ final readonly class TemplateService
         }
 
         return FieldSchemaDocument::fromArray($fieldSchema);
+    }
+
+    /**
+     * The resolution to store, confirmed against the row actually holding the lock.
+     *
+     * {@see publish()} resolves before opening the transaction so a PDF parse does not happen
+     * under the row lock. A draft can still be edited between the two, so the digest of the field
+     * set the pass ran against is compared with the locked row's, and a disagreement resolves
+     * again — inside the lock this time, because correctness outranks the lock-duration saving
+     * and a racing edit is rare enough that paying for it twice costs nothing in practice.
+     *
+     * @throws InvalidFieldSchemaException
+     */
+    private function resolutionFor(TemplateVersion $locked, AnchorResolutionOutcome $prepared): AnchorResolutionOutcome
+    {
+        if (hash_equals((string) $locked->field_schema_sha256, $prepared->sourceSchemaSha256)) {
+            return $prepared;
+        }
+
+        return $this->resolveAnchors($locked);
     }
 
     /**

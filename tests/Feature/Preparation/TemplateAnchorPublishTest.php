@@ -7,6 +7,8 @@ namespace Tests\Feature\Preparation;
 use App\Domain\Identity\Audit\AuditEvent;
 use App\Domain\Identity\Enums\WorkspaceRole;
 use App\Domain\Identity\Models\Workspace;
+use App\Domain\Preparation\Anchoring\RevisionAnchorResolver;
+use App\Domain\Preparation\Contracts\PdfTextLocator;
 use App\Domain\Preparation\Documents\DocumentIntake;
 use App\Domain\Preparation\Documents\Models\Document;
 use App\Domain\Preparation\Schema\AnchorPlacementMode;
@@ -16,7 +18,9 @@ use App\Domain\Preparation\Templates\Models\TemplateVersion;
 use App\Domain\Preparation\Templates\TemplateService;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use ReflectionMethod;
 use Tests\Support\DocumentWorkspace;
 use Tests\Support\FieldSchemaFixture;
 use Tests\TestCase;
@@ -133,6 +137,80 @@ class TemplateAnchorPublishTest extends TestCase
         // does not preserve object key order, so the bytes that come back are not necessarily
         // the bytes that went in (docs/preparation/templates.md).
         $this->assertSame($before, [$published?->canonicalFieldSchemaJson(), $published?->field_schema_sha256]);
+    }
+
+    /**
+     * The document is read before the transaction opens, not inside it.
+     *
+     * Resolving means a private-disk read and a full content-stream parse. Under
+     * `lockForUpdate()` that would hold the template-version row for the length of a PDF parse,
+     * which is where lock-wait timeouts start; `send()` deliberately does not do it, and neither
+     * does this. The observable proof is that no transaction is open while the document is being
+     * read.
+     */
+    public function test_the_document_is_read_before_the_row_is_locked(): void
+    {
+        $template = $this->template();
+        $this->draft($template, FieldSchemaFixture::asArray());
+
+        // RefreshDatabase already holds a transaction open around the test, so the baseline is
+        // whatever depth we are at now; publish opening its own would take it one deeper.
+        $baseline = DB::transactionLevel();
+        $depthWhileReading = null;
+        $locator = app(PdfTextLocator::class);
+
+        app()->instance(PdfTextLocator::class, new class($locator, $depthWhileReading) implements PdfTextLocator
+        {
+            public function __construct(private readonly PdfTextLocator $inner, public mixed &$depth) {}
+
+            public function extract(string $pdfBytes, ?int $page = null): array
+            {
+                $this->depth = DB::transactionLevel();
+
+                return $this->inner->extract($pdfBytes, $page);
+            }
+        });
+
+        app(TemplateService::class)->publish($this->versionOf($template), $this->sender);
+
+        $this->assertSame(
+            $baseline,
+            $depthWhileReading,
+            'The PDF was parsed inside the publish transaction, holding the row lock across it.',
+        );
+        $this->assertNotNull($this->versionOf($template)->published_at);
+    }
+
+    /**
+     * And the result is still confirmed against the row that holds the lock.
+     *
+     * Resolving outside the transaction means the draft could in principle be edited in between,
+     * so the outcome records the digest of the field set it ran against and a disagreement
+     * resolves again under the lock rather than being stored.
+     */
+    public function test_a_resolution_that_ran_against_a_different_field_set_is_not_stored(): void
+    {
+        $template = $this->template();
+        $draft = $this->draft($template, FieldSchemaFixture::asArray());
+
+        $service = app(TemplateService::class);
+        $stale = $draft->fieldSchemaDocument();
+
+        // A pass computed against a field set that is not the one on the row.
+        $prepared = app(RevisionAnchorResolver::class)->resolve(
+            $draft->documentRevision,
+            $stale->withFields([$stale->fields[0]]),
+            omitAbsentFields: false,
+        );
+
+        $confirmed = (new ReflectionMethod($service, 'resolutionFor'))->invoke($service, $draft, $prepared);
+
+        // Discarded and redone: the confirmed outcome describes the whole field set on the row.
+        $this->assertCount(count($stale->fields), $confirmed->schema->fields);
+        $this->assertSame(
+            hash('sha256', $draft->fieldSchemaDocument()->canonicalJson()),
+            $confirmed->sourceSchemaSha256,
+        );
     }
 
     // ------------------------------------------------------------------------ visible failure

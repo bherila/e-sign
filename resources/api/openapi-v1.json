@@ -1944,6 +1944,7 @@
                   "destination_refused",
                   "unknown_event_name",
                   "unsupported",
+                  "document_unavailable",
                   "internal_error"
                 ],
                 "description": "Stable machine code. Renaming one is a breaking change."

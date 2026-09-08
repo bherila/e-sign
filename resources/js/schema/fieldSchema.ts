@@ -297,6 +297,11 @@ export const FIELD_OPTIONAL = ["required", "read_only", "label", "alias", "prefi
 export const RECT_REQUIRED = ["x", "y", "width", "height"] as const;
 export const ANCHOR_REQUIRED = ["text", "occurrence"] as const;
 export const ANCHOR_OPTIONAL = ["placement", "origin", "offset", "required", "tolerance", "resolved"] as const;
+/** Anchor members that arrived after 1.0, and the minor that declares them. */
+export const ANCHOR_MEMBERS_SINCE_1_1 = ["placement", "required", "tolerance", "resolved"] as const;
+
+export const ANCHOR_MEMBERS_MINOR = 1;
+
 export const RESOLVED_ANCHOR_REQUIRED = [
   "document_sha256",
   "page",
@@ -911,7 +916,7 @@ function checkFields(
 
     if ("anchor" in field) {
       const fieldRequired = typeof field["required"] === "boolean" ? field["required"] : true;
-      checkAnchor(`${path}/anchor`, field["anchor"], fieldRequired, field["rect"], issues);
+      checkAnchor(`${path}/anchor`, field["anchor"], fieldRequired, field["rect"], declaredMinor(document), issues);
     }
   });
 }
@@ -1102,11 +1107,30 @@ function checkPrefill(
   }
 }
 
+/**
+ * The minor version a document declares, or null when it does not declare a usable one.
+ *
+ * Only used to decide which members a document may contain; every other check is
+ * version-independent, and a document with no readable version has already been reported.
+ */
+function declaredMinor(document: Record<string, unknown>): number | null {
+  const declared = document["schema_version"];
+
+  if (typeof declared !== "string") {
+    return null;
+  }
+
+  const match = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.exec(declared);
+
+  return match ? Number(match[2]) : null;
+}
+
 function checkAnchor(
   path: string,
   anchor: unknown,
   fieldRequired: boolean,
   fieldRect: unknown,
+  minor: number | null,
   issues: ValidationIssue[],
 ): void {
   if (!isObject(anchor)) {
@@ -1116,6 +1140,25 @@ function checkAnchor(
   }
 
   checkObjectShape(path, anchor, ANCHOR_REQUIRED, ANCHOR_OPTIONAL, issues);
+
+  // The version string has to be a contract, not a label: a document declaring 1.0 is read
+  // against a file that forbids undeclared properties, so a 1.1 member in it is refused with the
+  // code that consumer would use.
+  if (minor !== null && minor < ANCHOR_MEMBERS_MINOR) {
+    for (const member of ANCHOR_MEMBERS_SINCE_1_1) {
+      if (member in anchor) {
+        issues.push(
+          issue(
+            `${path}/${member}`,
+            "unknown_property",
+            `anchor.${member} arrived in schema 1.1, and this document declares 1.${minor}. Declare 1.1 to ` +
+              `use it: a document that says 1.${minor} is read against a contract that does not have it, and ` +
+              "refusing an undeclared property is what that contract does.",
+          ),
+        );
+      }
+    }
+  }
 
   if ("text" in anchor) {
     checkNonEmptyString(`${path}/text`, "anchor.text", anchor["text"], ANCHOR_TEXT_MAX_LENGTH, issues);
@@ -1130,7 +1173,8 @@ function checkAnchor(
   checkAnchorTolerance(`${path}/tolerance`, anchor, placement, issues);
 
   if ("resolved" in anchor) {
-    checkResolvedAnchor(`${path}/resolved`, anchor["resolved"], placement, fieldRect, issues);
+    const tolerance = typeof anchor["tolerance"] === "number" ? anchor["tolerance"] : null;
+    checkResolvedAnchor(`${path}/resolved`, anchor["resolved"], placement, tolerance, fieldRect, issues);
   }
 
   if ("origin" in anchor) {
@@ -1325,6 +1369,7 @@ function checkResolvedAnchor(
   path: string,
   resolved: unknown,
   placement: AnchorPlacement,
+  anchorTolerance: number | null,
   fieldRect: unknown,
   issues: ValidationIssue[],
 ): void {
@@ -1389,12 +1434,54 @@ function checkResolvedAnchor(
 
   const recorded = resolved["rect"];
 
-  if (placement !== "replace" || !isObject(fieldRect) || !isObject(recorded)) {
+  if (!isObject(fieldRect) || !isObject(recorded)) {
     return;
   }
 
-  // In `replace` mode the receipt's rectangle is where the field went, so the two must agree.
-  for (const name of RECT_REQUIRED) {
+  if (placement === "replace") {
+    // In `replace` mode the receipt's rectangle is where the field went, so the two must agree.
+    for (const name of RECT_REQUIRED) {
+      const declared = fieldRect[name];
+      const actual = recorded[name];
+
+      if (typeof declared !== "number" || typeof actual !== "number") {
+        return;
+      }
+
+      if (Math.abs(declared - actual) > CANONICAL_TOLERANCE) {
+        issues.push(
+          issue(
+            `${path}/rect/${name}`,
+            "invalid_format",
+            `anchor.resolved.rect must be the field's own rect when anchor.placement is "replace": the receipt ` +
+              `records where the field was placed, and this one says ${actual} where the field says ${declared}.`,
+          ),
+        );
+
+        return;
+      }
+    }
+
+    return;
+  }
+
+  // A cross-check receipt is the record that the check passed, so it has to survive the check —
+  // and against the tolerance the anchor itself states, because a receipt whose standard has to
+  // be looked up elsewhere proves nothing about what was applied.
+  if (anchorTolerance === null) {
+    issues.push(
+      issue(
+        path,
+        "missing_property",
+        'A "cross_check" anchor carrying anchor.resolved must also state anchor.tolerance: the receipt is the ' +
+          "record that the check passed, and without the distance it passed by there is nothing to check it against.",
+      ),
+    );
+
+    return;
+  }
+
+  for (const name of ["x", "y"] as const) {
     const declared = fieldRect[name];
     const actual = recorded[name];
 
@@ -1402,13 +1489,16 @@ function checkResolvedAnchor(
       return;
     }
 
-    if (Math.abs(declared - actual) > CANONICAL_TOLERANCE) {
+    const distance = Math.abs(declared - actual);
+
+    if (distance > anchorTolerance + CANONICAL_TOLERANCE) {
       issues.push(
         issue(
           `${path}/rect/${name}`,
-          "invalid_format",
-          `anchor.resolved.rect must be the field's own rect when anchor.placement is "replace": the receipt ` +
-            `records where the field was placed, and this one says ${actual} where the field says ${declared}.`,
+          "anchor_cross_check_failed",
+          `anchor.resolved records a ${name} of ${actual} against a declared ${name} of ${declared}, which is ` +
+            `${distance} pt apart and outside the ${anchorTolerance} pt tolerance the anchor states. A receipt ` +
+            "that records a failed check is not a record that the check passed.",
         ),
       );
 
