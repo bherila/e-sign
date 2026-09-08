@@ -285,14 +285,83 @@ return [
         'brevo_webhook_token' => env('ESIGN_MAIL_BREVO_WEBHOOK_TOKEN', ''),
 
         /*
-        | SES publishes feedback through SNS. The endpoint checks the topic ARN
-        | against this value and then asks an SnsSignatureVerifier to prove the
-        | message came from AWS. No verifier is implemented (the
-        | aws/aws-sns-message-validator package is not a dependency), so the
-        | endpoint currently rejects everything: unverified input never
-        | mutates a mail row. See docs/delivery/mail.md.
+        | SES publishes feedback through SNS, and POST /webhooks/mail/ses
+        | verifies the SNS signature with aws/aws-php-sns-message-validator
+        | before anything reaches a mail row. See docs/delivery/mail.md.
+        |
+        | `topic_arns` is the allowlist and it is the switch: with nothing in
+        | it the endpoint binds RejectingSnsMessageVerifier and refuses every
+        | message, so an unconfigured deployment fails closed. A topic ARN is
+        | not a secret — it is in console URLs and CloudTrail — so this is a
+        | routing decision, not the authentication; the signature is.
+        |
+        | `ESIGN_MAIL_SES_TOPIC_ARNS` is comma-separated. The older singular
+        | `ESIGN_MAIL_SES_TOPIC_ARN` is still read, so an existing .env keeps
+        | working.
         */
-        'ses_topic_arn' => env('ESIGN_MAIL_SES_TOPIC_ARN', ''),
+        'ses' => [
+            'topic_arns' => array_values(array_filter(
+                array_map(
+                    static fn (string $arn): string => trim($arn),
+                    explode(',', (string) env(
+                        'ESIGN_MAIL_SES_TOPIC_ARNS',
+                        (string) env('ESIGN_MAIL_SES_TOPIC_ARN', '')
+                    ))
+                ),
+                static fn (string $arn): bool => $arn !== ''
+            )),
+
+            /*
+            | Confirming an SNS subscription is an outbound request to a URL
+            | that arrived in a request body, and it is what makes this
+            | deployment start receiving a topic's traffic. Off by default:
+            | an operator confirms the subscription in the SNS console once,
+            | which is a deliberate act by someone who can see what they are
+            | subscribing to. Turn it on for an automated deployment that
+            | recreates its topic subscription, and understand that a verified
+            | message from an allowlisted topic can then make the application
+            | call AWS.
+            */
+            'auto_confirm_subscriptions' => filter_var(
+                env('ESIGN_MAIL_SES_AUTO_CONFIRM_SUBSCRIPTIONS', false),
+                FILTER_VALIDATE_BOOLEAN
+            ),
+
+            /*
+            | SNS still signs some messages with SignatureVersion 1, which is
+            | SHA-1. Refused unless this is on, because a signature scheme
+            | whose hash has practical collisions is not evidence. AWS
+            | publishes a per-topic SignatureVersion setting; set it to 2 on
+            | the topic rather than turning this on.
+            */
+            'allow_signature_version_1' => filter_var(
+                env('ESIGN_MAIL_SES_ALLOW_SIGNATURE_VERSION_1', false),
+                FILTER_VALIDATE_BOOLEAN
+            ),
+
+            /*
+            | A signature stays valid forever, so a captured notification can
+            | be replayed to walk a message's state. Messages outside this
+            | window either side of now are refused. AWS's own guidance is one
+            | hour; 15 minutes is enough for clock skew and SNS retries.
+            */
+            'replay_window_seconds' => (int) env('ESIGN_MAIL_SES_REPLAY_WINDOW_SECONDS', 900),
+
+            /*
+            | Signing certificates are cached by URL so a notification flood is
+            | not also a certificate-fetch flood against AWS. SNS rotates the
+            | certificate rarely and publishes a new URL when it does, so a
+            | long TTL costs nothing.
+            */
+            'certificate_cache_ttl_seconds' => (int) env('ESIGN_MAIL_SES_CERT_CACHE_TTL_SECONDS', 3600),
+
+            /*
+            | Refusals are recorded, not swallowed — but this is an
+            | unauthenticated POST surface, so one row per reason per window,
+            | not one row per hostile request.
+            */
+            'refusal_record_window_seconds' => (int) env('ESIGN_MAIL_SES_REFUSAL_WINDOW_SECONDS', 300),
+        ],
 
         // Backlog thresholds for the mail_backlog readiness probe: the age in
         // seconds of the oldest message still `queued`, and the number of

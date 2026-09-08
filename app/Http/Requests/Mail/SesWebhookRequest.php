@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\Mail;
 
+use App\Domain\Delivery\Mail\Feedback\SesFeedbackRefusals;
+use App\Domain\Delivery\Mail\Feedback\SnsTopicAllowlist;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -15,14 +17,19 @@ use Illuminate\Validation\Rule;
  * content here rather than in the controller, which is also what makes the rules below
  * apply to anything at all.
  *
- * authorize() checks only the topic ARN: this endpoint serves exactly one SNS topic, named
- * in configuration, and a message from any other topic is somebody else's traffic. It is
- * emphatically *not* the security check — a topic ARN is not a secret and appears in AWS
- * console URLs and CloudTrail. The real check is the SNS signature, which
- * SnsMessageVerifier performs in the controller and which currently rejects everything by
- * design. See App\Domain\Delivery\Mail\Feedback\RejectingSnsMessageVerifier.
+ * authorize() checks only the topic ARN, against the allowlist in
+ * `esign.mail.ses.topic_arns`. It is emphatically *not* the security check — a topic ARN is
+ * not a secret and appears in AWS console URLs and CloudTrail. The real check is the SNS
+ * signature, which SnsMessageVerifier performs in the controller.
  *
- * An unset topic ARN disables the endpoint.
+ * It is here anyway, ahead of the signature, for two reasons. It is the cheap one: rejecting
+ * somebody else's traffic before a certificate fetch and a public-key operation keeps this
+ * endpoint from being a work amplifier. And the answers differ — a foreign topic is a
+ * permanent 403 that SNS should stop retrying, while an unverifiable message is a retryable
+ * 503. AwsSnsMessageVerifier checks the allowlist a second time, so neither layer is
+ * load-bearing on its own.
+ *
+ * An empty allowlist disables the endpoint.
  */
 class SesWebhookRequest extends FormRequest
 {
@@ -34,19 +41,7 @@ class SesWebhookRequest extends FormRequest
 
     public function authorize(): bool
     {
-        $configured = trim((string) config('esign.mail.ses_topic_arn'));
-
-        if ($configured === '') {
-            return false;
-        }
-
-        $provided = $this->input('TopicArn');
-
-        if (! is_string($provided) || trim($provided) === '') {
-            return false;
-        }
-
-        return hash_equals($configured, trim($provided));
+        return $this->topics()->allows($this->input('TopicArn'));
     }
 
     /**
@@ -54,28 +49,36 @@ class SesWebhookRequest extends FormRequest
      */
     public function rules(): array
     {
+        $isConfirmation = fn (): bool => in_array(
+            $this->input('Type'),
+            ['SubscriptionConfirmation', 'UnsubscribeConfirmation'],
+            true,
+        );
+
         return [
             'Type' => ['required', 'string', Rule::in(self::MESSAGE_TYPES)],
             'TopicArn' => ['required', 'string', 'max:2048'],
             'MessageId' => ['required', 'string', 'max:191'],
-            // The SES notification, as a JSON string inside the envelope.
-            'Message' => ['nullable', 'string'],
-            'Timestamp' => ['nullable', 'string', 'max:64'],
-            // Required so an unsigned body is a 422 rather than reaching the verifier and
-            // being refused for a reason that reads like a configuration problem.
+            /*
+             * Required, not nullable. `Message` and `Timestamp` are in the string-to-sign for
+             * every SNS message type and SNS always sends both, so an envelope missing either
+             * cannot verify. Refusing it here makes it a 422 — a malformed body — rather than
+             * a 503 that reads like this deployment declining a well-formed one.
+             */
+            'Message' => ['required', 'string'],
+            'Timestamp' => ['required', 'string', 'max:64'],
             'Signature' => ['required', 'string'],
             'SignatureVersion' => ['required', 'string', 'max:8'],
             'SigningCertURL' => ['required', 'string', 'max:2048'],
-            'SubscribeURL' => ['nullable', 'string', 'max:2048'],
             /*
-             * Named so that envelope() keeps them, because validated() drops every key the
-             * rules do not mention and these two are part of what a real verifier checks:
-             * `Token` is in the string-to-sign for a subscription or unsubscribe
-             * confirmation (and is what confirms one), and `Subject` is in it for any
-             * notification that carries one. Without them here, binding a genuine
-             * SnsMessageVerifier would fail on exactly those messages.
+             * Both are in the string-to-sign for a subscription or unsubscribe confirmation,
+             * and `Token` is what confirms one, so on those two types they are required for
+             * the same reason `Message` is. `Subject` is optional everywhere and must stay
+             * *absent* rather than null when SNS omits it, because an empty `Subject` in the
+             * signed string is a signature that never verifies.
              */
-            'Token' => ['nullable', 'string', 'max:2048'],
+            'SubscribeURL' => [Rule::requiredIf($isConfirmation), 'nullable', 'string', 'max:2048'],
+            'Token' => [Rule::requiredIf($isConfirmation), 'nullable', 'string', 'max:2048'],
             'Subject' => ['nullable', 'string', 'max:255'],
         ];
     }
@@ -98,6 +101,28 @@ class SesWebhookRequest extends FormRequest
         return $envelope;
     }
 
+    /**
+     * A refused topic is recorded, not silently 403'd.
+     *
+     * An operator who has just pointed SNS at this endpoint and mistyped the ARN sees
+     * nothing at all otherwise: SNS reports a 403 on its own side, this side reports
+     * nothing, and the two are never looked at together. `topic_not_allowlisted` with the
+     * ARN that was actually offered answers it in one line. Collapsed per window by
+     * SesFeedbackRefusals, because this is a public POST surface.
+     */
+    protected function failedAuthorization(): void
+    {
+        /** @var SesFeedbackRefusals $refusals */
+        $refusals = $this->container->make(SesFeedbackRefusals::class);
+
+        $refusals->record(
+            $this->topics()->isConfigured() ? 'topic_not_allowlisted' : 'no_topic_configured',
+            $this->all(),
+        );
+
+        parent::failedAuthorization();
+    }
+
     protected function prepareForValidation(): void
     {
         // The input source, not all(): a query parameter must not be mistaken for a body
@@ -111,5 +136,10 @@ class SesWebhookRequest extends FormRequest
         if (is_array($decoded) && ! array_is_list($decoded)) {
             $this->merge($decoded);
         }
+    }
+
+    private function topics(): SnsTopicAllowlist
+    {
+        return SnsTopicAllowlist::fromConfig(config('esign.mail.ses.topic_arns', []));
     }
 }
