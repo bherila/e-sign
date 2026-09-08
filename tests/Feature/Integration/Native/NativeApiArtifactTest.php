@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Integration\Native;
 
 use App\Domain\Integration\Native\ArtifactLocator;
+use App\Domain\Integration\Native\FinalizedArtifactLocator;
 use App\Domain\Integration\Native\NoArtifactsYetLocator;
 use App\Domain\Signing\Envelopes\EnvelopeState;
 use App\Domain\Signing\Models\Envelope;
@@ -25,9 +26,16 @@ class NativeApiArtifactTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_the_shipped_locator_finds_nothing(): void
+    /**
+     * The shipped locator is the real one now that finalization exists (issue #31).
+     *
+     * {@see NoArtifactsYetLocator} is kept and still honest — it is what a deployment with
+     * finalization switched off would bind, and the empty side of the seam is what the two
+     * refusals below are about — but it is no longer the default.
+     */
+    public function test_the_shipped_locator_reads_the_artifacts_table(): void
     {
-        $this->assertInstanceOf(NoArtifactsYetLocator::class, app(ArtifactLocator::class));
+        $this->assertInstanceOf(FinalizedArtifactLocator::class, app(ArtifactLocator::class));
     }
 
     public function test_an_envelope_that_has_not_completed_answers_not_completed(): void
@@ -42,10 +50,11 @@ class NativeApiArtifactTest extends TestCase
             ->assertJsonPath('error.details.state', 'sent');
     }
 
-    public function test_a_completed_envelope_with_no_locator_answers_unsupported(): void
+    public function test_a_completed_envelope_with_no_published_artifact_answers_unsupported(): void
     {
         $scenario = NativeApiScenario::create();
         $issued = $scenario->credential();
+        $this->app->instance(ArtifactLocator::class, new NoArtifactsYetLocator);
         $envelope = $this->completed($scenario);
 
         // Deliberately not `409 not_completed`: the envelope *has* completed, and telling a

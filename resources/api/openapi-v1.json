@@ -1128,7 +1128,7 @@
         ],
         "operationId": "listEnvelopeArtifacts",
         "summary": "The finished artifacts.",
-        "description": "Two different refusals, and they mean different things. An envelope that has not completed is `409 not_completed` — a statement about the envelope. A **completed** envelope with no artifacts is `501 unsupported` — a statement about this build, where finalization is not implemented yet. Neither is ever a `200` with an empty list, which would tell a caller an agreement has no PDF.",
+        "description": "Two different refusals, and they mean different things. An envelope that has not completed is `409 not_completed` — a statement about the envelope. A **completed** envelope with no published artifact is `501 unsupported` — a statement about this build, where finalization produced nothing for it. Neither is ever a `200` with an empty list, which would tell a caller an agreement has no PDF.",
         "parameters": [
           {
             "name": "envelope",
@@ -1187,7 +1187,7 @@
             }
           },
           "501": {
-            "description": "The envelope completed but artifact retrieval is not implemented in this build.",
+            "description": "The envelope completed and this build published no artifact for it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1218,6 +1218,98 @@
           },
           "500": {
             "description": "An unexpected failure. The body carries no stack trace, no file path, and no SQL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/envelopes/{envelope}/evidence-bundle": {
+      "get": {
+        "tags": [
+          "Artifacts"
+        ],
+        "operationId": "downloadEnvelopeEvidenceBundle",
+        "summary": "The whole evidence export as one zip.",
+        "description": "Everything docs/HANDOFF.md section 8 requires in an export, in one archive: the original upload, the reviewed revision, the executed PDF, the machine-readable evidence document, the human-readable completion report, the seal certificate chain, the validation report, and a `manifest.json` giving each file its SHA-256 and a sentence saying what that digest covers. The manifest is deliberately unsigned — a signature by this service over its own inventory would add no independent assurance, and the seal that matters is inside the executed PDF. Streamed through the application; nothing is presigned.",
+        "parameters": [
+          {
+            "name": "envelope",
+            "in": "path",
+            "required": true,
+            "description": "The envelope's public id (ULID).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The evidence archive.",
+            "headers": {
+              "Content-Disposition": {
+                "description": "`attachment` with an ASCII filename.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No envelope with that id exists in this credential's workspace. Another tenant's id is indistinguishable from one that does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The envelope has not completed, so there is no evidence to export.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "The envelope completed and this build published no artifact for it, so there is nothing to export.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credential, or one that is unknown, revoked, or expired. `error.code` is `invalid_credential`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is valid but was not granted the scope this endpoint requires. `error.code` is `insufficient_scope`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1304,7 +1396,7 @@
             }
           },
           "501": {
-            "description": "Artifact retrieval is not implemented in this build.",
+            "description": "The envelope completed and this build published no artifact for it.",
             "content": {
               "application/json": {
                 "schema": {
