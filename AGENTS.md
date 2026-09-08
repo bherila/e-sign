@@ -81,6 +81,9 @@ pnpm run build
 composer test
 ```
 
+CI job details, the dependency-audit allowlist format, and how to run each check locally are in
+[docs/operations/ci.md](docs/operations/ci.md).
+
 ## Database safety
 
 1. Never run `php artisan migrate` or `php artisan schema:dump` unless the user explicitly requests it.
