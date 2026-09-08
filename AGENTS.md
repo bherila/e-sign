@@ -89,8 +89,15 @@ composer test
 4. Tests must use SQLite in-memory. Do not configure tests to use any other driver.
 5. **Never edit a migration that has merged to `main`.** A deployed instance has already run it.
    Ship a new migration that alters the schema, and make it valid on SQLite, MySQL, and MariaDB
-   (SQLite cannot `ALTER TABLE ADD CONSTRAINT`; rebuild the table there if needed).
-6. Production is MySQL 8 or MariaDB. Migrations must be valid on SQLite and both engines; never
+   (SQLite cannot `ALTER TABLE ADD CONSTRAINT`; rebuild the table there if needed). The one
+   exception is a migration that has never applied anywhere because it fails on a supported
+   engine; fix it in place and say so in the PR.
+6. **Use `dateTime()` for NOT NULL date columns**, never a bare `timestamp()` without
+   `useCurrent()`. MariaDB 10.6 gives the first NOT NULL `TIMESTAMP` in a table an implicit
+   `ON UPDATE CURRENT_TIMESTAMP` (so any later UPDATE silently rewrites it) and gives the
+   second a zero default that `NO_ZERO_DATE` refuses. 11.4 and MySQL 8 do neither, so only
+   the CI matrix entry for 10.6 catches it.
+7. Production is MySQL 8 or MariaDB. Migrations must be valid on SQLite and both engines; never
    rely on an engine-specific feature without a CI test on the other engine. The only exception
    to rule 4 is the CI-only `database` job in `.github/workflows/ci.yml`, which runs
    `php artisan migrate --force` and the feature suite against disposable MySQL 8.4/MariaDB 11.4
