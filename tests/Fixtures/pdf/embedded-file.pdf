@@ -1,0 +1,57 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding /FirstChar 32 /LastChar 126 /Widths [600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600] >>
+endobj
+2 0 obj
+<< /Type /EmbeddedFile /Subtype /text#2Fplain  /Length 21 >>
+stream
+synthetic attachment
+
+endstream
+endobj
+3 0 obj
+<< /Type /Filespec /F (attachment.txt) /UF (attachment.txt) /EF << /F 2 0 R >> >>
+endobj
+4 0 obj
+<< /Names [(attachment.txt) 3 0 R] >>
+endobj
+5 0 obj
+<< /EmbeddedFiles 4 0 R >>
+endobj
+6 0 obj
+<< /Type /Pages /Kids [8 0 R] /Count 1 >>
+endobj
+7 0 obj
+<<  /Length 75 >>
+stream
+BT
+/F1 12.0 Tf
+72.0000 700.0000 Td
+(Document with an embedded file.) Tj
+ET
+
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 6 0 R /MediaBox [0.0000 0.0000 612.0000 792.0000] /CropBox [0.0000 0.0000 612.0000 792.0000] /Rotate 0 /Resources << /Font << /F1 1 0 R >> >> /Contents 7 0 R >>
+endobj
+9 0 obj
+<< /Type /Catalog /Pages 6 0 R /Names 5 0 R >>
+endobj
+xref
+0 10
+0000000000 65535 f 
+0000000015 00000 n 
+0000000528 00000 n 
+0000000643 00000 n 
+0000000740 00000 n 
+0000000793 00000 n 
+0000000835 00000 n 
+0000000892 00000 n 
+0000001018 00000 n 
+0000001217 00000 n 
+trailer <</Size 10 /Root 9 0 R /ID [<00112233445566778899AABBCCDDEEFF> <00112233445566778899AABBCCDDEEFF>]>>
+startxref
+1279
+%%EOF

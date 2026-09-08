@@ -1,0 +1,1116 @@
+[
+    {
+        "description": "One US Letter page, no rotation, CropBox equal to MediaBox at the origin.",
+        "expected_preflight": "accept",
+        "expected_rejections": [],
+        "pages": [
+            {
+                "page": 1,
+                "media_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "crop_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "rotation": 0,
+                "user_unit": 1,
+                "native_width": 612,
+                "native_height": 792,
+                "probe_native": [
+                    72,
+                    72,
+                    24,
+                    12
+                ],
+                "probe_user": [
+                    72,
+                    708,
+                    96,
+                    720
+                ],
+                "overlay_native": [
+                    100,
+                    300,
+                    170,
+                    36
+                ],
+                "text_runs": [
+                    {
+                        "text": "Mutual Non-Disclosure Agreement",
+                        "native_rect": [
+                            72,
+                            82.4,
+                            223.2,
+                            12
+                        ]
+                    },
+                    {
+                        "text": "This synthetic document exists only for import fidelity tests.",
+                        "native_rect": [
+                            72,
+                            122.4,
+                            446.4,
+                            12
+                        ]
+                    },
+                    {
+                        "text": "Signature:",
+                        "native_rect": [
+                            72,
+                            582.4,
+                            72,
+                            12
+                        ]
+                    },
+                    {
+                        "text": "Printed Name:",
+                        "native_rect": [
+                            320,
+                            582.4,
+                            93.6,
+                            12
+                        ]
+                    }
+                ]
+            }
+        ],
+        "name": "single-page-letter",
+        "file": "single-page-letter.pdf",
+        "bytes": 1482
+    },
+    {
+        "description": "Three pages of different sizes (Letter, A4, 400x600).",
+        "expected_preflight": "accept",
+        "expected_rejections": [],
+        "pages": [
+            {
+                "page": 1,
+                "media_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "crop_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "rotation": 0,
+                "user_unit": 1,
+                "native_width": 612,
+                "native_height": 792,
+                "probe_native": [
+                    50,
+                    50,
+                    20,
+                    10
+                ],
+                "probe_user": [
+                    50,
+                    732,
+                    70,
+                    742
+                ],
+                "overlay_native": [
+                    90,
+                    400,
+                    120,
+                    30
+                ],
+                "text_runs": [
+                    {
+                        "text": "Page one of three (Letter).",
+                        "native_rect": [
+                            72,
+                            82.4,
+                            194.4,
+                            12
+                        ]
+                    },
+                    {
+                        "text": "Signature:",
+                        "native_rect": [
+                            72,
+                            662.4,
+                            72,
+                            12
+                        ]
+                    }
+                ]
+            },
+            {
+                "page": 2,
+                "media_box": [
+                    0,
+                    0,
+                    595,
+                    842
+                ],
+                "crop_box": [
+                    0,
+                    0,
+                    595,
+                    842
+                ],
+                "rotation": 0,
+                "user_unit": 1,
+                "native_width": 595,
+                "native_height": 842,
+                "probe_native": [
+                    40,
+                    40,
+                    20,
+                    10
+                ],
+                "probe_user": [
+                    40,
+                    792,
+                    60,
+                    802
+                ],
+                "overlay_native": [
+                    80,
+                    380,
+                    120,
+                    30
+                ],
+                "text_runs": [
+                    {
+                        "text": "Page two of three (A4).",
+                        "native_rect": [
+                            60,
+                            72.4,
+                            165.6,
+                            12
+                        ]
+                    },
+                    {
+                        "text": "Initials:",
+                        "native_rect": [
+                            60,
+                            722.4,
+                            64.8,
+                            12
+                        ]
+                    }
+                ]
+            },
+            {
+                "page": 3,
+                "media_box": [
+                    0,
+                    0,
+                    400,
+                    600
+                ],
+                "crop_box": [
+                    0,
+                    0,
+                    400,
+                    600
+                ],
+                "rotation": 0,
+                "user_unit": 1,
+                "native_width": 400,
+                "native_height": 600,
+                "probe_native": [
+                    30,
+                    30,
+                    20,
+                    10
+                ],
+                "probe_user": [
+                    30,
+                    560,
+                    50,
+                    570
+                ],
+                "overlay_native": [
+                    60,
+                    260,
+                    100,
+                    24
+                ],
+                "text_runs": [
+                    {
+                        "text": "Page three of three (400x600).",
+                        "native_rect": [
+                            40,
+                            50.4,
+                            216,
+                            12
+                        ]
+                    },
+                    {
+                        "text": "Date:",
+                        "native_rect": [
+                            40,
+                            500.4,
+                            36,
+                            12
+                        ]
+                    }
+                ]
+            }
+        ],
+        "name": "multi-page-mixed-size",
+        "file": "multi-page-mixed-size.pdf",
+        "bytes": 2250
+    },
+    {
+        "description": "Three US Letter pages with /Rotate 90, 180 and 270.",
+        "expected_preflight": "accept",
+        "expected_rejections": [],
+        "pages": [
+            {
+                "page": 1,
+                "media_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "crop_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "rotation": 90,
+                "user_unit": 1,
+                "native_width": 792,
+                "native_height": 612,
+                "probe_native": [
+                    36,
+                    36,
+                    24,
+                    12
+                ],
+                "probe_user": [
+                    36,
+                    36,
+                    48,
+                    60
+                ],
+                "overlay_native": [
+                    120,
+                    240,
+                    150,
+                    32
+                ],
+                "text_runs": [
+                    {
+                        "text": "Rotated page 90 degrees.",
+                        "native_rect": [
+                            697.6,
+                            72,
+                            12,
+                            172.8
+                        ]
+                    },
+                    {
+                        "text": "Signature:",
+                        "native_rect": [
+                            197.6,
+                            72,
+                            12,
+                            72
+                        ]
+                    }
+                ]
+            },
+            {
+                "page": 2,
+                "media_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "crop_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "rotation": 180,
+                "user_unit": 1,
+                "native_width": 612,
+                "native_height": 792,
+                "probe_native": [
+                    36,
+                    36,
+                    24,
+                    12
+                ],
+                "probe_user": [
+                    552,
+                    36,
+                    576,
+                    48
+                ],
+                "overlay_native": [
+                    120,
+                    240,
+                    150,
+                    32
+                ],
+                "text_runs": [
+                    {
+                        "text": "Rotated page 180 degrees.",
+                        "native_rect": [
+                            360,
+                            697.6,
+                            180,
+                            12
+                        ]
+                    },
+                    {
+                        "text": "Signature:",
+                        "native_rect": [
+                            468,
+                            197.6,
+                            72,
+                            12
+                        ]
+                    }
+                ]
+            },
+            {
+                "page": 3,
+                "media_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "crop_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "rotation": 270,
+                "user_unit": 1,
+                "native_width": 792,
+                "native_height": 612,
+                "probe_native": [
+                    36,
+                    36,
+                    24,
+                    12
+                ],
+                "probe_user": [
+                    564,
+                    732,
+                    576,
+                    756
+                ],
+                "overlay_native": [
+                    120,
+                    240,
+                    150,
+                    32
+                ],
+                "text_runs": [
+                    {
+                        "text": "Rotated page 270 degrees.",
+                        "native_rect": [
+                            82.4,
+                            360,
+                            12,
+                            180
+                        ]
+                    },
+                    {
+                        "text": "Signature:",
+                        "native_rect": [
+                            582.4,
+                            468,
+                            12,
+                            72
+                        ]
+                    }
+                ]
+            }
+        ],
+        "name": "rotated-pages",
+        "file": "rotated-pages.pdf",
+        "bytes": 2250
+    },
+    {
+        "description": "MediaBox 612x792 with CropBox [36 48 576 744]; page 2 additionally has /Rotate 90.",
+        "expected_preflight": "accept",
+        "expected_rejections": [],
+        "pages": [
+            {
+                "page": 1,
+                "media_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "crop_box": [
+                    36,
+                    48,
+                    576,
+                    744
+                ],
+                "rotation": 0,
+                "user_unit": 1,
+                "native_width": 540,
+                "native_height": 696,
+                "probe_native": [
+                    40,
+                    40,
+                    24,
+                    12
+                ],
+                "probe_user": [
+                    76,
+                    692,
+                    100,
+                    704
+                ],
+                "overlay_native": [
+                    80,
+                    300,
+                    140,
+                    30
+                ],
+                "text_runs": [
+                    {
+                        "text": "Offset CropBox, no rotation.",
+                        "native_rect": [
+                            64,
+                            134.4,
+                            201.6,
+                            12
+                        ]
+                    },
+                    {
+                        "text": "Signature:",
+                        "native_rect": [
+                            64,
+                            534.4,
+                            72,
+                            12
+                        ]
+                    }
+                ]
+            },
+            {
+                "page": 2,
+                "media_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "crop_box": [
+                    36,
+                    48,
+                    576,
+                    744
+                ],
+                "rotation": 90,
+                "user_unit": 1,
+                "native_width": 696,
+                "native_height": 540,
+                "probe_native": [
+                    40,
+                    40,
+                    24,
+                    12
+                ],
+                "probe_user": [
+                    76,
+                    88,
+                    88,
+                    112
+                ],
+                "overlay_native": [
+                    200,
+                    120,
+                    140,
+                    30
+                ],
+                "text_runs": [
+                    {
+                        "text": "Offset CropBox, rotated 90.",
+                        "native_rect": [
+                            549.6,
+                            64,
+                            12,
+                            194.4
+                        ]
+                    },
+                    {
+                        "text": "Signature:",
+                        "native_rect": [
+                            149.6,
+                            64,
+                            12,
+                            72
+                        ]
+                    }
+                ]
+            }
+        ],
+        "name": "cropbox-offset",
+        "file": "cropbox-offset.pdf",
+        "bytes": 1791
+    },
+    {
+        "description": "US Letter page carrying /UserUnit 2.0: each default user-space unit is two points.",
+        "expected_preflight": "accept",
+        "expected_rejections": [],
+        "pages": [
+            {
+                "page": 1,
+                "media_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "crop_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "rotation": 0,
+                "user_unit": 2,
+                "native_width": 612,
+                "native_height": 792,
+                "probe_native": [
+                    72,
+                    72,
+                    24,
+                    12
+                ],
+                "probe_user": [
+                    72,
+                    708,
+                    96,
+                    720
+                ],
+                "overlay_native": [
+                    100,
+                    300,
+                    170,
+                    36
+                ],
+                "text_runs": [
+                    {
+                        "text": "UserUnit 2.0 page.",
+                        "native_rect": [
+                            72,
+                            82.4,
+                            129.6,
+                            12
+                        ]
+                    },
+                    {
+                        "text": "Signature:",
+                        "native_rect": [
+                            72,
+                            582.4,
+                            72,
+                            12
+                        ]
+                    }
+                ]
+            }
+        ],
+        "name": "user-unit",
+        "file": "user-unit.pdf",
+        "bytes": 1322
+    },
+    {
+        "description": "One page where the anchor string \"Signature:\" occurs three times.",
+        "expected_preflight": "accept",
+        "expected_rejections": [],
+        "pages": [
+            {
+                "page": 1,
+                "media_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "crop_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "rotation": 0,
+                "user_unit": 1,
+                "native_width": 612,
+                "native_height": 792,
+                "probe_native": [
+                    72,
+                    72,
+                    24,
+                    12
+                ],
+                "probe_user": [
+                    72,
+                    708,
+                    96,
+                    720
+                ],
+                "overlay_native": [
+                    300,
+                    300,
+                    150,
+                    30
+                ],
+                "text_runs": [
+                    {
+                        "text": "Signature:",
+                        "native_rect": [
+                            72,
+                            182.4,
+                            72,
+                            12
+                        ]
+                    },
+                    {
+                        "text": "Signature:",
+                        "native_rect": [
+                            72,
+                            282.4,
+                            72,
+                            12
+                        ]
+                    },
+                    {
+                        "text": "Signature:",
+                        "native_rect": [
+                            72,
+                            382.4,
+                            72,
+                            12
+                        ]
+                    },
+                    {
+                        "text": "Countersignature:",
+                        "native_rect": [
+                            72,
+                            482.4,
+                            122.4,
+                            12
+                        ]
+                    }
+                ]
+            }
+        ],
+        "name": "multi-occurrence",
+        "file": "multi-occurrence.pdf",
+        "bytes": 1412
+    },
+    {
+        "description": "PDF 1.5 document using a cross-reference stream instead of a classic xref table.",
+        "expected_preflight": "accept",
+        "expected_rejections": [],
+        "pages": [
+            {
+                "page": 1,
+                "media_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "crop_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "rotation": 0,
+                "user_unit": 1,
+                "native_width": 612,
+                "native_height": 792,
+                "probe_native": [
+                    72,
+                    72,
+                    24,
+                    12
+                ],
+                "probe_user": [
+                    72,
+                    708,
+                    96,
+                    720
+                ],
+                "overlay_native": [
+                    100,
+                    300,
+                    170,
+                    36
+                ],
+                "text_runs": [
+                    {
+                        "text": "Cross-reference stream document.",
+                        "native_rect": [
+                            72,
+                            82.4,
+                            230.4,
+                            12
+                        ]
+                    },
+                    {
+                        "text": "Signature:",
+                        "native_rect": [
+                            72,
+                            582.4,
+                            72,
+                            12
+                        ]
+                    }
+                ]
+            }
+        ],
+        "name": "xref-stream",
+        "file": "xref-stream.pdf",
+        "bytes": 1301
+    },
+    {
+        "description": "PDF 1.5 document whose catalog, page tree and page dictionaries live in an /ObjStm.",
+        "expected_preflight": "accept",
+        "expected_rejections": [],
+        "pages": [
+            {
+                "page": 1,
+                "media_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "crop_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "rotation": 0,
+                "user_unit": 1,
+                "native_width": 612,
+                "native_height": 792,
+                "probe_native": [
+                    72,
+                    72,
+                    24,
+                    12
+                ],
+                "probe_user": [
+                    72,
+                    708,
+                    96,
+                    720
+                ],
+                "overlay_native": [
+                    100,
+                    300,
+                    170,
+                    36
+                ],
+                "text_runs": [
+                    {
+                        "text": "Object stream document.",
+                        "native_rect": [
+                            72,
+                            82.4,
+                            165.6,
+                            12
+                        ]
+                    },
+                    {
+                        "text": "Signature:",
+                        "native_rect": [
+                            72,
+                            582.4,
+                            72,
+                            12
+                        ]
+                    }
+                ]
+            }
+        ],
+        "name": "object-stream",
+        "file": "object-stream.pdf",
+        "bytes": 1342
+    },
+    {
+        "description": "Identity-H Type0 text drawn with an embedded synthetic TrueType subset plus a /ToUnicode CMap.",
+        "expected_preflight": "accept",
+        "expected_rejections": [],
+        "pages": [
+            {
+                "page": 1,
+                "media_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "crop_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "rotation": 0,
+                "user_unit": 1,
+                "native_width": 612,
+                "native_height": 792,
+                "probe_native": [
+                    72,
+                    72,
+                    24,
+                    12
+                ],
+                "probe_user": [
+                    72,
+                    708,
+                    96,
+                    720
+                ],
+                "overlay_native": [
+                    100,
+                    300,
+                    170,
+                    36
+                ],
+                "text_runs": [
+                    {
+                        "text": "Embedded Unicode font sample:",
+                        "native_rect": [
+                            72,
+                            82.4,
+                            208.8,
+                            12
+                        ]
+                    },
+                    {
+                        "text": "ÜïćΩ€✓",
+                        "native_rect": [
+                            72,
+                            122.4,
+                            43.2,
+                            12
+                        ]
+                    },
+                    {
+                        "text": "Signature:",
+                        "native_rect": [
+                            72,
+                            582.4,
+                            72,
+                            12
+                        ]
+                    }
+                ]
+            }
+        ],
+        "name": "unicode-embedded-font",
+        "file": "unicode-embedded-font.pdf",
+        "bytes": 3387
+    },
+    {
+        "description": "Full-page 64x64 greyscale image standing in for a scanned page, plus one real text run.",
+        "expected_preflight": "accept",
+        "expected_rejections": [],
+        "pages": [
+            {
+                "page": 1,
+                "media_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "crop_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "rotation": 0,
+                "user_unit": 1,
+                "native_width": 612,
+                "native_height": 792,
+                "probe_native": [
+                    72,
+                    72,
+                    24,
+                    12
+                ],
+                "probe_user": [
+                    72,
+                    708,
+                    96,
+                    720
+                ],
+                "overlay_native": [
+                    100,
+                    300,
+                    170,
+                    36
+                ],
+                "text_runs": [
+                    {
+                        "text": "Signature:",
+                        "native_rect": [
+                            72,
+                            582.4,
+                            72,
+                            12
+                        ]
+                    }
+                ]
+            }
+        ],
+        "name": "scanned-image-page",
+        "file": "scanned-image-page.pdf",
+        "bytes": 1539
+    },
+    {
+        "description": "AcroForm with one text widget, a URI link annotation and a square annotation.",
+        "expected_preflight": "accept",
+        "expected_rejections": [],
+        "notes": "Accepted with warnings: widget and link annotations are not carried into the assembled output.",
+        "pages": [
+            {
+                "page": 1,
+                "media_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "crop_box": [
+                    0,
+                    0,
+                    612,
+                    792
+                ],
+                "rotation": 0,
+                "user_unit": 1,
+                "native_width": 612,
+                "native_height": 792,
+                "probe_native": [
+                    72,
+                    72,
+                    24,
+                    12
+                ],
+                "probe_user": [
+                    72,
+                    708,
+                    96,
+                    720
+                ],
+                "overlay_native": [
+                    100,
+                    400,
+                    170,
+                    36
+                ],
+                "text_runs": [
+                    {
+                        "text": "Form fields and annotations.",
+                        "native_rect": [
+                            72,
+                            82.4,
+                            201.6,
+                            12
+                        ]
+                    },
+                    {
+                        "text": "Signature:",
+                        "native_rect": [
+                            72,
+                            582.4,
+                            72,
+                            12
+                        ]
+                    }
+                ]
+            }
+        ],
+        "name": "form-fields-annotations",
+        "file": "form-fields-annotations.pdf",
+        "bytes": 1788
+    },
+    {
+        "description": "Standard security handler (V4/R4, AES-128) with an empty user password.",
+        "expected_preflight": "reject",
+        "expected_rejections": [
+            "encrypted"
+        ],
+        "pages": [],
+        "name": "encrypted-aes128",
+        "file": "encrypted-aes128.pdf",
+        "bytes": 1591
+    },
+    {
+        "description": "AcroForm /SigFlags 3 with a populated signature field. The /Contents blob is a placeholder, so the document is structurally signed but not cryptographically valid.",
+        "expected_preflight": "reject",
+        "expected_rejections": [
+            "already_signed"
+        ],
+        "pages": [],
+        "name": "already-signed",
+        "file": "already-signed.pdf",
+        "bytes": 1621
+    },
+    {
+        "description": "Name-tree JavaScript plus an /OpenAction JavaScript action.",
+        "expected_preflight": "reject",
+        "expected_rejections": [
+            "javascript"
+        ],
+        "pages": [],
+        "name": "javascript-action",
+        "file": "javascript-action.pdf",
+        "bytes": 1552
+    },
+    {
+        "description": "AcroForm carrying an /XFA array (XML Forms Architecture).",
+        "expected_preflight": "reject",
+        "expected_rejections": [
+            "xfa"
+        ],
+        "pages": [],
+        "name": "xfa-form",
+        "file": "xfa-form.pdf",
+        "bytes": 1379
+    },
+    {
+        "description": "Name-tree /EmbeddedFiles attachment.",
+        "expected_preflight": "reject",
+        "expected_rejections": [
+            "embedded_file"
+        ],
+        "pages": [],
+        "name": "embedded-file",
+        "file": "embedded-file.pdf",
+        "bytes": 1619
+    }
+]
