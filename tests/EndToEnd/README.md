@@ -3,7 +3,7 @@
 The suite for [issue #36](https://github.com/bherila/e-sign/issues/36). A test double of the
 **consumer application** drives this one from the outside: it creates signing requests through
 the Firma-compatible facade, receives and verifies webhooks on its own endpoint, follows the
-invitations recipients are mailed, signs on the guest pages, runs the finalization worker,
+invitations recipients are mailed, signs on the guest pages, runs the queued finalization job,
 downloads and validates the sealed PDF, and pulls the evidence bundle — for all four workflow
 shapes, with every external destination blocked.
 
@@ -43,10 +43,13 @@ Four things are faked, all of them the boundary of the process:
 | The storage backend | `Storage::fake('documents')`, and `InMemoryObjectStore` for the second run | No container runtime here, so no Garage. See "Storage portability". |
 | The mail transport | the `array` mailer, from `phpunit.xml` | See "Mail". |
 
-and one thing is *scheduled* rather than faked: only `DeliverWebhook` is held back on the
-queue, so the test can play the worker and deliver attempts that are due, in an order it
-chooses. Every other job — outbox fan-out, mail scheduling, sending, finalization — runs on the
-synchronous queue, which honours `afterCommit()`.
+and two jobs are *held on the queue* rather than faked away: `DeliverWebhook` and
+`FinalizeEnvelope`, the two a worker owns. The test plays that worker — delivering the attempts
+that are due, in an order it chooses, and running the finalization the application queued.
+Neither may run inline: on the synchronous queue a delivery would happen inside the request
+that caused it and the finalization would seal the document inside the guest request that
+completed the signing, which is not where a worker runs. Every other job — outbox fan-out, mail
+scheduling, sending — does run on the synchronous queue, which honours `afterCommit()`.
 
 ---
 
@@ -68,7 +71,8 @@ the active recipient's invitation is minted by the real issuer and read out of t
 message's context, exactly as a mail client reads it; the guest flow is driven over HTTP as
 that recipient; `signing_request.recipient.signed` arrives and the next recipient is invited;
 after the last signature the envelope is in `finalizing` and **no completion has been
-announced**; the finalization job runs; `signing_request.completed` arrives only once a
+announced**; the finalization job the real trigger queued is run; `signing_request.completed`
+arrives only once a
 validated artifact is published, asserted at the moment of receipt; `/download` reports
 `finished` and not partial; the PDF fetched through the signed URL hashes to the digest
 publication recorded; `ArtifactValidator` reports PAdES **B-B** with no failures; and the
@@ -188,13 +192,27 @@ Stating this is the point of the file.
   [#42](https://github.com/bherila/e-sign/issues/42) and
   [#43](https://github.com/bherila/e-sign/issues/43).
 
-### One gap this suite found rather than covered
+### One gap this suite found, and how it was closed
 
-**Nothing in `app/` dispatches `FinalizeEnvelope`.** An envelope that reaches `finalizing` sits
-there until something starts the work; in this suite the harness plays that part
-(`SyntheticConsumer::runFinalizationWorker()`). That is a real hole in the product, not a
-property of the test, and it is recorded here rather than hidden behind a helper that looks
-like production wiring.
+**Nothing in `app/` used to dispatch `FinalizeEnvelope`.** An envelope that reached
+`finalizing` sat there until something started the work, and in the first version of this suite
+the harness played that part — a real hole in the product rather than a property of the test,
+recorded here rather than hidden behind a helper that looked like production wiring
+([#94](https://github.com/bherila/e-sign/issues/94)).
+
+`App\Domain\Evidence\Finalization\FinalizationTrigger` now dispatches it, after commit, on
+the acceptance that lands the envelope in `finalizing`, with `esign:finalization:resume` behind
+it for a job that is lost and a `finalization_backlog` readiness probe over the same set. The
+harness no longer dispatches anything: `FinalizeEnvelope` is faked on the queue beside
+`DeliverWebhook`, and `SyntheticConsumer::runFinalizationWorker()` **asserts the application
+queued it** and then runs it, which is what a worker does. Holding it on the queue is still
+necessary — on the synchronous queue the trigger would seal the document inside the facade or
+guest request that caused it, which is not where a worker runs — but the dispatch under test is
+now the product's.
+
+The one dispatch the harness still makes is the operator's: `retryFinalization()` re-queues a
+`finalization_failed` envelope, because that state is deliberately outside the resume sweep and
+the transition publishes no event.
 
 ---
 
@@ -204,7 +222,7 @@ like production wiring.
 
 | Class | What it is |
 |---|---|
-| `SyntheticConsumer` | The consumer application: credential, endpoint, facade calls, guest-flow driver, worker, egress fence |
+| `SyntheticConsumer` | The consumer application: credential, endpoint, facade calls, guest-flow driver, worker (runs the queued webhook and finalization jobs; dispatches neither), egress fence |
 | `ConsumerWebhookReceiver` | Its inbox, on a route registered inside the test. Verifies, deduplicates, refuses to regress, and can be told to fail |
 | `FirmaSignatureVerifier` | The `X-Firma-Signature` scheme, implemented from the documentation and nothing else |
 | `ReceivedEvent` | One POST as the receiver saw it — an attempt, not an event |
@@ -222,5 +240,7 @@ generated fixture seal key.
 
 `docs/security/release-gates.md` is the record; the rows this suite moves are **7 (webhooks)**,
 **8 (isolation)**, **11 (runtime portability)** and **12 (independence)**, with supporting
-evidence for **6 (artifact durability)** and **13 (migration)**. Read that document for the
+evidence for **6 (artifact durability)** and **13 (migration)**. The "nothing dispatches
+`FinalizeEnvelope`" entry it opened against gates 6 and 11 is closed and no longer listed
+there. Read that document for the
 current status of each — including the parts that are still not proven.
