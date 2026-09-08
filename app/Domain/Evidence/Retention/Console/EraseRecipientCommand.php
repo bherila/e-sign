@@ -65,6 +65,10 @@ final class EraseRecipientCommand extends Command
 
         $this->line('Rewritten: '.implode(', ', $result['columns']));
         $this->line(sprintf('Transactional message rows tombstoned: %d.', $result['outbound_mail_rows_erased']));
+        $this->line(sprintf(
+            'Provider feedback rows the address was scrubbed out of: %d.',
+            $result['outbound_mail_event_rows_scrubbed'],
+        ));
 
         $this->newLine();
         $this->comment(

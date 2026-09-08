@@ -14,8 +14,10 @@ use App\Domain\Evidence\Retention\RetentionPolicy;
 use App\Domain\Evidence\Retention\RetentionSweeper;
 use App\Domain\Identity\Audit\AuditActor;
 use App\Domain\Identity\Audit\AuditEvent;
+use App\Domain\Preparation\Documents\Models\Document;
 use App\Domain\Signing\Models\Envelope;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Tests\Support\RetentionScenario;
 use Tests\Support\SigningScenario;
@@ -206,6 +208,121 @@ class LegalHoldTest extends TestCase
         }
 
         $this->assertSame($email, $recipient->refresh()->email);
+    }
+
+    /**
+     * One instance, one held envelope, one soft-deleted document, and every path in the
+     * application that can remove a row or an object, run one after another.
+     *
+     * The per-path tests above each prove one exclusion. This proves the property the
+     * runbook actually claims — *"no routine path removes a held agreement"*, and *"a
+     * soft-deleted row still counts"* — by walking the whole set in one pass, so a pass
+     * added later that consults neither is a failure here rather than a gap nobody notices.
+     * Issue #89.
+     */
+    public function test_no_deletion_path_removes_a_held_envelope_or_a_soft_deleted_document(): void
+    {
+        config([
+            // Every window as short as it can be, so nothing survives by being too young.
+            'esign.retention.executed_documents_days' => 30,
+            'esign.retention.abandoned_drafts_days' => 30,
+            'esign.retention.purge_grace_days' => 30,
+        ]);
+
+        $scenario = RetentionScenario::finalized();
+        $envelope = $scenario->envelope->refresh();
+        $recipient = $envelope->recipients()->firstOrFail();
+        $address = $recipient->email;
+        $artifacts = Artifact::query()->get();
+
+        $this->assertCount(3, $artifacts);
+
+        // Held and old enough for the executed-agreement pass.
+        RetentionScenario::completedDaysAgo($envelope, 400);
+
+        // Held and old enough for the abandoned-draft pass.
+        $draft = $scenario->signing->preparedDraft();
+        RetentionScenario::backdate('envelopes', (int) $draft->getKey(), [
+            'created_at' => RetentionScenario::daysAgo(400),
+        ]);
+
+        $recipients = DB::table('envelope_recipients')->where('envelope_id', $draft->getKey())->count();
+        $this->assertGreaterThan(0, $recipients);
+
+        // Old enough for the unreferenced-document pass, and soft-deleted, which is an undo
+        // rather than a decision to destroy.
+        $document = RetentionScenario::orphanDocument($scenario->signing->workspace, 400);
+        $objects = RetentionScenario::objectsOf($document);
+        $document->delete();
+
+        $holds = app(LegalHold::class);
+        $holds->place($envelope, 'Preservation notice 2026-14', AuditActor::console('esign:hold:place'));
+        $holds->place($draft, 'Preservation notice 2026-14', AuditActor::console('esign:hold:place'));
+
+        // Path 1, 2, and 3: the authentication-log, abandoned-draft, and executed-agreement
+        // passes, plus the unreferenced-document pass that runs beside them.
+        $this->artisan('esign:retention:run', ['--force' => true])->assertSuccessful();
+
+        // Path 4: privacy erasure, which a hold refuses outright.
+        try {
+            app(RecipientEraser::class)->erase($recipient, 'Article 17 request', AuditActor::console('test'));
+            $this->fail('A hold should refuse an erasure.');
+        } catch (LegalHoldActive) {
+            // Expected. The assertions below are what the refusal has to have preserved.
+        }
+
+        // Path 5: the staging pruner, the one byte-deleting path outside this module.
+        $this->artisan('esign:artifacts:prune-staging', ['--apply' => true])->assertSuccessful();
+
+        // Path 6: the blob purge, with the envelope soft-deleted for longer than the grace
+        // period so that it is genuinely eligible and only the hold is stopping it.
+        DB::table('envelopes')->where('id', $envelope->getKey())->update([
+            'deleted_at' => RetentionScenario::daysAgo(90)->toDateTimeString(),
+        ]);
+
+        $this->artisan('esign:retention:purge-blobs', ['--force' => true])->assertSuccessful();
+
+        // ---- Nothing was removed, by any of them. ----
+
+        $this->assertSame(1, Envelope::query()->withTrashed()->whereKey($envelope->getKey())->count());
+        $this->assertSame(1, Envelope::query()->whereKey($draft->getKey())->count());
+        $this->assertNull($draft->refresh()->deleted_at);
+        $this->assertSame($recipients, DB::table('envelope_recipients')->where('envelope_id', $draft->getKey())->count());
+
+        $this->assertSame(3, Artifact::query()->count());
+
+        foreach ($artifacts as $artifact) {
+            $this->assertTrue(
+                Storage::disk('documents')->exists($artifact->path),
+                $artifact->kind->value.' was removed from a held envelope.',
+            );
+        }
+
+        $this->assertSame(1, Document::query()->withTrashed()->whereKey($document->getKey())->count());
+        $this->assertSame(2, DB::table('document_revisions')->where('document_id', $document->getKey())->count());
+
+        foreach ($objects as $path) {
+            $this->assertTrue(Storage::disk('documents')->exists($path), $path.' was destroyed by a soft delete.');
+        }
+
+        // The document the held agreement was built from, and the bytes behind it.
+        $this->assertSame(1, Document::query()->whereKey($scenario->signing->document->getKey())->count());
+        $this->assertTrue(Storage::disk('documents')->exists($scenario->signing->revision->path));
+
+        // Contact data intact: the erasure was refused, not partially applied.
+        $this->assertSame($address, $recipient->refresh()->email);
+
+        // And no path wrote a deletion event, which is the other half of "nothing happened":
+        // a sweep that deleted nothing and a sweep that deleted something without saying so
+        // look the same from the row counts alone.
+        foreach ([
+            RetentionSweeper::EXECUTED_DELETED,
+            RetentionSweeper::ABANDONED_DELETED,
+            BlobPurger::PURGED,
+            RecipientEraser::ERASED,
+        ] as $action) {
+            $this->assertSame(0, AuditEvent::query()->where('action', $action)->count(), $action.' was recorded.');
+        }
     }
 
     public function test_the_console_commands_place_and_release_a_hold(): void
