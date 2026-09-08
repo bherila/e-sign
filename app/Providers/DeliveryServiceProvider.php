@@ -20,6 +20,7 @@ use App\Domain\Delivery\Outbound\DestinationAllowlist;
 use App\Domain\Delivery\Outbound\DestinationPolicy;
 use App\Domain\Delivery\Outbound\HostResolver;
 use App\Domain\Delivery\Outbound\SystemHostResolver;
+use App\Domain\Delivery\Queue\Console\WorkBoundedCommand;
 use App\Domain\Delivery\Webhooks\Console\BacklogCommand;
 use App\Domain\Delivery\Webhooks\Console\EndpointCreateCommand;
 use App\Domain\Delivery\Webhooks\Console\EndpointDisableCommand;
@@ -130,6 +131,7 @@ final class DeliveryServiceProvider extends ServiceProvider
                 MailBacklogCommand::class,
                 RemindCommand::class,
                 ExpireCommand::class,
+                WorkBoundedCommand::class,
             ]);
         }
     }

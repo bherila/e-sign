@@ -1,0 +1,60 @@
+# Builds the cPanel/shared-hosting release bundle (scripts/build-release.sh) and attaches it,
+# with its SHA-256 sums file, to the GitHub Release that triggered the run. This is the
+# shared-hosting counterpart to publish-image.yml, which publishes the Docker image; a GitHub
+# Release gets both artifacts independently.
+name: Release bundle
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-bundle-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-bundle:
+    name: Build and attach the release bundle
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          coverage: none
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Build the release bundle
+        run: |
+          version="${{ github.event.release.tag_name }}"
+          scripts/build-release.sh "${version:-dev}"
+
+      - name: Upload as a workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-bundle
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Attach to the GitHub Release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" dist/*.tar.gz dist/*.tar.gz.sha256 \
+            --repo "${{ github.repository }}" --clobber
