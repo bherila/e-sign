@@ -2,10 +2,13 @@ import {Laptop, Moon, Sun } from 'lucide-react';
 import * as React from 'react';
 import { useEffect, useRef, useState } from 'react';
 
-type NavbarProps = {
+interface NavbarProps {
+  /**
+   * There is deliberately no `isAdmin`. This application has no global administrator role:
+   * authority is a workspace membership row, so the chrome has nothing to assert about it.
+   */
   authenticated: boolean;
-  isAdmin: boolean;
-};
+}
 
 type ThemeMode = 'system' | 'dark' | 'light';
 
@@ -16,7 +19,7 @@ function applyTheme(mode: ThemeMode) {
   root.classList.toggle('dark', isDark);
 }
 
-export default function Navbar({ authenticated, isAdmin }: NavbarProps) {
+export default function Navbar({ authenticated }: NavbarProps) {
   const [toolsOpen, setToolsOpen] = useState(false);
   const toolsRef = useRef<HTMLLIElement | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(() => (localStorage.getItem('theme') as ThemeMode) || 'system');
@@ -54,6 +57,12 @@ export default function Navbar({ authenticated, isAdmin }: NavbarProps) {
         </a>
         <ul className='hidden md:flex items-center gap-4 text-sm'>
           <li><a className='hover:underline underline-offset-4' href='/'>Home</a></li>
+          {/* The one thing the chrome can honestly say about the visitor. */}
+          {authenticated ? (
+            <li><a className='hover:underline underline-offset-4' href='/dashboard'>Workspaces</a></li>
+          ) : (
+            <li><a className='hover:underline underline-offset-4' href='/login'>Sign in</a></li>
+          )}
         </ul>
       </div>
 
