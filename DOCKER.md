@@ -25,6 +25,15 @@ docker run --rm -p 8080:8080 --env-file .env bwh-esign:<tag>            # web
 docker run --rm --env-file .env -v /secure/keys:/keys:ro bwh-esign:<tag> worker
 ```
 
+## Published image
+
+`.github/workflows/publish-image.yml` pushes the production target to **`ghcr.io/bherila/e-sign`**
+on every push to `main` (`:main`, `:sha-<short>`) and on every GitHub Release (`:<semver>`,
+`:<major>.<minor>`, `:latest`), for `linux/arm64` and `linux/amd64`. The package is public, so
+pulls are anonymous and storage is free. This repository publishes the image and deploys nothing
+with it; a consumer pins a tag or, for production, the digest printed in the run summary, and
+deploys through its own pipeline. Old `sha-` builds are pruned automatically; semver tags are kept.
+
 ## Standalone stack (this repository)
 
 `docker-compose.yml` runs eSign with its own MariaDB and Mailpit on ports that do not collide with
