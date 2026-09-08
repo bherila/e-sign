@@ -180,6 +180,61 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Outbound mail (Stage 4, issue #35)
+    |--------------------------------------------------------------------------
+    |
+    | Every transactional message goes through the outbox in
+    | App\Domain\Delivery\Mail. The states it records are deliberately
+    | distinct: `queued` means the row exists, `sent_to_provider` means a
+    | transport accepted the bytes, and only `delivered` — which can arrive
+    | only from provider feedback — means a mailbox took it. Nothing in this
+    | file lets a logged message be counted as a delivered one; see
+    | docs/delivery/mail.md.
+    |
+    */
+
+    'mail' => [
+        // Attempts per message, and the pause before each retry in seconds.
+        // The backoff list is consumed positionally; the last value repeats.
+        'tries' => (int) env('ESIGN_MAIL_TRIES', 5),
+
+        'backoff' => array_values(array_filter(array_map(
+            static fn (string $value): int => (int) trim($value),
+            explode(',', (string) env('ESIGN_MAIL_BACKOFF', '60,300,900,3600'))
+        ))),
+
+        // Named queue for send jobs, so mail never sits behind sealing work.
+        'queue' => env('ESIGN_MAIL_QUEUE', 'mail'),
+
+        /*
+        | Brevo posts transactional events to POST /webhooks/mail/brevo. It
+        | signs nothing, so the only thing standing between the endpoint and
+        | the internet is this shared token, compared with hash_equals. An
+        | empty token disables the endpoint rather than opening it.
+        */
+        'brevo_webhook_token' => env('ESIGN_MAIL_BREVO_WEBHOOK_TOKEN', ''),
+
+        /*
+        | SES publishes feedback through SNS. The endpoint checks the topic ARN
+        | against this value and then asks an SnsSignatureVerifier to prove the
+        | message came from AWS. No verifier is implemented (the
+        | aws/aws-sns-message-validator package is not a dependency), so the
+        | endpoint currently rejects everything: unverified input never
+        | mutates a mail row. See docs/delivery/mail.md.
+        */
+        'ses_topic_arn' => env('ESIGN_MAIL_SES_TOPIC_ARN', ''),
+
+        // Backlog thresholds for the mail_backlog readiness probe: the age in
+        // seconds of the oldest message still `queued`, and the number of
+        // messages that reached `failed` in the last 24 hours.
+        'backlog_warn_seconds' => (int) env('ESIGN_MAIL_BACKLOG_WARN_SECONDS', 300),
+        'backlog_fail_seconds' => (int) env('ESIGN_MAIL_BACKLOG_FAIL_SECONDS', 1800),
+        'failed_warn_count' => (int) env('ESIGN_MAIL_FAILED_WARN_COUNT', 1),
+        'failed_fail_count' => (int) env('ESIGN_MAIL_FAILED_FAIL_COUNT', 25),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Authentication mode (Stage 1, issues #12 and #13)
     |--------------------------------------------------------------------------
     |
