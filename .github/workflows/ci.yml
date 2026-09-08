@@ -71,6 +71,9 @@ jobs:
               - 'routes/**'
               - 'tests/**'
               - 'scripts/**'
+              # CI-only DSS profile checker; never part of the runtime, but the
+              # `pades-profile` job below is built from it.
+              - 'tools/**'
               - '.github/workflows/**'
             docker:
               - '.docker/**'
@@ -526,9 +529,53 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  pades-profile:
+    name: PAdES profile conformance (DSS)
+    needs: changes
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.docker == 'true'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    # Deliberately a separate job from `validation` rather than another step inside it. The two
+    # validators answer different questions — pyHanko: is the seal sound and trusted; DSS: which
+    # ETSI baseline profile does it actually satisfy — and a JVM or Maven Central problem here
+    # must not be able to take the pyHanko evidence down with it, or the reverse.
+    steps:
+      - uses: actions/checkout@v7
+
+      # No PHP, no Composer, no resealing: this job reads the committed artifact bytes exactly
+      # as they are. Regeneration belongs to the `validation` job, which owns the sealer's
+      # freshness. Java is the only runtime here and it never leaves CI (see .dockerignore).
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          # Caches ~/.m2/repository, keyed on the pinned pom. The DSS jars are ~40 artifacts
+          # and are otherwise re-downloaded from Maven Central on every run.
+          cache: maven
+          cache-dependency-path: tools/dss/pom.xml
+
+      - name: Check the PAdES profile of every committed artifact
+        env:
+          MAVEN_ARGS: --batch-mode --no-transfer-progress
+        run: scripts/validate-pades-profile.sh
+
+      - name: Upload the DSS reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dss-pades-profile
+          path: |
+            tests/Fixtures/validation/dss-output.txt
+            tests/Fixtures/validation/dss-report.json
+            tests/Fixtures/validation/pades-profile-manifest.tsv
+            tools/dss/reports
+          if-no-files-found: warn
+          retention-days: 7
+
   result:
     name: CI result
-    needs: [changes, test, database, licenses, audit, image, validation]
+    needs: [changes, test, database, licenses, audit, image, validation, pades-profile]
     if: always()
     runs-on: ubuntu-24.04-arm
     steps:
@@ -553,6 +600,11 @@ jobs:
             exit 1
           fi
           if [[ "${{ needs.validation.result }}" == "failure" || "${{ needs.validation.result }}" == "cancelled" ]]; then
+            exit 1
+          fi
+          # Index syntax, not needs.pades-profile: the expression language reads the hyphen
+          # as subtraction and the property access silently yields nothing.
+          if [[ "${{ needs['pades-profile'].result }}" == "failure" || "${{ needs['pades-profile'].result }}" == "cancelled" ]]; then
             exit 1
           fi
           echo "Required checks passed or no code paths changed."
