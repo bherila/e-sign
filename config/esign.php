@@ -53,10 +53,22 @@ return [
     | text-dense pages). They are configuration, not an invariant, and are
     | expected to move once there is a corpus of real uploads.
     |
-    | Nesting depth and the decompression ceiling are not separately
-    | configurable: the object-graph walk fixes its recursion depth at 32, and
-    | decompression is bounded by `max_decoded_stream_bytes` per stream. See
-    | App\Domain\Preparation\Preflight\PreflightLimits.
+    | Decompression is bounded twice: `max_decoded_stream_bytes` bounds any one
+    | stream, and `max_decompressed_bytes` bounds every stream in a document
+    | added up. The aggregate one is the control. A per-stream ceiling alone is
+    | not a budget: sixteen streams each just under it are sixteen times the
+    | ceiling of retained memory from one small upload, which is the shape of
+    | findings U-1 and U-2 in docs/security/review-2026-09.md.
+    |
+    | The time and memory budgets are backstops, not controls. They catch what
+    | the byte and object budgets do not model, and they are set generously
+    | because a symptom makes a poor gate: memory usage depends on everything
+    | else the request has done, and a wall clock rejects a legitimate document
+    | on a loaded host.
+    |
+    | Object-graph recursion depth is not separately configurable: the hazard
+    | walk fixes its recursion depth at 32 and the parser refuses nesting past
+    | 256. See App\Domain\Preparation\Preflight\PreflightLimits.
     |
     */
 
@@ -69,6 +81,20 @@ return [
         'max_pages' => (int) env('ESIGN_DOCUMENTS_MAX_PAGES', 500),
         'max_objects' => (int) env('ESIGN_DOCUMENTS_MAX_OBJECTS', 100_000),
         'max_decoded_stream_bytes' => (int) env('ESIGN_DOCUMENTS_MAX_DECODED_STREAM_BYTES', 33_554_432),
+
+        // Every decoded stream in one document, added up. 8x the upload ceiling:
+        // large enough that no legitimate document reaches it (Flate content
+        // streams expand by roughly an order of magnitude, and DCT/JPX image
+        // payloads are handed back untouched), small enough that the whole
+        // budget still fits inside the 512 MB `memory_limit` the shipped
+        // php.ini sets. 20x would be 640 MiB and could never bind before the
+        // process died, which is the failure this ceiling exists to prevent.
+        'max_decompressed_bytes' => (int) env('ESIGN_DOCUMENTS_MAX_DECOMPRESSED_BYTES', 268_435_456),
+
+        // Backstops. Checked between units of work while the document is read,
+        // for the cases the byte and object budgets do not catch. 0 disables.
+        'preflight_time_budget_seconds' => (float) env('ESIGN_DOCUMENTS_PREFLIGHT_TIME_BUDGET_SECONDS', 30),
+        'preflight_memory_budget_bytes' => (int) env('ESIGN_DOCUMENTS_PREFLIGHT_MEMORY_BUDGET_BYTES', 268_435_456),
 
         // The MIME types the upload Form Request accepts, checked against the
         // file's sniffed type rather than its name or its declared header. This
