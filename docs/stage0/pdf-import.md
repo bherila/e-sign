@@ -144,9 +144,13 @@ of CPU and 10 MB. Image-heavy pages will be dominated by decoded image bytes ins
 which is why `PreflightLimits` caps the decoded stream size separately.
 
 Suggested starting limits, to be revisited with real uploads: 32 MB upload, 500 pages,
-100,000 indirect objects, 32 MB per decoded stream. These are the defaults in
-`App\Domain\Preparation\Preflight\PreflightLimits`, and they are configuration rather
-than an invariant.
+100,000 indirect objects, 32 MB per decoded stream, and — added by issue #88 — 256 MB of
+decoded stream data across the whole document, with 30-second and 256 MB backstops. A
+per-stream ceiling on its own is not a budget: it bounds one stream and nothing else, so
+many streams each just under it add up without limit (security review U-1). These are the
+defaults in `App\Domain\Preparation\Preflight\PreflightLimits`, they are documented with
+their tuning relationships in [docs/preparation/documents.md](../preparation/documents.md),
+and they are configuration rather than an invariant.
 
 ## Findings
 

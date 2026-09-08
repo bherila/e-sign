@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace App\Domain\Preparation\TcPdf\Parsing;
 
+use App\Domain\Preparation\Preflight\PreflightBudget;
+use App\Domain\Preparation\Preflight\PreflightBudgetException;
 use Com\Tecnick\Pdf\Parser\Exception;
-use Com\Tecnick\Pdf\Parser\Parser;
 
 /**
  * A thin, typed reader over the raw object array produced by tc-lib-pdf-parser.
@@ -38,15 +39,17 @@ final class PdfObjectGraph
     }
 
     /**
+     * @param  PreflightBudget|null  $budget  The caller's running cost for this document. A caller
+     *                                        that has none (the assembler re-reading its own output,
+     *                                        a test probe) gets a fresh one on the shipped defaults,
+     *                                        so no parse in this application is unbounded.
+     *
      * @throws Exception
+     * @throws PreflightBudgetException
      */
-    public static function parse(string $pdfBytes, int $maxStreamBytes = 33_554_432): self
+    public static function parse(string $pdfBytes, ?PreflightBudget $budget = null): self
     {
-        $parser = new Parser([
-            'decode_streams' => true,
-            'ignore_filter_errors' => false,
-            'max_stream_size' => $maxStreamBytes,
-        ]);
+        $parser = new BoundedPdfParser($budget ?? new PreflightBudget);
         [$xref, $objects] = $parser->parse($pdfBytes);
 
         /** @var array<string, mixed> $trailer */

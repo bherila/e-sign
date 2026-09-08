@@ -23,6 +23,9 @@ enum PreflightCode: string
     case PageLimitExceeded = 'page_limit_exceeded';
     case ObjectLimitExceeded = 'object_limit_exceeded';
     case SizeLimitExceeded = 'size_limit_exceeded';
+    case DecompressionLimitExceeded = 'decompression_limit_exceeded';
+    case TimeBudgetExceeded = 'time_budget_exceeded';
+    case MemoryBudgetExceeded = 'memory_budget_exceeded';
     case InvalidPageGeometry = 'invalid_page_geometry';
     case UserUnitNotPreserved = 'user_unit_not_preserved';
     case AnnotationsNotPreserved = 'annotations_not_preserved';

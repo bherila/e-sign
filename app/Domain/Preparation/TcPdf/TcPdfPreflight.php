@@ -7,11 +7,14 @@ namespace App\Domain\Preparation\TcPdf;
 use App\Domain\Preparation\Contracts\PdfPreflight;
 use App\Domain\Preparation\Geometry\PageGeometry;
 use App\Domain\Preparation\Preflight\DocumentMetrics;
+use App\Domain\Preparation\Preflight\PreflightBudget;
+use App\Domain\Preparation\Preflight\PreflightBudgetException;
 use App\Domain\Preparation\Preflight\PreflightCode;
 use App\Domain\Preparation\Preflight\PreflightFinding;
 use App\Domain\Preparation\Preflight\PreflightLimits;
 use App\Domain\Preparation\Preflight\PreflightReport;
 use App\Domain\Preparation\Preflight\PreflightSeverity;
+use App\Domain\Preparation\TcPdf\Parsing\BoundedPdfParser;
 use App\Domain\Preparation\TcPdf\Parsing\MalformedPageTreeException;
 use App\Domain\Preparation\TcPdf\Parsing\PageTreeReader;
 use App\Domain\Preparation\TcPdf\Parsing\PdfObjectGraph;
@@ -31,15 +34,27 @@ use App\Domain\Preparation\TcPdf\Parsing\PdfObjectGraph;
  *
  * Detection walks every parsed object, including objects inside object streams, so a
  * hazard hidden behind an indirect reference or a compressed object is still found.
+ *
+ * Resource ceilings are charged *while* the document is read, not after it: see
+ * {@see PreflightBudget} for what is counted and {@see BoundedPdfParser}
+ * for where. A budget that trips aborts the parse and becomes a rejection naming the
+ * ceiling, never a generic `unparseable`.
  */
 final readonly class TcPdfPreflight implements PdfPreflight
 {
-    public function __construct(private PreflightLimits $limits = new PreflightLimits) {}
+    /**
+     * @param  (\Closure(): float)|null  $clock  Seconds, for the wall-clock backstop. Injected so a
+     *                                           test can make the time budget trip without sleeping
+     *                                           for the length of it.
+     */
+    public function __construct(
+        private PreflightLimits $limits = new PreflightLimits,
+        private ?\Closure $clock = null,
+    ) {}
 
     public function inspect(string $pdfBytes): PreflightReport
     {
-        $startedAt = microtime(true);
-        $memoryBefore = memory_get_usage();
+        $budget = new PreflightBudget($this->limits, $this->clock);
 
         $findings = [];
         $pages = [];
@@ -59,13 +74,20 @@ final readonly class TcPdfPreflight implements PdfPreflight
                 [],
                 $pdfBytes,
                 0,
-                $startedAt,
-                $memoryBefore,
+                $budget,
             );
         }
 
         try {
-            $graph = PdfObjectGraph::parse($pdfBytes, $this->limits->maxDecodedStreamBytes);
+            $graph = PdfObjectGraph::parse($pdfBytes, $budget);
+        } catch (PreflightBudgetException $exception) {
+            return $this->report(
+                [PreflightFinding::reject($exception->preflightCode, $exception->getMessage())],
+                [],
+                $pdfBytes,
+                $budget->objectCount(),
+                $budget,
+            );
         } catch (\Throwable $exception) {
             return $this->report(
                 [PreflightFinding::reject(
@@ -76,8 +98,7 @@ final readonly class TcPdfPreflight implements PdfPreflight
                 [],
                 $pdfBytes,
                 0,
-                $startedAt,
-                $memoryBefore,
+                $budget,
             );
         }
 
@@ -95,29 +116,26 @@ final readonly class TcPdfPreflight implements PdfPreflight
                 [],
                 $pdfBytes,
                 $objectCount,
-                $startedAt,
-                $memoryBefore,
+                $budget,
             );
-        }
-
-        if ($objectCount > $this->limits->maxObjects) {
-            $findings[] = PreflightFinding::reject(
-                PreflightCode::ObjectLimitExceeded,
-                sprintf(
-                    'The document contains %d indirect objects; the limit is %d.',
-                    $objectCount,
-                    $this->limits->maxObjects,
-                ),
-            );
-        }
-
-        foreach ($this->scanHazards($graph) as $finding) {
-            $findings[] = $finding;
         }
 
         try {
+            // Objects reached through an /ObjStm are stored by the parser without passing
+            // through the seam the budget charges, so the total is re-checked here. The
+            // budget owns the message either way, so the same ceiling reads the same way
+            // whichever path found it.
+            if ($this->limits->maxObjects > 0 && $objectCount > $this->limits->maxObjects) {
+                $budget->exhaustObjects();
+            }
+
+            foreach ($this->scanHazards($graph, $budget) as $finding) {
+                $findings[] = $finding;
+            }
+
             $flattened = (new PageTreeReader($graph))->pages($this->limits->maxPages);
             foreach ($flattened as $page) {
+                $budget->tick();
                 $pages[] = $page->geometry;
 
                 if ($page->geometry->userUnit !== 1.0) {
@@ -168,6 +186,14 @@ final readonly class TcPdfPreflight implements PdfPreflight
                 PreflightCode::InvalidPageGeometry,
                 'The page tree could not be read: '.$exception->getMessage(),
             );
+        } catch (PreflightBudgetException $exception) {
+            return $this->report(
+                [PreflightFinding::reject($exception->preflightCode, $exception->getMessage())],
+                [],
+                $pdfBytes,
+                $objectCount,
+                $budget,
+            );
         }
 
         if ($pages === [] && ! $this->hasRejection($findings)) {
@@ -177,17 +203,21 @@ final readonly class TcPdfPreflight implements PdfPreflight
             );
         }
 
-        return $this->report($findings, $pages, $pdfBytes, $objectCount, $startedAt, $memoryBefore);
+        return $this->report($findings, $pages, $pdfBytes, $objectCount, $budget);
     }
 
     /**
      * @return array<int, PreflightFinding>
+     *
+     * @throws PreflightBudgetException
      */
-    private function scanHazards(PdfObjectGraph $graph): array
+    private function scanHazards(PdfObjectGraph $graph, PreflightBudget $budget): array
     {
         $codes = [];
 
         foreach ($graph->objectRefs() as $ref) {
+            $budget->tick();
+
             foreach ($graph->object($ref) as $entry) {
                 $this->scanEntry($graph, $entry, $codes, 0);
             }
@@ -317,8 +347,7 @@ final readonly class TcPdfPreflight implements PdfPreflight
         array $pages,
         string $pdfBytes,
         int $objectCount,
-        float $startedAt,
-        int $memoryBefore,
+        PreflightBudget $budget,
     ): PreflightReport {
         return new PreflightReport(
             $findings,
@@ -327,8 +356,8 @@ final readonly class TcPdfPreflight implements PdfPreflight
                 strlen($pdfBytes),
                 count($pages),
                 $objectCount,
-                microtime(true) - $startedAt,
-                max(0, memory_get_usage() - $memoryBefore),
+                $budget->elapsedSeconds(),
+                $budget->memoryDeltaBytes(),
             ),
         );
     }
