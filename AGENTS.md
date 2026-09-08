@@ -88,7 +88,14 @@ composer test
 3. For schema dumps: `php artisan schema:dump --database=sqlite`. Never use `--prune`.
 4. Tests must use SQLite in-memory. Do not configure tests to use any other driver.
 5. Production is MySQL 8 or MariaDB. Migrations must be valid on SQLite and both engines; never
-   rely on an engine-specific feature without a CI test on the other engine.
+   rely on an engine-specific feature without a CI test on the other engine. The only exception
+   to rule 4 is the CI-only `database` job in `.github/workflows/ci.yml`, which runs
+   `php artisan migrate --force` and the feature suite against disposable MySQL 8.4/MariaDB 11.4
+   service containers. `Tests\SafeTestCase` still refuses every other non-SQLite connection by
+   default; that job opts in by setting `ESIGN_TEST_DB_ENGINE=mysql|mariadb`, and
+   `Tests\Support\TestDatabaseGuard` accepts it only when the connection also targets the
+   disposable `esign_ci_test` database on `127.0.0.1`/`localhost`. Never set
+   `ESIGN_TEST_DB_ENGINE` outside that job.
 
 ## Laravel conventions
 
