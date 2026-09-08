@@ -338,12 +338,39 @@ jobs:
             -e APP_URL=http://localhost:8080 -e DB_CONNECTION=sqlite -e DB_DATABASE=/tmp/esign.sqlite \
             -e SESSION_DRIVER=file -e CACHE_STORE=file -e QUEUE_CONNECTION=sync -e LOG_CHANNEL=stderr \
             bwh-esign:ci
+          up=""
           for i in $(seq 1 30); do
-            if curl -fsS http://localhost:8080/up >/dev/null; then echo "up after ${i}s"; exit 0; fi
+            if curl -fsS http://localhost:8080/up >/dev/null; then up="1"; echo "up after ${i}s"; break; fi
             sleep 1
           done
-          docker logs esign-smoke
-          exit 1
+          if [ -z "$up" ]; then
+            docker logs esign-smoke
+            exit 1
+          fi
+          # Prove the image's own HEALTHCHECK script reports the web role healthy, the same way
+          # Docker's health state machine would (see .docker/scripts/healthcheck.sh).
+          docker exec esign-smoke esign-healthcheck
+          docker rm -f esign-smoke >/dev/null
+
+      - name: Smoke test role dispatch (artisan, worker)
+        run: |
+          set -eu
+          # The one-shot `artisan` role is the cheap proof that the entrypoint's role dispatch
+          # (.docker/scripts/entrypoint.sh) reaches `exec php artisan "$@"` correctly.
+          docker run --rm \
+            -e APP_KEY="base64:$(openssl rand -base64 32)" -e APP_ENV=production -e APP_DEBUG=false \
+            -e DB_CONNECTION=sqlite -e DB_DATABASE=/tmp/esign.sqlite -e SESSION_DRIVER=file \
+            -e CACHE_STORE=file -e QUEUE_CONNECTION=sync -e LOG_CHANNEL=stderr \
+            bwh-esign:ci artisan --version
+          # The `worker` role, bounded with --stop-when-empty so it exits as soon as it finds no
+          # queued jobs instead of running forever: proof that the worker role starts, that extra
+          # arguments after the role name reach `queue:work`, and that the healthcheck script's
+          # `pgrep -f queue:work` process check has something real to find while it runs.
+          timeout 30 docker run --rm \
+            -e APP_KEY="base64:$(openssl rand -base64 32)" -e APP_ENV=production -e APP_DEBUG=false \
+            -e DB_CONNECTION=sqlite -e DB_DATABASE=/tmp/esign.sqlite -e SESSION_DRIVER=file \
+            -e CACHE_STORE=file -e QUEUE_CONNECTION=sync -e LOG_CHANNEL=stderr \
+            bwh-esign:ci worker --stop-when-empty
 
   validation:
     name: Independent seal validation (pyHanko)

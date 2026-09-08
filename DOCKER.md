@@ -13,6 +13,13 @@ unprivileged `www-data` user and serves HTTP on **8080**. The container command 
 Caches (`config`, `route`, `view`) are built at container start when `APP_ENV=production`, so the
 image is environment-agnostic. Migrations never run automatically.
 
+The image carries a role-aware `HEALTHCHECK` (`.docker/scripts/healthcheck.sh`, 30s interval, 5s
+timeout, 20s start period, 3 retries): the entrypoint writes the active role to `/tmp/esign-role`
+before exec'ing it, and the healthcheck reads that file to decide what "healthy" means — `web`
+curls `http://127.0.0.1:8080/up`, `worker`/`scheduler` check for their long-running process
+(`pgrep -f queue:work` / `pgrep -f schedule:run`) since nginx is not present in those roles.
+One-shot `artisan` invocations report healthy unconditionally; they have no steady state to probe.
+
 ## Targets
 
 - `production`: immutable. Code, `vendor` (no dev), and the Vite bundle are baked in.
@@ -33,6 +40,39 @@ on every push to `main` (`:main`, `:sha-<short>`) and on every GitHub Release (`
 pulls are anonymous and storage is free. This repository publishes the image and deploys nothing
 with it; a consumer pins a tag or, for production, the digest printed in the run summary, and
 deploys through its own pipeline. Old `sha-` builds are pruned automatically; semver tags are kept.
+
+### Labels
+
+Every image carries OCI labels: `org.opencontainers.image.title`, `.description`, `.source`
+(this repository), `.licenses` (`MIT AND LGPL-3.0-or-later` — the application is MIT, one bundled
+dependency is LGPL, see `docs/adr/0005-lgpl-dependency-handling.md`), `.revision` (commit SHA),
+and `.version` (release tag, or the commit SHA on a `main` build). `publish-image.yml` sets the
+real `.revision`/`.version` at build time via `docker/build-push-action`'s `labels:` input;
+`.docker/Dockerfile` also declares them as build `ARG`s with static fallback values
+(`IMAGE_REVISION=unknown`, `IMAGE_VERSION=unknown`, `IMAGE_SOURCE` pointing at this repository) so
+a local `docker build` without `--build-arg` still produces a labeled image, just without a real
+revision/version. The production target also copies `LICENSE` and `THIRD_PARTY_NOTICES.md` into
+`/usr/share/doc/bwh-esign/` inside the image — the LGPL dependency's notices obligation travels
+with the image, not just the source tree.
+
+### SBOM
+
+The published image does not carry an embedded SBOM attestation. `publish-image.yml` builds each
+architecture natively and pushes by digest before a separate job assembles the multi-arch
+manifest with `docker buildx imagetools create` (see the "Publish: build each architecture
+natively" history on this repository) — `imagetools create` combines existing per-arch manifests
+by reference and does not merge the attestation manifests that `sbom: true`/`provenance:
+mode=min` would attach to each per-arch build, short of reintroducing a single QEMU-emulated
+multi-platform build purely to get attestation merging for free. That trade was rejected once
+already for build speed and dist-fetch reliability, so this repository takes the escape hatch
+instead: the CycloneDX SBOM is the CI license job's inventory. `.github/workflows/ci.yml`'s
+`licenses` job already produces `build/licenses/sbom.cdx.json` from the exact production
+dependency tree (`composer licenses` + `pnpm licenses list`, gated by `scripts/check-licenses.php`)
+on every change to a lock file. `publish-image.yml` regenerates that same file for the commit it
+publishes and attaches it to the GitHub Release (`gh release upload`) on a release, and uploads it
+as a workflow artifact on every `main` push. **The image's SBOM is that file**, not something
+baked into the manifest; fetch it from the Release assets or the `image-sbom` workflow artifact
+for a given publish run.
 
 ## Standalone stack (this repository)
 
@@ -55,6 +95,37 @@ stack's MariaDB (dedicated `esign` database and user), Garage (dedicated `esign-
 and key), and Mailpit. That is the local mirror of the intended production shape: one eSign
 instance per VM, sharing the VM's MariaDB and Garage servers but never their schemas, buckets, or
 credentials. See that repository's `DOCKER.md`.
+
+## Production deployment (consumer pipeline)
+
+`docker-compose.prod.example.yml` is a template a consumer's own deploy pipeline copies and fills
+in — this repository never runs it. It pins `ESIGN_IMAGE` to a manifest digest, runs the three
+long-running roles plus a one-shot `esign-migrate` (`profiles: [release]`) release job, mounts the
+signing key directory read-only into `esign-worker` only, and hardens the root filesystem
+(`read_only: true` with `tmpfs` for `/tmp` and the writable `storage/framework`/`bootstrap/cache`
+paths, `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`). It publishes nothing except
+the web role on `127.0.0.1:8080`, for a host reverse proxy to front. Full release/rollback
+procedure and the environment file and key directory contracts: **[docs/operations/deploy-docker.md](docs/operations/deploy-docker.md)**.
+
+This repository does not run a reverse-proxy container; reuse whatever the host already runs.
+For nginx, proxy to the loopback port the compose file publishes:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name esign.example.com;
+
+    # ... TLS config ...
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        client_max_body_size 64M;   # match .docker/nginx/nginx.conf inside the image
+    }
+}
+```
 
 ## What the image deliberately lacks
 

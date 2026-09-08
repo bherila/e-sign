@@ -90,7 +90,9 @@ invite, sign, seal, download, validate, deliver a verified webhook, recover from
 interruption):
 
 - **Docker**: one image in web, worker, and scheduler roles behind an existing reverse proxy;
-  signing keys mounted only into the worker role. See [DOCKER.md](DOCKER.md); the consumer's
+  signing keys mounted only into the worker role. See [DOCKER.md](DOCKER.md) for the image itself
+  and [docs/operations/deploy-docker.md](docs/operations/deploy-docker.md) for the consumer
+  pipeline's release/rollback steps and the env-file/key-directory contracts; the consumer's
   compose stack has an `esign` profile that runs this image beside it.
 - **cPanel / shared hosting**: prebuilt assets, `public/` as document root, cron-driven bounded
   queue work with a database lease. `.github/workflows/deploy.yml` is the rsync path and is off
