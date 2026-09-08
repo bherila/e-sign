@@ -1001,8 +1001,9 @@ final readonly class EnvelopeStateMachine
      * sent with unresolved anchors, and none in which it holds resolved rectangles for a send
      * that rolled back.
      *
-     * An envelope with no anchors, or one the facade already resolved against these same bytes,
-     * produces an empty array — its stored schema and digest are left exactly as they were.
+     * An envelope with no anchors produces an empty array — its stored schema and digest are left
+     * exactly as they were. An envelope whose anchors resolve to what they already said produces
+     * the same bytes and therefore the same digest, so storing it is a no-op either way.
      *
      * @return array<string, mixed>
      */

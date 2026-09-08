@@ -13,8 +13,10 @@ use App\Domain\Preparation\Schema\FieldSchemaDocument;
  * the receipt that produced it, and any intentionally omitted field is gone from `fields`.
  * `$resolved` names the fields whose rectangle this pass wrote, and `$omissions` the fields it
  * removed. `changed()` says whether storing it is necessary at all, so an envelope with no
- * anchors — or one whose anchors were already resolved against these exact bytes — is not
- * rewritten and does not get a new field-schema digest for nothing.
+ * anchors is not rewritten and does not get a new field-schema digest for nothing. An envelope
+ * whose anchors resolve to what they already said *is* rewritten, with byte-identical content and
+ * therefore an identical digest: re-resolution is unconditional, and a receipt is never taken as
+ * a reason to skip it.
  */
 final readonly class AnchorResolutionOutcome
 {

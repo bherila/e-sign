@@ -26,8 +26,9 @@ use App\Domain\Signing\Models\Envelope;
 interface AnchorResolution
 {
     /**
-     * Resolve every anchor in the envelope's copied field schema that is not already resolved
-     * against the envelope's own document bytes.
+     * Resolve every anchor in the envelope's copied field schema against the envelope's own
+     * document bytes — including one that already carries a receipt naming them, because a
+     * receipt records what was found and never stands in for looking again.
      *
      * Called inside the send transaction, before anything is written. It must not write to the
      * envelope: the caller commits the resolved schema together with the transition, so that a

@@ -1303,11 +1303,12 @@ final class FieldSchemaValidator
     /**
      * A `cross_check` receipt has to prove the check it claims to be.
      *
-     * This is the whole feature. The stored receipt is what lets resolution be skipped — a field
-     * whose receipt names the document's own digest is not looked up again — so if nothing here
-     * compared the resolved corner against the declared one, a receipt could record any
-     * disagreement at all and the cross-check would never run against it. That is worse than not
-     * having the mode: the document would carry a record saying it had been checked.
+     * This is the whole feature. A stored receipt is read back on every request — the envelope
+     * re-imports its own schema — and it is the only account of the check anyone reading the
+     * document afterwards has. If nothing here compared the resolved corner against the declared
+     * one, a receipt could record any disagreement at all and still be read back as valid. That
+     * is worse than not having the mode: the document would carry a record saying it had been
+     * checked when nothing ever checked it.
      *
      * The comparison uses the anchor's *own* `tolerance`, which is why one is required alongside
      * a cross-check receipt: the deployment default can change, and a receipt whose standard has
