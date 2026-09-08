@@ -31,6 +31,7 @@ use App\Domain\Signing\Contracts\EnvelopeEventSink;
 use App\Domain\Signing\Envelopes\EnvelopeStateMachine;
 use App\Domain\Signing\Models\Envelope;
 use App\Domain\Signing\Sessions\SigningCookie;
+use Carbon\CarbonImmutable;
 use GuzzleHttp\Promise\PromiseInterface;
 use Illuminate\Foundation\Testing\TestCase;
 use Illuminate\Http\Client\ConnectionException;
@@ -137,6 +138,7 @@ final class SyntheticConsumer
     {
         $consumer = new self($test);
 
+        $consumer->freezeTheClockOnAWholeSecond();
         $consumer->bootApplicationUnderTest();
         $consumer->bootConsumer();
 
@@ -637,6 +639,34 @@ final class SyntheticConsumer
     /**
      * Put the application into the shape a deployment is in, with only external I/O faked.
      */
+    /**
+     * One clock for the scenario, anchored to a whole second, moved only by `travel()`.
+     *
+     * Two decisions in this suite are made at second granularity and neither should be left
+     * to the wall clock:
+     *
+     * 1. **The consumer's out-of-order guard.** The profile envelope formats `created_at` to
+     *    whole seconds, and {@see ConsumerWebhookReceiver} refuses to apply an event older
+     *    than one it has already applied to the same signing request. `signing_request.created`
+     *    and `signing_request.sent` are recorded microseconds apart inside one request, so on
+     *    a slow engine a second can tick over between them — and a retried `created` is then
+     *    *legitimately* regressive and dropped. That is a fact about the clock, not about
+     *    retries, and it failed the MariaDB 10.6 CI job exactly once.
+     * 2. **What is due.** {@see drainWebhooks()} asks for `next_attempt_at <= now()`. Those
+     *    columns are second-precision `DATETIME`s, and MySQL 8 *rounds* a fractional value on
+     *    write while MariaDB *truncates* it — so a timestamp written half a second past the
+     *    boundary lands one second apart on the two engines, and a delivery can be due on one
+     *    and not on the other. Starting on a whole second removes the fraction entirely.
+     *
+     * `travelBack()` first: nothing in the framework clears a previous test's `setTestNow`,
+     * so the anchor is taken from the real clock rather than from whatever was left behind.
+     */
+    private function freezeTheClockOnAWholeSecond(): void
+    {
+        $this->test->travelBack();
+        $this->test->travelTo(CarbonImmutable::now()->startOfSecond());
+    }
+
     private function bootApplicationUnderTest(): void
     {
         // One consent version, everywhere.
