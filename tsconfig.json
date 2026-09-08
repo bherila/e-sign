@@ -10,6 +10,10 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "target": "esnext",
+    // The field schema contract (resources/schema/field-schema-1.0.json) and its fixtures are
+    // imported directly by the schema tests, so they are checked against the same bytes the
+    // PHP importer reads.
+    "resolveJsonModule": true,
     "types": [],
     // For nodejs:
     // "lib": ["esnext"],
