@@ -45,19 +45,6 @@ final readonly class FieldDefinition
         return $this->anchor instanceof AnchorPlacement;
     }
 
-    /**
-     * True when this field's anchor still has to be resolved against these exact bytes.
-     *
-     * A receipt written against a different revision is not reused: it records coordinates
-     * measured in a document that is not the one being sent. Re-resolution happens only before
-     * send, never after it.
-     */
-    public function anchorNeedsResolution(string $documentSha256): bool
-    {
-        return $this->anchor instanceof AnchorPlacement
-            && ! $this->anchor->isResolvedAgainst($documentSha256);
-    }
-
     /** The same field carrying a different anchor request; nothing else moves. */
     public function withAnchor(AnchorPlacement $anchor): self
     {

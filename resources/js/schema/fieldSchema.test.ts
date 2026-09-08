@@ -638,6 +638,34 @@ describe("validateFieldSchema", () => {
       "/fields/5/anchor/resolved",
     ],
     [
+      "a receipt for a page the field is no longer on",
+      (raw) => {
+        raw.fields[5].anchor.resolved = {
+          document_sha256: "a".repeat(64),
+          page: 1,
+          occurrence_index: 1,
+          anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
+          rect: { x: 330, y: 646.9, width: 170, height: 36 },
+        };
+      },
+      "page_out_of_range",
+      "/fields/5/anchor/resolved/page",
+    ],
+    [
+      "a receipt for a match the anchor no longer asks for",
+      (raw) => {
+        raw.fields[5].anchor.resolved = {
+          document_sha256: "a".repeat(64),
+          page: 2,
+          occurrence_index: 3,
+          anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
+          rect: { x: 330, y: 646.9, width: 170, height: 36 },
+        };
+      },
+      "invalid_format",
+      "/fields/5/anchor/resolved/occurrence_index",
+    ],
+    [
       "a recipient email that is not an address",
       (raw) => (raw.recipients[0].email = "buyer at example.test"),
       "invalid_email",

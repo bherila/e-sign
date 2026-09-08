@@ -23,11 +23,15 @@ use InvalidArgumentException;
  * ascender does — and is never checked against the page edge. Validating a measurement as though
  * it were a placement is how a perfectly ordinary document becomes an unimportable one.
  *
- * `document_sha256` is the digest of the exact bytes the text was extracted from. It is the
- * reason a stored rectangle can be trusted without re-resolving: a rectangle resolved against a
- * different revision is detectable rather than assumed, so an envelope built from another
- * revision resolves again at send instead of inheriting coordinates measured somewhere else.
- * After send nothing re-resolves at all (docs/preparation/anchors.md).
+ * `document_sha256` is the digest of the exact bytes the text was extracted from, and it is
+ * provenance rather than a cache key. A receipt never lets resolution be skipped: publishing and
+ * sending both resolve every anchored field, because a receipt binds its rectangle to a document,
+ * a page and an occurrence but not to the anchor *text*, the origin corner or the offset — so
+ * trusting one would let an edited request keep the answer to the question it used to ask. What
+ * the digest is for is reading a stored document afterwards: it says which bytes the recorded
+ * rectangle was measured in, so a receipt from another revision is recognisable as one rather
+ * than mistaken for a measurement of this one. After send nothing re-resolves at all
+ * (docs/preparation/anchors.md).
  *
  * A caller may submit one of these, and the validator checks it as strictly as anything else
  * rather than refusing it: an envelope re-reads its own stored schema through the same importer
@@ -90,12 +94,6 @@ final readonly class ResolvedAnchorRecord
             MeasuredRect::fromArray($resolved['anchor_rect']),
             Rect::fromArray($resolved['rect']),
         );
-    }
-
-    /** True when this receipt was written against the bytes the caller holds. */
-    public function describes(string $documentSha256): bool
-    {
-        return hash_equals($this->documentSha256, $documentSha256);
     }
 
     /**

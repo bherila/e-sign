@@ -177,17 +177,28 @@ again under the lock rather than trusted.
 
 Three things make that guarantee checkable rather than a matter of care.
 
-Every receipt names the digest of the bytes it was measured in, so a field already resolved
-against an envelope's own document is skipped — and one carrying a receipt from a *different*
-revision is resolved again rather than trusted. That digest is **proved, not assumed**: the bytes
-are hashed when they are read and refused if they do not match the revision row
-(`Documents\RevisionBytes`). A write-time check cannot see an object replaced afterwards, and
-measuring replacement bytes while stamping the recorded digest would invite signers against a
-document the envelope is not bound to — with finalization noticing only after signing.
+**A receipt is a record of what was found, never permission to stop looking.** Every anchored
+field is resolved on every pass, including one that already carries a receipt naming the exact
+bytes about to be used. The reason is what a receipt does and does not bind: it names a document,
+a page and an occurrence, but not the anchor *text*, the origin corner, or the offset. Honour one
+and an edited request keeps the answer to the question it used to ask — change `anchor.text` to a
+string that is nowhere in the document and a *required* anchor would sail past the one check that
+exists to catch it, placing silently at the old coordinates. Resolution is a pure function of the
+request and the bytes, so re-running it on an unchanged pair costs one parse and returns the same
+rectangle; running it again on a changed one is the entire point. A field set with no anchor at
+all still never opens the document.
 
-A receipt also has to answer the question the field is asking *now*: its `page` must be the
-field's page and its `occurrence_index` the occurrence the anchor requests. Editing either while
-keeping the receipt would otherwise publish and send at coordinates resolved for something else.
+The digest a receipt carries is **proved, not assumed**: the bytes are hashed when they are read
+and refused if they do not match the revision row (`Documents\RevisionBytes`). A write-time check
+cannot see an object replaced afterwards, and measuring replacement bytes while stamping the
+recorded digest would invite signers against a document the envelope is not bound to — with
+finalization noticing only after signing.
+
+A stored receipt also has to answer the question its field is asking *now*, or the document does
+not import: its `page` must be the field's page and its `occurrence_index` the occurrence the
+anchor requests. That is what keeps a document at rest self-consistent, in both projections — the
+PHP importer and the TypeScript one check it identically, so moving an anchored field to another
+page is refused in the editor rather than discovered as a 422 after the save.
 
 And no code path outside `send()` and `publish()` calls the resolver at all;
 `tests/Feature/Signing/EnvelopeAnchorResolutionTest.php` counts the calls through a send, two
@@ -244,8 +255,10 @@ placement path.
 A caller *may* submit a `resolved` receipt of its own — the importer validates it like anything
 else, because an envelope re-reads its own stored schema through that same importer on every
 request, and a receipt the service can write but not read back would be a document that stops
-importing. A forged one buys nothing: it would let a sender put a field at coordinates of their
-choosing, which is exactly what submitting a rectangle with no anchor already does. Placement is
+importing. A submitted one is never honoured as a shortcut — publish and send resolve the
+anchor anyway and overwrite it — and a forged one buys nothing even before that: it would let a
+sender put a field at coordinates of their choosing, which is exactly what submitting a rectangle
+with no anchor already does. Placement is
 the sender's to decide either way; what resolution guarantees is that an anchor which *is* honoured
 was honoured deterministically.
 

@@ -916,7 +916,15 @@ function checkFields(
 
     if ("anchor" in field) {
       const fieldRequired = typeof field["required"] === "boolean" ? field["required"] : true;
-      checkAnchor(`${path}/anchor`, field["anchor"], fieldRequired, field["rect"], declaredMinor(document), issues);
+      checkAnchor(
+        `${path}/anchor`,
+        field["anchor"],
+        fieldRequired,
+        field["rect"],
+        field["page"],
+        declaredMinor(document),
+        issues,
+      );
     }
   });
 }
@@ -1130,6 +1138,7 @@ function checkAnchor(
   anchor: unknown,
   fieldRequired: boolean,
   fieldRect: unknown,
+  fieldPage: unknown,
   minor: number | null,
   issues: ValidationIssue[],
 ): void {
@@ -1174,7 +1183,16 @@ function checkAnchor(
 
   if ("resolved" in anchor) {
     const tolerance = typeof anchor["tolerance"] === "number" ? anchor["tolerance"] : null;
-    checkResolvedAnchor(`${path}/resolved`, anchor["resolved"], placement, tolerance, fieldRect, issues);
+    checkResolvedAnchor(
+      `${path}/resolved`,
+      anchor["resolved"],
+      placement,
+      tolerance,
+      fieldRect,
+      fieldPage,
+      anchor["occurrence"],
+      issues,
+    );
   }
 
   if ("origin" in anchor) {
@@ -1365,12 +1383,69 @@ function checkAnchorTolerance(
   }
 }
 
+/**
+ * A receipt answers one question, and it has to be the question the field is asking now.
+ *
+ * The mirror of `FieldSchemaValidator::checkReceiptAnswersTheRequest()`. Move an anchored field to
+ * another page, or point its anchor at a different occurrence, and the receipt kept alongside
+ * describes a match nobody asked for any more. The server refuses that; refusing it here too is
+ * what stops the editor from discovering it as a 422 after the save.
+ */
+function checkReceiptAnswersTheRequest(
+  path: string,
+  recorded: { page?: number; occurrence_index?: number },
+  fieldPage: unknown,
+  requestedOccurrence: unknown,
+  issues: ValidationIssue[],
+): void {
+  if (typeof fieldPage === "number" && Number.isInteger(fieldPage) && recorded.page !== undefined && recorded.page !== fieldPage) {
+    issues.push(
+      issue(
+        `${path}/page`,
+        "page_out_of_range",
+        `anchor.resolved.page is ${recorded.page} and the field is on page ${fieldPage}. An anchor is searched ` +
+          "on the page its field declares, so a receipt for another page answers a question this field is no " +
+          "longer asking; move the field back or drop the receipt so it resolves again.",
+      ),
+    );
+  }
+
+  if (recorded.occurrence_index === undefined) {
+    return;
+  }
+
+  // "sole" means the text occurs once, so the match taken is always the first.
+  const expected =
+    requestedOccurrence === ANCHOR_OCCURRENCE_SOLE
+      ? 1
+      : typeof requestedOccurrence === "number" && Number.isInteger(requestedOccurrence)
+        ? requestedOccurrence
+        : null;
+
+  if (expected === null || recorded.occurrence_index === expected) {
+    return;
+  }
+
+  issues.push(
+    issue(
+      `${path}/occurrence_index`,
+      "invalid_format",
+      `anchor.resolved.occurrence_index is ${recorded.occurrence_index} and the anchor asks for ` +
+        `${requestedOccurrence === ANCHOR_OCCURRENCE_SOLE ? "the sole occurrence" : `occurrence ${expected}`}. ` +
+        "A receipt records which match was taken, so one for a different match is not an answer to this " +
+        "anchor; drop it so the anchor resolves again.",
+    ),
+  );
+}
+
 function checkResolvedAnchor(
   path: string,
   resolved: unknown,
   placement: AnchorPlacement,
   anchorTolerance: number | null,
   fieldRect: unknown,
+  fieldPage: unknown,
+  requestedOccurrence: unknown,
   issues: ValidationIssue[],
 ): void {
   if (!isObject(resolved)) {
@@ -1396,6 +1471,8 @@ function checkResolvedAnchor(
     }
   }
 
+  const recorded: { page?: number; occurrence_index?: number } = {};
+
   for (const name of ["page", "occurrence_index"] as const) {
     if (!(name in resolved)) {
       continue;
@@ -1417,8 +1494,14 @@ function checkResolvedAnchor(
           `anchor.resolved.${name} is 1-based; got ${value}.`,
         ),
       );
+
+      continue;
     }
+
+    recorded[name] = value;
   }
+
+  checkReceiptAnswersTheRequest(path, recorded, fieldPage, requestedOccurrence, issues);
 
   // `anchor_rect` records where the text was, not where anything goes: a heading's ascender
   // legitimately starts above the CropBox edge, so it is never checked as a placement.
@@ -1432,9 +1515,9 @@ function checkResolvedAnchor(
 
   checkRect(`${path}/rect`, resolved["rect"], null, undefined, issues);
 
-  const recorded = resolved["rect"];
+  const recordedRect = resolved["rect"];
 
-  if (!isObject(fieldRect) || !isObject(recorded)) {
+  if (!isObject(fieldRect) || !isObject(recordedRect)) {
     return;
   }
 
@@ -1442,7 +1525,7 @@ function checkResolvedAnchor(
     // In `replace` mode the receipt's rectangle is where the field went, so the two must agree.
     for (const name of RECT_REQUIRED) {
       const declared = fieldRect[name];
-      const actual = recorded[name];
+      const actual = recordedRect[name];
 
       if (typeof declared !== "number" || typeof actual !== "number") {
         return;
@@ -1483,7 +1566,7 @@ function checkResolvedAnchor(
 
   for (const name of ["x", "y"] as const) {
     const declared = fieldRect[name];
-    const actual = recorded[name];
+    const actual = recordedRect[name];
 
     if (typeof declared !== "number" || typeof actual !== "number") {
       return;

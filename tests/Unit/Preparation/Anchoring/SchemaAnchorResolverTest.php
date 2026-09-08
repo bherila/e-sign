@@ -136,20 +136,68 @@ final class SchemaAnchorResolverTest extends TestCase
         );
     }
 
-    // ------------------------------------------------------------------ no re-resolution
+    // ------------------------------------------------------------------ a receipt is not a licence
 
-    public function test_a_field_already_resolved_against_these_bytes_is_left_alone(): void
+    /**
+     * The same request against the same bytes twice: the same answer, and it was looked up twice.
+     *
+     * Resolution is a pure function of the request and the document, so a second pass over an
+     * unchanged pair costs a parse and changes nothing. That is what makes it safe to run every
+     * time rather than only where a receipt happens to be missing.
+     */
+    public function test_resolving_the_same_request_against_the_same_bytes_twice_is_idempotent(): void
     {
         $runs = (new TcPdfTextLocator)->extract(PdfFixtures::bytes('single-page-letter'));
         $once = $this->resolver()->resolve($this->documentWith($this->replacingAnchor()), $runs, self::DIGEST);
 
-        // Second pass over the same document, with runs that no longer contain the anchor text
-        // at all. Nothing moves, because nothing is looked up.
-        $twice = $this->resolver()->resolve($once->schema, [], self::DIGEST);
+        $twice = $this->resolver()->resolve($once->schema, $runs, self::DIGEST);
 
-        $this->assertFalse($twice->changed());
-        $this->assertSame([], $twice->resolved);
+        $this->assertSame(['signature'], $twice->resolved);
         $this->assertSame($once->schema->canonicalJson(), $twice->schema->canonicalJson());
+    }
+
+    /**
+     * A receipt records what was found; it never stands in for looking again.
+     *
+     * The receipt binds its rectangle to a document, a page and an occurrence — not to the anchor
+     * *text*, the origin corner or the offset. Honouring one would let an edited request keep the
+     * answer to the question it used to ask: the text below is no longer anywhere in the
+     * document, and a required anchor that cannot be found has to stop the document rather than
+     * publish and send at the coordinates the old text resolved to.
+     */
+    public function test_a_receipt_does_not_answer_an_anchor_whose_text_has_since_changed(): void
+    {
+        $runs = (new TcPdfTextLocator)->extract(PdfFixtures::bytes('single-page-letter'));
+        $once = $this->resolver()->resolve($this->documentWith($this->replacingAnchor()), $runs, self::DIGEST);
+
+        $edited = $this->withAnchorText($once->schema, 'Nowhere in this document:');
+
+        $failure = $this->failureOf($edited, $runs);
+
+        $this->assertCount(1, $failure->problems);
+        $this->assertSame(ValidationCode::AnchorNotFound, $failure->problems[0]->code);
+        $this->assertSame('Nowhere in this document:', $failure->problems[0]->anchorText);
+    }
+
+    /** And when the edited text *is* in the document, the field moves to it rather than staying put. */
+    public function test_an_edited_anchor_text_is_resolved_to_its_own_match(): void
+    {
+        $runs = (new TcPdfTextLocator)->extract(PdfFixtures::bytes('single-page-letter'));
+        $once = $this->resolver()->resolve($this->documentWith($this->replacingAnchor()), $runs, self::DIGEST);
+        $wasAt = $once->schema->field('signature')?->rect->toArray();
+
+        $again = $this->resolver()->resolve(
+            $this->withAnchorText($once->schema, 'Printed Name:'),
+            $runs,
+            self::DIGEST,
+        );
+
+        $moved = $again->schema->field('signature');
+
+        $this->assertSame(['signature'], $again->resolved);
+        $this->assertNotNull($moved);
+        $this->assertNotSame($wasAt, $moved->rect->toArray());
+        $this->assertSame($moved->rect->toArray(), $moved->anchor?->resolved?->rect->toArray());
     }
 
     public function test_a_receipt_from_a_different_revision_is_resolved_again(): void
@@ -396,6 +444,15 @@ final class SchemaAnchorResolverTest extends TestCase
         }
 
         $this->fail('Expected the anchors to be refused.');
+    }
+
+    /** The same document with one field's anchor text edited and its receipt left in place. */
+    private function withAnchorText(FieldSchemaDocument $schema, string $text): FieldSchemaDocument
+    {
+        $document = $schema->toArray();
+        $document['fields'][0]['anchor']['text'] = $text;
+
+        return FieldSchemaDocument::fromArray($document);
     }
 
     /**

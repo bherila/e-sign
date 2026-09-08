@@ -27,9 +27,9 @@ use InvalidArgumentException;
  *
  * This is the field-schema half of anchor placement. {@see AnchorResolver} owns the semantics —
  * what counts as a match, which match wins, and what an absent or ambiguous one means — and this
- * class owns what that means for a *document*: which fields still need resolving, what the
- * resolved rectangle does to the field, which failures are reported together, and what happens
- * to a field whose optional anchor legitimately is not there.
+ * class owns what that means for a *document*: what the resolved rectangle does to the field,
+ * which failures are reported together, and what happens to a field whose optional anchor
+ * legitimately is not there.
  *
  * ## The rules it applies
  *
@@ -50,8 +50,15 @@ use InvalidArgumentException;
  * 4. **Absent is only acceptable when the document says so, and only for an optional field.**
  *    Then the field is *omitted* — removed from the field set and recorded — rather than placed
  *    at its placeholder rectangle. Ambiguity is never acceptable.
- * 5. **Nothing is resolved twice.** A field whose receipt already names these exact bytes is left
- *    alone, so the stored rectangle cannot drift if extraction changes later.
+ * 5. **A receipt is a record, never a licence to skip.** Every anchored field is resolved on
+ *    every pass, including one that already carries a receipt naming these exact bytes. A receipt
+ *    binds a rectangle to a document, and to a page and an occurrence, but not to the anchor
+ *    *text*, the origin corner, or the offset — so honouring one would let an edited request keep
+ *    an answer to the question it used to ask, and a required anchor whose text is no longer in
+ *    the document would place silently at the old coordinates instead of failing. Resolution is a
+ *    pure function of the request and the bytes: running it again on an unchanged pair costs one
+ *    parse and returns the same rectangle, and running it again on a changed one is the entire
+ *    point. Nothing re-resolves *after* send; that is a different rule, and it still holds.
  *
  * Every failure is collected, not thrown at the first one: see {@see AnchorResolutionFailed}.
  */
@@ -103,7 +110,7 @@ final readonly class SchemaAnchorResolver
         foreach ($schema->fields as $index => $field) {
             $anchor = $field->anchor;
 
-            if (! $anchor instanceof AnchorPlacement || ! $field->anchorNeedsResolution($documentSha256)) {
+            if (! $anchor instanceof AnchorPlacement) {
                 $fields[] = $field;
 
                 continue;

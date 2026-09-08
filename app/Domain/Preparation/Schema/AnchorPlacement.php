@@ -34,8 +34,9 @@ use InvalidArgumentException;
  *
  * Resolution writes {@see ResolvedAnchorRecord} into `resolved` and, in `replace` mode, writes
  * the resolved rectangle into the field's `rect`. It happens when a template version is
- * published and again when an envelope is sent; a missing or ambiguous required anchor is an
- * error at both, not a guess (docs/HANDOFF.md section 7, docs/preparation/anchors.md).
+ * published and again when an envelope is sent — every time, for every anchored field, whether or
+ * not one already carries a receipt — and a missing or ambiguous required anchor is an error at
+ * both, not a guess (docs/HANDOFF.md section 7, docs/preparation/anchors.md).
  */
 final readonly class AnchorPlacement
 {
@@ -208,13 +209,6 @@ final readonly class AnchorPlacement
             $this->tolerance,
             $record,
         );
-    }
-
-    /** True when this anchor already carries a receipt written against these exact bytes. */
-    public function isResolvedAgainst(string $documentSha256): bool
-    {
-        return $this->resolved instanceof ResolvedAnchorRecord
-            && $this->resolved->describes($documentSha256);
     }
 
     /**

@@ -30,9 +30,11 @@ use Throwable;
  * records. Hashing the bytes again here would produce a second answer to a question that already
  * has one.
  *
- * **The document is only opened when there is an anchor to resolve.** A field set with no
- * unresolved anchor never pays for a parse, which is what makes it safe to run this on every
- * publish and every send rather than only where somebody remembered to.
+ * **The document is only opened when the field set contains an anchor.** A field set with no
+ * anchor at all never pays for a parse, which is what makes it safe to run this on every publish
+ * and every send rather than only where somebody remembered to. A field set that *does* carry an
+ * anchor is resolved every time, receipt or no receipt: see {@see SchemaAnchorResolver} for why a
+ * stored receipt is a record of what was found and never permission to skip looking again.
  */
 final readonly class RevisionAnchorResolver
 {
@@ -52,23 +54,23 @@ final readonly class RevisionAnchorResolver
     ): AnchorResolutionOutcome {
         $digest = (string) $revision->sha256;
 
-        if (! $this->hasWorkToDo($schema, $digest)) {
+        if (! $this->hasAnchors($schema)) {
             return AnchorResolutionOutcome::unchanged($schema);
         }
 
         return $this->resolver->resolve(
             $schema,
-            $this->runs($schema, $digest, $revision),
+            $this->runs($schema, $revision),
             $digest,
             PreflightPageSizes::of($revision->document),
             $omitAbsentFields,
         );
     }
 
-    private function hasWorkToDo(FieldSchemaDocument $schema, string $documentSha256): bool
+    private function hasAnchors(FieldSchemaDocument $schema): bool
     {
         foreach ($schema->fields as $field) {
-            if ($field->anchorNeedsResolution($documentSha256)) {
+            if ($field->isAnchored()) {
                 return true;
             }
         }
@@ -81,7 +83,7 @@ final readonly class RevisionAnchorResolver
      *
      * @throws AnchorResolutionFailed
      */
-    private function runs(FieldSchemaDocument $schema, string $documentSha256, DocumentRevision $revision): array
+    private function runs(FieldSchemaDocument $schema, DocumentRevision $revision): array
     {
         $bytes = $this->readBytes($revision);
 
@@ -93,7 +95,7 @@ final readonly class RevisionAnchorResolver
             // internals, and no document response reveals those (docs/BLOB_STORAGE.md).
             $this->log($revision, $failure);
 
-            throw new AnchorResolutionFailed($this->unreadableProblems($schema, $documentSha256));
+            throw new AnchorResolutionFailed($this->unreadableProblems($schema));
         }
     }
 
@@ -147,12 +149,12 @@ final readonly class RevisionAnchorResolver
      *
      * @return list<AnchorResolutionProblem>
      */
-    private function unreadableProblems(FieldSchemaDocument $schema, string $documentSha256): array
+    private function unreadableProblems(FieldSchemaDocument $schema): array
     {
         $problems = [];
 
         foreach ($schema->fields as $index => $field) {
-            if (! $field->anchorNeedsResolution($documentSha256) || $field->anchor === null) {
+            if ($field->anchor === null) {
                 continue;
             }
 

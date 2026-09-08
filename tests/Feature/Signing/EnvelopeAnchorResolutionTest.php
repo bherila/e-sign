@@ -287,19 +287,77 @@ class EnvelopeAnchorResolutionTest extends TestCase
         $this->assertSame($afterSend, $envelope->refresh()->field_schema_sha256);
     }
 
-    public function test_an_already_resolved_anchor_is_not_looked_up_again(): void
+    /**
+     * A schema that arrives already resolved is resolved again, and nothing moves.
+     *
+     * Sending is the authoritative resolution, so it measures rather than reads a receipt back.
+     * Resolution is a pure function of the request and the bytes, so measuring an unchanged pair
+     * a second time returns the first answer exactly — including the digest the receipt names.
+     */
+    public function test_a_schema_that_arrives_resolved_is_resolved_again_to_the_same_bytes(): void
     {
         // What the Firma facade produces: the rectangle and the receipt for these exact bytes.
         $envelope = $this->scenario->preparedDraft(['field_schema' => $this->preResolvedSchema()]);
         $before = [$envelope->fieldSchema()->canonicalJson(), $envelope->field_schema_sha256];
 
-        // Remove the bytes. Anything that tried to read the document would fail loudly.
-        Storage::disk('documents')->delete($this->scenario->revision->path);
-
         $this->scenario->machine()->send($envelope);
 
         $this->assertSame(EnvelopeState::Sent, $envelope->refresh()->state);
         $this->assertSame($before, [$envelope->fieldSchema()->canonicalJson(), $envelope->field_schema_sha256]);
+    }
+
+    /**
+     * A receipt is a record of what was found, never permission to stop looking.
+     *
+     * It binds its rectangle to a document, a page and an occurrence — not to the anchor text, the
+     * origin corner or the offset. Were a receipt honoured, this send would place the signature
+     * block at the coordinates the *old* text resolved to, and a required anchor whose text is not
+     * in the document would sail through the one check that exists to catch it.
+     */
+    public function test_a_receipt_does_not_answer_an_anchor_whose_text_has_since_changed(): void
+    {
+        $schema = $this->preResolvedSchema();
+        $schema = SigningFixtures::mutateField($schema, 'seller_signature', [
+            'anchor' => array_replace(
+                $schema['fields'][array_search(
+                    'seller_signature',
+                    array_column($schema['fields'], 'id'),
+                    true,
+                )]['anchor'],
+                ['text' => 'Nowhere in this document:'],
+            ),
+        ]);
+
+        $envelope = $this->scenario->preparedDraft(['field_schema' => $schema]);
+
+        $failure = $this->refusedSend($envelope);
+
+        $this->assertTrue($failure->hasCode(ValidationCode::AnchorNotFound->value));
+        $this->assertSame('seller_signature', $failure->problems[0]['field']);
+        $this->assertSame('Nowhere in this document:', $failure->problems[0]['anchor_text']);
+        $this->assertSame(EnvelopeState::Draft, $envelope->refresh()->state);
+    }
+
+    /**
+     * And the document is genuinely opened for a schema that already carries receipts.
+     *
+     * Under the rule this replaced — a receipt naming these bytes means do not look — the send
+     * below succeeded with the object deleted, which is precisely how a stale receipt got
+     * honoured without anything reading the document it claims to describe.
+     */
+    public function test_a_resolved_schema_still_needs_the_document_at_send(): void
+    {
+        $envelope = $this->scenario->preparedDraft(['field_schema' => $this->preResolvedSchema()]);
+
+        Storage::disk('documents')->delete($this->scenario->revision->path);
+
+        $this->expectException(AnchorDocumentUnavailable::class);
+
+        try {
+            $this->scenario->machine()->send($envelope);
+        } finally {
+            $this->assertSame(EnvelopeState::Draft, $envelope->refresh()->state);
+        }
     }
 
     // ------------------------------------------------------------------------ storage failure
