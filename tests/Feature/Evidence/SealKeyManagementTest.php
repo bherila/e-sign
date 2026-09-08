@@ -35,6 +35,34 @@ class SealKeyManagementTest extends TestCase
             ->assertSuccessful();
     }
 
+    public function test_the_status_command_lists_retired_keys_and_flags_a_missing_certificate(): void
+    {
+        FinalizationScenario::configureSeal();
+
+        config(['esign.seal.retired_keys' => [[
+            'key_id' => 'fixture-seal-2025-a',
+            'certificate_path' => SealingFixtures::cryptoPath('seal-b.test.crt'),
+            'chain_path' => '',
+        ]]]);
+
+        $this->artisan('esign:seal:status')
+            ->expectsOutputToContain('fixture-seal-2025-a')
+            ->expectsOutputToContain('Retired seal keys')
+            ->assertSuccessful();
+
+        // A retired certificate that cannot be loaded is published evidence this deployment can
+        // no longer attribute, so it fails the exit status a cron check reads.
+        config(['esign.seal.retired_keys' => [[
+            'key_id' => 'fixture-seal-2025-a',
+            'certificate_path' => SealingFixtures::cryptoPath('gone.test.crt'),
+            'chain_path' => '',
+        ]]]);
+
+        $this->artisan('esign:seal:status')
+            ->expectsOutputToContain('UNRESOLVABLE')
+            ->assertFailed();
+    }
+
     public function test_the_status_command_never_prints_key_material(): void
     {
         FinalizationScenario::configureSeal();
