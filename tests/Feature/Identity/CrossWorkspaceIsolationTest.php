@@ -25,14 +25,21 @@ use Tests\TestCase;
  * every member-scoped lookup behaves as though B does not exist, so a probe cannot even
  * distinguish "forbidden" from "no such workspace".
  *
- * This is the seed of the isolation suite that issue #11 requires in CI. Service
- * credentials have landed and their cases are below; the remaining surfaces named there —
- * imported-provider aliases, JSON import, artifact downloads, and queue jobs — do not exist
- * yet, and each one adds its cases here as it lands rather than getting an isolation test of
- * its own somewhere else. The HTTP half of the credential case (a request carrying a valid
- * secret for another workspace's resource) is in
+ * This is the seed of the isolation suite that issue #11 requires in CI. It covers the
+ * policy and the member-scoped lookups. Service credentials have landed and their cases are
+ * below; the HTTP half of that case (a request carrying a valid secret for another
+ * workspace's resource) is in
  * tests/Feature/Identity/Credentials/ServiceCredentialAuthenticationTest.php, where the
- * middleware and its probe routes already are.
+ * middleware and its probe routes already are. A surface with its own HTTP routes asserts
+ * the same property over those routes next to the rest of its coverage, and lists itself
+ * here:
+ *
+ *  - documents, uploads and revision downloads:
+ *    tests/Feature/Preparation/DocumentHttpTest.php
+ *
+ * The remaining surfaces named in issue #11 — imported-provider aliases, JSON import,
+ * artifact downloads, and queue jobs — do not exist yet, and each one adds its cases here as
+ * it lands rather than getting an isolation test of its own somewhere else.
  */
 class CrossWorkspaceIsolationTest extends TestCase
 {

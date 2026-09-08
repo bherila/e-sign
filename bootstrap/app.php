@@ -23,7 +23,12 @@ return Application::configure(basePath: dirname(__DIR__))
         // `/up` above is Laravel's minimal liveness probe. `routes/health.php` adds the
         // detailed `/health/ready` readiness probe (issue #16); it is registered here
         // rather than merged into web/api so it never picks up session or CSRF middleware.
-        then: fn () => Route::group([], base_path('routes/health.php')),
+        // `routes/documents.php` (issue #19) declares its own `web` + `auth` stack for the
+        // same reason: the file that defines a route also defines what protects it.
+        then: function (): void {
+            Route::group([], base_path('routes/health.php'));
+            Route::group([], base_path('routes/documents.php'));
+        },
     )
     // Domain commands live under app/Domain/<Module>/Console, which Laravel's
     // app/Console/Commands auto-discovery does not scan, so they are listed here.
