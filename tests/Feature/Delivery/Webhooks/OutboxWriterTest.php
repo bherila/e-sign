@@ -16,7 +16,7 @@ use App\Domain\Delivery\Webhooks\OutboxWriter;
 use App\Domain\Delivery\Webhooks\WebhookDispatcher;
 use App\Domain\Identity\Models\Workspace;
 use Carbon\CarbonImmutable;
-use Illuminate\Foundation\Testing\DatabaseMigrations;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -25,30 +25,38 @@ use Tests\TestCase;
 
 /**
  * The transactional-outbox contract.
- *
- * DatabaseMigrations rather than RefreshDatabase on purpose: RefreshDatabase
- * wraps every test in a transaction, which would make `DB::transactionLevel()`
- * report 1 even where the test means to be outside one, and the central rule
- * here is precisely that a write outside a transaction is refused.
  */
 class OutboxWriterTest extends TestCase
 {
-    use DatabaseMigrations;
+    use RefreshDatabase;
 
     public function test_recording_an_event_outside_a_transaction_is_refused(): void
     {
-        $workspace = Workspace::factory()->create();
-
-        $this->assertSame(0, DB::transactionLevel());
+        // RefreshDatabase wraps every test in a transaction, so getting to the
+        // state this rule is about — none open — means rolling that wrapper
+        // back and starting a fresh one for the teardown to unwind. The
+        // alternative, DatabaseMigrations, cannot drop this schema in foreign
+        // key order on MySQL or MariaDB.
+        DB::rollBack();
 
         try {
-            $this->writer()->record($workspace, 'signing_request.sent', ['signing_request' => ['id' => 'x']]);
-            $this->fail('An outbox write with no transaction open should be refused.');
-        } catch (OutboxWriteOutsideTransactionException $refusal) {
-            $this->assertStringContainsString('DB::transaction()', $refusal->getMessage());
-        }
+            $this->assertSame(0, DB::transactionLevel());
 
-        $this->assertSame(0, OutboxEvent::query()->count());
+            // Unsaved on purpose: the refusal lands before the writer touches
+            // the database, so this test writes nothing while uncommitted.
+            $workspace = new Workspace(['name' => 'Acme', 'slug' => 'acme']);
+
+            try {
+                $this->writer()->record($workspace, 'signing_request.sent', ['signing_request' => ['id' => 'x']]);
+                $this->fail('An outbox write with no transaction open should be refused.');
+            } catch (OutboxWriteOutsideTransactionException $refusal) {
+                $this->assertStringContainsString('DB::transaction()', $refusal->getMessage());
+            }
+
+            $this->assertSame(0, OutboxEvent::query()->count());
+        } finally {
+            DB::beginTransaction();
+        }
     }
 
     public function test_a_recorded_event_carries_the_envelope_it_will_send(): void
