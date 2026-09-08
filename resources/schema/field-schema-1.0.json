@@ -65,13 +65,7 @@
       "description": "The declared coordinate space. Version 1.0 implements exactly one, and every value is a const: a document that declares anything else is rejected rather than reinterpreted. Never infer points versus percent from a number's magnitude.",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "unit",
-        "origin",
-        "page_box",
-        "rotation",
-        "page_index_base"
-      ],
+      "required": ["unit", "origin", "page_box", "rotation", "page_index_base"],
       "properties": {
         "unit": {
           "description": "PostScript points, 1/72 inch.",
@@ -98,11 +92,7 @@
     "recipient": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "id",
-        "name",
-        "email"
-      ],
+      "required": ["id", "name", "email"],
       "properties": {
         "id": {
           "$ref": "#/$defs/identifier"
@@ -130,13 +120,7 @@
     "field": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "id",
-        "recipient_id",
-        "type",
-        "page",
-        "rect"
-      ],
+      "required": ["id", "recipient_id", "type", "page", "rect"],
       "properties": {
         "id": {
           "description": "Stable field id, unique within the document.",
@@ -204,12 +188,7 @@
       "description": "An axis-aligned rectangle in the declared coordinate space, anchored at its top-left corner. Values are finite, carry at most three decimal places (0.001 pt), and are written without a trailing fractional zero when integral.",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "x",
-        "y",
-        "width",
-        "height"
-      ],
+      "required": ["x", "y", "width", "height"],
       "properties": {
         "x": {
           "type": "number",
@@ -229,13 +208,33 @@
         }
       }
     },
+    "measured_rect": {
+      "description": "A rectangle recording where something was, rather than where something goes. Same unit, orientation and canonical spelling as rect, but x and y may be negative and nothing is checked against the page edge \u2014 see resolved_anchor.anchor_rect. Only the extents are constrained, to being non-negative, because a box with a negative extent is not a measurement of anything.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "width": {
+          "type": "number",
+          "minimum": 0
+        },
+        "height": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
     "prefill": {
       "description": "Binds the field's initial value to a named variable resolved at send time. An unresolved variable is an error before send, never a blank field.",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "variable"
-      ],
+      "required": ["variable"],
       "properties": {
         "variable": {
           "type": "string",
@@ -246,14 +245,10 @@
       }
     },
     "anchor": {
-      "description": "An anchor placement request: find this text, then place the field's rect relative to it, or check the rect that is already there. Resolution is deterministic positioned-text extraction (App\\Domain\\Preparation\\Text) that writes the resolved rectangle and a receipt back into this document before send; a missing or ambiguous required anchor is an error, never a guess. Matching semantics belong to the resolver, not to this schema. See docs/preparation/anchors.md.",
+      "description": "An anchor placement request: find this text, then place the field's rect relative to it, or check the rect that is already there. Resolution is deterministic positioned-text extraction (App\\Domain\\Preparation\\Text) that writes the resolved rectangle and a receipt back into this document when a template version is published and again when an envelope is sent, and never after that; a missing or ambiguous required anchor is an error, never a guess. Matching semantics belong to the resolver, not to this schema. See docs/preparation/anchors.md.",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "text",
-        "occurrence",
-        "placement"
-      ],
+      "required": ["text", "occurrence"],
       "properties": {
         "text": {
           "description": "Exact text to locate. Matched case-sensitively against decoded text runs; never a regular expression over PDF bytes and never a fuzzy match.",
@@ -274,32 +269,22 @@
           ]
         },
         "placement": {
-          "description": "Which of the field's two statements about position wins. \"replace\" makes the anchor authoritative for x and y and keeps only the rect's width and height, because an anchor says where a field goes and never how big it is; the rect's x and y are a placeholder that resolution overwrites, and nothing is ever left at it. \"cross_check\" keeps the declared rect and requires the anchor to resolve within `tolerance` points of it, which is the mode for a document whose layout the consumer generates itself. Required, with no default: every field carries a rect, so a field that also carries an anchor and does not say which one governs is under-specified and is rejected.",
+          "description": "Which of the field's two statements about position wins. \"replace\" makes the anchor authoritative for x and y and keeps only the rect's width and height, because an anchor says where a field goes and never how big it is; the rect's x and y are then a placeholder that resolution overwrites, and nothing is ever left at it. \"cross_check\" keeps the declared rect and requires the anchor to resolve within `tolerance` points of it, which is the mode for a document whose layout the consumer generates itself. Omitted means \"replace\": that is the only behaviour an anchor in this schema has ever had, so it is what an already-written document meant, and a canonical form that added the property would move the field-schema digest every attestation on an anchored agreement is bound to.",
           "type": "string",
-          "enum": [
-            "replace",
-            "cross_check"
-          ]
+          "enum": ["replace", "cross_check"],
+          "default": "replace"
         },
         "origin": {
           "description": "Corner of the matched text box the offset is measured from. Omitted means top-left; nothing is inferred from the sign of the offset.",
           "type": "string",
-          "enum": [
-            "top_left",
-            "top_right",
-            "bottom_left",
-            "bottom_right"
-          ],
+          "enum": ["top_left", "top_right", "bottom_left", "bottom_right"],
           "default": "top_left"
         },
         "offset": {
           "description": "Offset from the origin corner, in the same unit and orientation as the coordinate space, so dy grows downwards. May be negative.",
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "dx",
-            "dy"
-          ],
+          "required": ["dx", "dy"],
           "properties": {
             "dx": {
               "type": "number"
@@ -310,7 +295,7 @@
           }
         },
         "required": {
-          "description": "Whether the anchor text must be present. Omitted means true: an unstated requirement fails closed. False is the narrow compatibility option for a document in which this text may legitimately not appear — the field is then omitted from the sent envelope rather than placed anywhere, and the omission is recorded on the envelope. It is only accepted on a field whose own `required` is false, and it never makes an ambiguous anchor acceptable.",
+          "description": "Whether the anchor text must be present. Omitted means true: an unstated requirement fails closed. False is the narrow compatibility option for a document in which this text may legitimately not appear \u2014 the field is then omitted from the sent envelope rather than placed anywhere, and the omission is recorded on the envelope. Only accepted on a field whose own `required` is false and whose placement is \"replace\", and it never makes an ambiguous anchor acceptable.",
           "type": "boolean",
           "default": true
         },
@@ -328,13 +313,7 @@
       "description": "What resolution found, written by the service and never by a caller authoring a document. The anchor is the question, the field's rect is the answer everything downstream uses, and this is the receipt in between. `document_sha256` is the digest of the exact bytes the text was located in, which is what lets a stored rectangle be trusted without re-resolving: a receipt from a different revision is detected and resolved again before send, and after send nothing re-resolves at all.",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "document_sha256",
-        "page",
-        "occurrence_index",
-        "anchor_rect",
-        "rect"
-      ],
+      "required": ["document_sha256", "page", "occurrence_index", "anchor_rect", "rect"],
       "properties": {
         "document_sha256": {
           "description": "SHA-256, lowercase hex, of the document revision the text was located in.",
@@ -352,11 +331,11 @@
           "minimum": 1
         },
         "anchor_rect": {
-          "description": "Where the matched text itself sits, in the declared coordinate space.",
-          "$ref": "#/$defs/rect"
+          "description": "Where the matched text itself sits. A measurement, not a placement: a run's nominal box is its advance by the font's ascent plus descent, so a heading near the top of the page legitimately starts above the CropBox edge and a run at the margin legitimately ends on it. Never checked against the page.",
+          "$ref": "#/$defs/measured_rect"
         },
         "rect": {
-          "description": "The rectangle resolution produced: the anchor rect's chosen corner plus the offset, sized by the field. In \"replace\" mode this is the field's rect.",
+          "description": "The rectangle resolution produced: the anchor rect's chosen corner plus the offset, sized by the field. In \"replace\" mode this is required to be the field's own rect, so the receipt cannot describe a placement that did not happen.",
           "$ref": "#/$defs/rect"
         }
       }

@@ -39,26 +39,39 @@ a default position and not a dropped field.
 |---|---|---|
 | `text` | yes | exact string, matched case-sensitively against decoded text runs |
 | `occurrence` | yes | `"sole"` (must occur exactly once) or a 1-based index in document order |
-| `placement` | yes | `"replace"` or `"cross_check"`; see below |
+| `placement` | no, default `replace` | `"replace"` or `"cross_check"`; see below |
 | `origin` | no, default `top_left` | corner of the matched text the offset is measured from |
 | `offset` | no | `dx`, `dy` in points, `dy` downwards, either may be negative |
 | `required` | no, default `true` | false is the compatibility option below |
 | `tolerance` | no | points; `cross_check` only |
 | `resolved` | written by the service | the receipt; see [What gets stored](#what-gets-stored) |
 
-Three of those are required with **no default**, and all three for the same reason: an unstated
-placement rule is a guess, and a guess moves a signature box.
+**`occurrence` is required and has no default.** There is no "first match wins" fallback. A string
+that matches twice, in an anchor that does not say which match it means, is under-specified — and
+silently taking the first would move the box the day somebody adds a paragraph above it.
 
-- **`occurrence`** has no "first match wins" fallback. A string that matches twice, in an anchor
-  that does not say which match it means, is under-specified — and silently taking the first would
-  move the box the day somebody adds a paragraph above it.
-- **`placement`** exists because a field always carries a rectangle. Schema 1.0 requires `rect`
-  and always will: it is what the editor draws, what assembly stamps, and it carries the field's
-  *size*, which an anchor never supplies — an anchor says where a field goes, never how big it is.
-  So an anchored field holds two statements about its position, and `placement` is the document
-  saying which one wins.
-- **`required`** is the field-level rule applied to the anchor: an unstated requirement fails
-  closed.
+**`placement` exists because a field always carries a rectangle.** Schema 1.0 requires `rect` and
+always will: it is what the editor draws, what assembly stamps, and it carries the field's *size*,
+which an anchor never supplies — an anchor says where a field goes, never how big it is. So an
+anchored field holds two statements about its position, and `placement` is the document saying
+which one wins.
+
+It *is* defaulted, unlike `occurrence`, and the difference is not laziness. For `occurrence` the
+two readings are equally plausible and picking one silently moves a box. For `placement` there is
+only one reading with any history behind it: before `cross_check` existed, an anchor wrote its
+resolved rectangle into the field and that was the whole of what an anchor could do. `replace` is
+therefore not a guess about what a document meant — it is what every document written until now
+*did* mean.
+
+That is also why it has to stay defaulted, and why the canonical form omits it. An envelope's
+`field_schema_sha256` is the digest every attestation on it is bound to. If canonicalising an
+existing anchor grew a `"placement"` property, that digest would move, and the evidence for every
+anchored agreement already signed would stop verifying. The same applies to `required`: `true` is
+the default and is written out only when it is `false`. An anchor authored before either property
+existed canonicalises to exactly the bytes it always did.
+
+**`required`** is the field-level rule applied to the anchor: an unstated requirement fails
+closed.
 
 `occurrence`, `origin` and the matching rules are the serialised form of the value objects in
 `App\Domain\Preparation\Text`, so a document cannot express a placement the resolver does not
@@ -90,6 +103,11 @@ refusal is not.
 Deliberately tight: the point of a cross-check is to catch a layout that moved, and a generous
 tolerance catches nothing. `tolerance` on a `replace` anchor is a validation error, because there
 is no declared rectangle for it to be a tolerance of.
+
+`anchor.required: false` is a validation error here too, for the mirror-image reason: in this mode
+the rectangle is authoritative and the anchor only confirms it, so an absent anchor has no
+placement waiting on it to omit. Honouring it would delete a field the document positioned
+itself.
 
 ## Scope: one page, the field's own
 
@@ -124,6 +142,12 @@ coordinate. It happens before anybody is invited, so nothing has been shown for 
 is nothing an acceptance could already bind to. Afterwards the rule holds without an exception:
 **nothing re-resolves**, and a rectangle a signer saw can never move.
 
+Resolution runs before `send()` opens its transaction, so a PDF parse never happens while the
+envelope row is locked. That is safe because resolution is a pure function of the copied field
+schema and the document's bytes, and the version compare-and-swap pins both: the outcome records
+the digest of the field set it ran against, and a locked row that disagrees is resolved again
+under the lock rather than trusted.
+
 Two things make that guarantee checkable rather than a matter of care. Every receipt names the
 digest of the bytes it was measured in, so a field already resolved against an envelope's own
 document is skipped — and one carrying a receipt from a *different* revision is resolved again
@@ -157,7 +181,22 @@ the answer everything downstream uses.
 
 `anchor_rect` is where the matched *text* sits; `rect` is what came out of it once the origin
 corner and offset were applied. Keeping both means a reader can check the placement without
-re-running extraction, which is the one thing that must not happen again.
+re-running extraction, which is the one thing that must not happen again. In `replace` mode the
+receipt's `rect` is required to be the field's own, so a document whose field sits somewhere its
+own receipt does not describe is rejected.
+
+The two rectangles are **different kinds of thing**, and the schema says so: `rect` is a
+`#/$defs/rect` and `anchor_rect` is a `#/$defs/measured_rect`.
+
+- A `rect` is a *placement*. It must be on the page, with a positive width and height, and a
+  negative coordinate is a bug.
+- A `measured_rect` is an *observation*. A run's nominal box is its advance width by the font's
+  ascent plus descent, so a heading near the top of a page routinely has an ascender crossing the
+  CropBox edge, and a run at the margin ends exactly on it. Its `x` and `y` may be negative and it
+  is never checked against the page.
+
+Validating a measurement as though it were a placement is how an ordinary document becomes an
+unimportable one — and, worse, how the service writes a receipt it cannot read back.
 
 A resolved field is **indistinguishable from a hand-placed one** to everything that reads a
 rectangle: the editor, assembly, the signing page, and finalization all read `rect` and none of
@@ -187,6 +226,7 @@ sender fixing one does not discover the next afterwards.
 | `anchor_resolved_off_page` | the offset put the rectangle off the page it was found on |
 | `anchor_text_unreadable` | the document's text could not be extracted at all |
 | `anchor_optional_on_required_field` | `anchor.required: false` on a field whose own `required` is true |
+| `invalid_format` | `anchor.required: false` with `cross_check`, `tolerance` with `replace`, or a `replace` receipt whose `rect` is not the field's |
 
 At **publish** they arrive as an ordinary field-schema rejection: a 422 with
 `field_schema_errors[]`, each entry carrying the code and an RFC 6901 pointer
@@ -209,9 +249,10 @@ and if it does not, do not place the field at all.*
 
 It is narrow in three ways.
 
-1. **Only on an optional field.** An absent anchor omits the field, and a required field that is
-   never placed can never be completed. The combination is a validation error
-   (`anchor_optional_on_required_field`), refused where the field set is written.
+1. **Only on an optional field, and only in `replace` mode.** An absent anchor omits the field, so
+   a required field that is never placed can never be completed
+   (`anchor_optional_on_required_field`), and a `cross_check` anchor has no placement waiting on it
+   to omit. Both are validation errors, refused where the field set is written.
 2. **It never excuses ambiguity.** `required: false` says the text may be missing. It says nothing
    about what to do when the text is there three times, and a field that could go in three places
    is not a field anybody can be asked to sign. An ambiguous optional anchor is refused exactly

@@ -43,7 +43,10 @@ use InvalidArgumentException;
  *    direction.
  * 3. **A resolved rectangle must land on its page.** An anchored rectangle is built from where
  *    the text turned out to be plus the caller's offset, so nothing before resolution knows
- *    whether it fits. A field a signer cannot reach is refused rather than stored.
+ *    whether it fits. A field a signer cannot reach is refused rather than stored. The *matched
+ *    text's* own box is not checked that way and must not be: a heading's ascender routinely
+ *    crosses the top of the CropBox, and refusing that would refuse the document rather than the
+ *    placement.
  * 4. **Absent is only acceptable when the document says so, and only for an optional field.**
  *    Then the field is *omitted* — removed from the field set and recorded — rather than placed
  *    at its placeholder rectangle. Ambiguity is never acceptable.
@@ -138,12 +141,19 @@ final readonly class SchemaAnchorResolver
         }
 
         $fieldsOmitted = $omitAbsentFields && $omissions !== [];
+        $source = hash('sha256', $schema->canonicalJson());
 
         if ($resolved === [] && ! $fieldsOmitted) {
-            return new AnchorResolutionOutcome($schema, [], $omissions);
+            return new AnchorResolutionOutcome($schema, [], $omissions, false, $source);
         }
 
-        return new AnchorResolutionOutcome($schema->withFields($fields), $resolved, $omissions, $fieldsOmitted);
+        return new AnchorResolutionOutcome(
+            $schema->withFields($fields),
+            $resolved,
+            $omissions,
+            $fieldsOmitted,
+            $source,
+        );
     }
 
     /**
@@ -185,21 +195,23 @@ final readonly class SchemaAnchorResolver
             return $mismatch;
         }
 
+        // Storable by construction: the matched text's own box is a measurement and may sit
+        // partly outside the page ({@see MeasuredRect}), and the resolved rectangle has already
+        // been checked against the page above. The guard stays because a value object that can
+        // throw should never be constructed on the assumption that it will not.
         try {
             $record = ResolvedAnchorRecord::fromResolvedAnchor($found, $documentSha256);
         } catch (InvalidArgumentException $unstorable) {
-            // The matched run has no measurable box, so there is nothing to place against. It
-            // reads as an off-page failure because that is what it is: a rectangle that cannot
-            // be stored is a field a signer cannot reach.
             return new AnchorResolutionProblem(
                 $index,
                 $field->id,
                 $field->recipientId,
                 $anchor->text,
                 ValidationCode::AnchorResolvedOffPage,
-                'an unusable rectangle',
-                'Field "'.$field->id.'" anchored to "'.$anchor->text.'" on page '.$field->page
-                    .', but the match does not produce a storable rectangle: '.$unstorable->getMessage(),
+                'a rectangle that cannot be recorded',
+                'Field "'.$field->id.'" is anchored to "'.$anchor->text.'" on page '.$field->page
+                    .', and the match cannot be recorded: '.$unstorable->getMessage().' This is a property of the '
+                    .'matched text itself, not of the offset.',
             );
         }
 
@@ -296,7 +308,7 @@ final readonly class SchemaAnchorResolver
         AnchorPlacement $anchor,
         ResolvedAnchor $found,
     ): ?AnchorResolutionProblem {
-        if ($anchor->placement !== AnchorPlacementMode::CrossCheck) {
+        if ($anchor->mode() !== AnchorPlacementMode::CrossCheck) {
             return null;
         }
 

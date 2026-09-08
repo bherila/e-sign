@@ -253,7 +253,7 @@ class FirmaCreateAndSendTest extends TestCase
         $anchor = $field->anchor;
         $this->assertNotNull($anchor);
         $this->assertSame('Signature:', $anchor->text);
-        $this->assertSame(AnchorPlacementMode::Replace, $anchor->placement);
+        $this->assertSame(AnchorPlacementMode::Replace, $anchor->mode());
         $this->assertTrue($anchor->required);
 
         $receipt = $anchor->resolved;

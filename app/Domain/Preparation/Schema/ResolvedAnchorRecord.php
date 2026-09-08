@@ -17,6 +17,12 @@ use InvalidArgumentException;
  * hand-placed one *and* check the placement without re-running extraction, while assembly,
  * signing, and finalization keep reading nothing but `rect`.
  *
+ * The two rectangles are deliberately different types. `rect` is a {@see Rect}: a placement, on
+ * the page, positive in both extents. `anchor_rect` is a {@see MeasuredRect}: an observation of
+ * where a run of text sat, which may legitimately start above the top of the CropBox — a heading's
+ * ascender does — and is never checked against the page edge. Validating a measurement as though
+ * it were a placement is how a perfectly ordinary document becomes an unimportable one.
+ *
  * `document_sha256` is the digest of the exact bytes the text was extracted from. It is the
  * reason a stored rectangle can be trusted without re-resolving: a rectangle resolved against a
  * different revision is detectable rather than assumed, so an envelope built from another
@@ -35,7 +41,7 @@ final readonly class ResolvedAnchorRecord
         public string $documentSha256,
         public int $page,
         public int $occurrenceIndex,
-        public Rect $anchorRect,
+        public MeasuredRect $anchorRect,
         public Rect $rect,
     ) {
         if (preg_match('/^[0-9a-f]{64}$/', $documentSha256) !== 1) {
@@ -57,7 +63,7 @@ final readonly class ResolvedAnchorRecord
             $documentSha256,
             $resolved->page,
             $resolved->occurrenceIndex,
-            new Rect(
+            new MeasuredRect(
                 $resolved->anchorRect->x,
                 $resolved->anchorRect->y,
                 $resolved->anchorRect->width,
@@ -81,7 +87,7 @@ final readonly class ResolvedAnchorRecord
             $resolved['document_sha256'],
             (int) $resolved['page'],
             (int) $resolved['occurrence_index'],
-            Rect::fromArray($resolved['anchor_rect']),
+            MeasuredRect::fromArray($resolved['anchor_rect']),
             Rect::fromArray($resolved['rect']),
         );
     }

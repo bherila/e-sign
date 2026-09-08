@@ -19,6 +19,16 @@ use App\Domain\Preparation\Schema\FieldSchemaDocument;
 final readonly class AnchorResolutionOutcome
 {
     /**
+     * Digest of the canonical form of the field set this pass ran *against*.
+     *
+     * The caller may have resolved before taking a lock on the row it is about to write — the
+     * send path does, so a PDF parse does not happen under it — and this is how the outcome is
+     * confirmed to belong to the field set that is actually there. It is the input's digest, not
+     * the output's; `$schema`'s own digest is in {@see toAuditPayload()}.
+     */
+    public string $sourceSchemaSha256;
+
+    /**
      * @param  list<string>  $resolved  Field ids whose rectangle this pass wrote.
      * @param  list<AnchorOmission>  $omissions
      */
@@ -27,7 +37,10 @@ final readonly class AnchorResolutionOutcome
         public array $resolved = [],
         public array $omissions = [],
         public bool $fieldsOmitted = false,
-    ) {}
+        ?string $sourceSchemaSha256 = null,
+    ) {
+        $this->sourceSchemaSha256 = $sourceSchemaSha256 ?? hash('sha256', $schema->canonicalJson());
+    }
 
     public static function unchanged(FieldSchemaDocument $schema): self
     {

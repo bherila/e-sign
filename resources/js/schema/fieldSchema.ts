@@ -95,7 +95,13 @@ export const DEFAULT_ANCHOR_ORIGIN: AnchorOrigin = "top_left";
  * Every field carries a rect, so a field that also carries an anchor holds two of them.
  * `"replace"` makes the anchor authoritative for x and y and keeps only the rect's size;
  * `"cross_check"` keeps the declared rect and requires the anchor to resolve within
- * `tolerance` points of it. Required, with no default: an unstated precedence is a guess.
+ * `tolerance` points of it.
+ *
+ * Omitted means `"replace"`, which is not the kind of default `occurrence` refuses: it is the
+ * only behaviour an anchor has ever had here, so it is what an already-written document meant.
+ * Both defaults are omitted from the canonical form for the same reason — an anchor written
+ * before these properties existed must still canonicalise to exactly its old bytes, because the
+ * field-schema digest is what every attestation on an anchored agreement is bound to.
  */
 export const ANCHOR_PLACEMENTS = ["replace", "cross_check"] as const;
 
@@ -104,19 +110,35 @@ export type AnchorPlacement = (typeof ANCHOR_PLACEMENTS)[number];
 /** Whether an anchor's text must be present. Omitted means true; false needs an optional field. */
 export const DEFAULT_ANCHOR_REQUIRED = true;
 
+export const DEFAULT_ANCHOR_PLACEMENT: AnchorPlacement = "replace";
+
+/**
+ * A rectangle recording where something *was*, rather than where something goes.
+ *
+ * `x` and `y` may be negative and nothing is checked against the page: a run's nominal box is its
+ * advance by the font's ascent plus descent, so a heading near the top of the page legitimately
+ * starts above the CropBox edge.
+ */
+export interface MeasuredRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 /** What resolution found, written by the service and never authored in the editor. */
 export interface ResolvedAnchor {
   document_sha256: string;
   page: number;
   occurrence_index: number;
-  anchor_rect: Rect;
+  anchor_rect: MeasuredRect;
   rect: Rect;
 }
 
 export interface Anchor {
   text: string;
   occurrence: AnchorOccurrence;
-  placement: AnchorPlacement;
+  placement?: AnchorPlacement;
   origin?: AnchorOrigin;
   offset?: AnchorOffset;
   required?: boolean;
@@ -260,8 +282,8 @@ export const RECIPIENT_OPTIONAL = ["role"] as const;
 export const FIELD_REQUIRED = ["id", "recipient_id", "type", "page", "rect"] as const;
 export const FIELD_OPTIONAL = ["required", "read_only", "label", "alias", "prefill", "anchor"] as const;
 export const RECT_REQUIRED = ["x", "y", "width", "height"] as const;
-export const ANCHOR_REQUIRED = ["text", "occurrence", "placement"] as const;
-export const ANCHOR_OPTIONAL = ["origin", "offset", "required", "tolerance", "resolved"] as const;
+export const ANCHOR_REQUIRED = ["text", "occurrence"] as const;
+export const ANCHOR_OPTIONAL = ["placement", "origin", "offset", "required", "tolerance", "resolved"] as const;
 export const RESOLVED_ANCHOR_REQUIRED = [
   "document_sha256",
   "page",
@@ -440,16 +462,20 @@ function canonicaliseRect(rect: Rect): Rect {
 }
 
 /**
- * Canonical anchor order: the required properties, then the optional ones, with `required`
- * always stated — the same rule the field's own `required` follows, so a canonical document
- * never leaves a requirement to a default.
+ * Canonical anchor order: the declared properties in schema order, with anything that equals its
+ * default omitted — the anchor object's own long-standing convention, and here load-bearing: an
+ * anchor written before `placement` and `required` existed must canonicalise to exactly its old
+ * bytes, or the field-schema digest every attestation is bound to would move.
  */
 function canonicaliseAnchor(anchor: Anchor): Anchor {
   const canonical: Anchor = {
     text: anchor.text,
     occurrence: anchor.occurrence,
-    placement: anchor.placement,
   };
+
+  if (anchor.placement !== undefined && anchor.placement !== DEFAULT_ANCHOR_PLACEMENT) {
+    canonical.placement = anchor.placement;
+  }
 
   if (anchor.origin !== undefined) {
     canonical.origin = anchor.origin;
@@ -462,7 +488,9 @@ function canonicaliseAnchor(anchor: Anchor): Anchor {
     };
   }
 
-  canonical.required = anchor.required ?? DEFAULT_ANCHOR_REQUIRED;
+  if (anchor.required !== undefined && anchor.required !== DEFAULT_ANCHOR_REQUIRED) {
+    canonical.required = anchor.required;
+  }
 
   if (anchor.tolerance !== undefined) {
     canonical.tolerance = roundCoordinate(anchor.tolerance);
@@ -867,7 +895,7 @@ function checkFields(
 
     if ("anchor" in field) {
       const fieldRequired = typeof field["required"] === "boolean" ? field["required"] : true;
-      checkAnchor(`${path}/anchor`, field["anchor"], fieldRequired, page, options.pageSizes, issues);
+      checkAnchor(`${path}/anchor`, field["anchor"], fieldRequired, field["rect"], issues);
     }
   });
 }
@@ -1062,8 +1090,7 @@ function checkAnchor(
   path: string,
   anchor: unknown,
   fieldRequired: boolean,
-  page: number | null,
-  pageSizes: PageSize[] | undefined,
+  fieldRect: unknown,
   issues: ValidationIssue[],
 ): void {
   if (!isObject(anchor)) {
@@ -1082,12 +1109,12 @@ function checkAnchor(
     checkAnchorOccurrence(`${path}/occurrence`, anchor["occurrence"], issues);
   }
 
-  const placement = checkAnchorPlacement(`${path}/placement`, anchor, issues);
-  checkAnchorRequired(path, anchor, fieldRequired, issues);
+  const placement = checkAnchorPlacement(`${path}/placement`, anchor, issues) ?? DEFAULT_ANCHOR_PLACEMENT;
+  checkAnchorRequired(path, anchor, fieldRequired, placement, issues);
   checkAnchorTolerance(`${path}/tolerance`, anchor, placement, issues);
 
   if ("resolved" in anchor) {
-    checkResolvedAnchor(`${path}/resolved`, anchor["resolved"], page, pageSizes, issues);
+    checkResolvedAnchor(`${path}/resolved`, anchor["resolved"], placement, fieldRect, issues);
   }
 
   if ("origin" in anchor) {
@@ -1188,6 +1215,7 @@ function checkAnchorRequired(
   path: string,
   anchor: Record<string, unknown>,
   fieldRequired: boolean,
+  placement: AnchorPlacement,
   issues: ValidationIssue[],
 ): void {
   if (!("required" in anchor)) {
@@ -1202,25 +1230,41 @@ function checkAnchorRequired(
     return;
   }
 
-  if (required || !fieldRequired) {
+  if (required) {
     return;
   }
 
-  issues.push(
-    issue(
-      `${path}/required`,
-      "anchor_optional_on_required_field",
-      'anchor.required is false on a field whose own "required" is true. An absent anchor omits the field, ' +
-        "and a required field that is never placed can never be completed. Make the field optional, or " +
-        "require the anchor.",
-    ),
-  );
+  if (fieldRequired) {
+    issues.push(
+      issue(
+        `${path}/required`,
+        "anchor_optional_on_required_field",
+        'anchor.required is false on a field whose own "required" is true. An absent anchor omits the field, ' +
+          "and a required field that is never placed can never be completed. Make the field optional, or " +
+          "require the anchor.",
+      ),
+    );
+
+    return;
+  }
+
+  if (placement === "cross_check") {
+    issues.push(
+      issue(
+        `${path}/required`,
+        "invalid_format",
+        'anchor.required false means an absent anchor omits the field, which contradicts anchor.placement ' +
+          '"cross_check": there the declared rectangle is authoritative and the anchor only checks it, so an ' +
+          'absent anchor has nothing to omit. Use "replace", or require the anchor.',
+      ),
+    );
+  }
 }
 
 function checkAnchorTolerance(
   path: string,
   anchor: Record<string, unknown>,
-  placement: AnchorPlacement | null,
+  placement: AnchorPlacement,
   issues: ValidationIssue[],
 ): void {
   if (!("tolerance" in anchor)) {
@@ -1264,8 +1308,8 @@ function checkAnchorTolerance(
 function checkResolvedAnchor(
   path: string,
   resolved: unknown,
-  page: number | null,
-  pageSizes: PageSize[] | undefined,
+  placement: AnchorPlacement,
+  fieldRect: unknown,
   issues: ValidationIssue[],
 ): void {
   if (!isObject(resolved)) {
@@ -1315,9 +1359,84 @@ function checkResolvedAnchor(
     }
   }
 
-  for (const name of ["anchor_rect", "rect"] as const) {
-    if (name in resolved) {
-      checkRect(`${path}/${name}`, resolved[name], page, pageSizes, issues);
+  // `anchor_rect` records where the text was, not where anything goes: a heading's ascender
+  // legitimately starts above the CropBox edge, so it is never checked as a placement.
+  if ("anchor_rect" in resolved) {
+    checkMeasuredRect(`${path}/anchor_rect`, resolved["anchor_rect"], issues);
+  }
+
+  if (!("rect" in resolved)) {
+    return;
+  }
+
+  checkRect(`${path}/rect`, resolved["rect"], null, undefined, issues);
+
+  const recorded = resolved["rect"];
+
+  if (placement !== "replace" || !isObject(fieldRect) || !isObject(recorded)) {
+    return;
+  }
+
+  // In `replace` mode the receipt's rectangle is where the field went, so the two must agree.
+  for (const name of RECT_REQUIRED) {
+    const declared = fieldRect[name];
+    const actual = recorded[name];
+
+    if (typeof declared !== "number" || typeof actual !== "number") {
+      return;
+    }
+
+    if (Math.abs(declared - actual) > CANONICAL_TOLERANCE) {
+      issues.push(
+        issue(
+          `${path}/rect/${name}`,
+          "invalid_format",
+          `anchor.resolved.rect must be the field's own rect when anchor.placement is "replace": the receipt ` +
+            `records where the field was placed, and this one says ${actual} where the field says ${declared}.`,
+        ),
+      );
+
+      return;
+    }
+  }
+}
+
+/**
+ * A rectangle that records where something was, rather than where something goes: finite, with
+ * non-negative extents, and never checked against the page.
+ */
+function checkMeasuredRect(path: string, rect: unknown, issues: ValidationIssue[]): void {
+  if (!isObject(rect)) {
+    issues.push(issue(path, "invalid_type", "rect must be an object with x, y, width, and height."));
+
+    return;
+  }
+
+  checkObjectShape(path, rect, RECT_REQUIRED, [], issues);
+
+  for (const name of RECT_REQUIRED) {
+    if (!(name in rect)) {
+      continue;
+    }
+
+    const value = rect[name];
+
+    if (typeof value !== "number") {
+      issues.push(issue(`${path}/${name}`, "invalid_type", `rect.${name} must be a number.`));
+
+      continue;
+    }
+
+    if (!Number.isFinite(value)) {
+      issues.push(issue(`${path}/${name}`, "coordinate_not_finite", `rect.${name} must be a finite number; got ${value}.`));
+
+      continue;
+    }
+
+    if ((name === "width" || name === "height") && value < 0) {
+      issues.push(
+        issue(`${path}/${name}`, "dimension_not_positive", `rect.${name} must not be negative; got ${value}.`),
+      );
     }
   }
 }

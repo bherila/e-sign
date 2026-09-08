@@ -202,6 +202,15 @@ there is no window in which an envelope is sent with unresolved anchors and none
 rectangles for a send that rolled back. Nothing re-resolves afterwards, which is what makes a
 rectangle a signer saw unable to move.
 
+The resolution itself runs **before** the transaction opens. It reads a document object and parses
+its content streams, which is orders of magnitude slower than anything else `send()` does, and
+under `lockForUpdate()` it would hold the envelope row for the length of a PDF parse. It is safe
+outside because resolution is a pure function of the copied field schema and the document's bytes,
+and both are pinned by the version compare-and-swap: any change to either bumps `version`, so a
+stale resolution becomes a `StaleEnvelope` rather than a wrong rectangle. The outcome carries the
+digest of the field set it ran against, and the locked row's digest is compared with it before
+anything is committed; a disagreement resolves again inside the lock rather than trusting it.
+
 `assurance_material_unavailable` comes from the `AssurancePolicyCheck` port. `docs/HANDOFF.md` section 9 requires
 rejecting absent, unusable, or mismatched signing material *before* inviting signers, and
 never downgrading a requested level to one that can be met. The default implementation reads

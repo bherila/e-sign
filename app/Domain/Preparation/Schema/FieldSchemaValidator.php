@@ -96,10 +96,10 @@ final class FieldSchemaValidator
     public const RECT_REQUIRED = ['x', 'y', 'width', 'height'];
 
     /** @var list<string> */
-    public const ANCHOR_REQUIRED = ['text', 'occurrence', 'placement'];
+    public const ANCHOR_REQUIRED = ['text', 'occurrence'];
 
     /** @var list<string> */
-    public const ANCHOR_OPTIONAL = ['origin', 'offset', 'required', 'tolerance', 'resolved'];
+    public const ANCHOR_OPTIONAL = ['placement', 'origin', 'offset', 'required', 'tolerance', 'resolved'];
 
     /** @var list<string> */
     public const RESOLVED_ANCHOR_REQUIRED = ['document_sha256', 'page', 'occurrence_index', 'anchor_rect', 'rect'];
@@ -567,8 +567,7 @@ final class FieldSchemaValidator
                     array_key_exists('required', $field) && is_bool($field['required'])
                         ? $field['required']
                         : FieldDefinition::DEFAULT_REQUIRED,
-                    $field['page'] ?? null,
-                    $pageSizes,
+                    $field['rect'] ?? null,
                     $errors,
                 );
             }
@@ -765,14 +764,14 @@ final class FieldSchemaValidator
 
     /**
      * @param  bool  $fieldRequired  The field's own `required` flag, which bounds `anchor.required`.
+     * @param  mixed  $fieldRect  The field's own rectangle, which a `replace` receipt must reproduce.
      * @param  list<ValidationError>  $errors
      */
     private function checkAnchor(
         string $path,
         mixed $anchor,
         bool $fieldRequired,
-        mixed $page,
-        ?PageSizes $pageSizes,
+        mixed $fieldRect,
         array &$errors,
     ): void {
         if (! $this->isObject($anchor)) {
@@ -791,12 +790,13 @@ final class FieldSchemaValidator
             $this->checkAnchorOccurrence($path.'/occurrence', $anchor['occurrence'], $errors);
         }
 
-        $mode = $this->checkAnchorPlacement($path.'/placement', $anchor, $errors);
-        $this->checkAnchorRequired($path, $anchor, $fieldRequired, $errors);
+        $mode = $this->checkAnchorPlacement($path.'/placement', $anchor, $errors)
+            ?? AnchorPlacement::DEFAULT_PLACEMENT;
+        $this->checkAnchorRequired($path, $anchor, $fieldRequired, $mode, $errors);
         $this->checkAnchorTolerance($path.'/tolerance', $anchor, $mode, $errors);
 
         if (array_key_exists('resolved', $anchor)) {
-            $this->checkResolvedAnchor($path.'/resolved', $anchor['resolved'], $page, $pageSizes, $errors);
+            $this->checkResolvedAnchor($path.'/resolved', $anchor['resolved'], $mode, $fieldRect, $errors);
         }
 
         if (array_key_exists('origin', $anchor)) {
@@ -856,12 +856,12 @@ final class FieldSchemaValidator
     /**
      * Which of the field's two statements about position wins.
      *
-     * Required, with no default. Schema 1.0 requires every field to carry a rectangle — it is
-     * what the editor draws and what assembly stamps, and an anchor never supplies a size — so a
-     * field that also carries an anchor holds two statements about where it goes. Defaulting one
-     * of them would be the same guess `anchor.occurrence` refuses: a document that does not say
-     * whether the anchor moves the box or merely checks it is under-specified, and both readings
-     * put a signature somewhere nobody agreed to.
+     * Omitted means `replace`, and that is not the kind of default `anchor.occurrence` refuses.
+     * There, two readings are equally plausible and picking one silently moves a box. Here there
+     * is one reading with any history behind it: before `cross_check` existed, an anchor wrote
+     * its resolved rectangle into the field and that was all an anchor could do. So the default
+     * is what an already-written document meant, which is also why it must stay the default —
+     * see {@see AnchorPlacement::DEFAULT_PLACEMENT} for the digest that depends on it.
      *
      * @param  array<string, mixed>  $anchor
      * @param  list<ValidationError>  $errors
@@ -911,8 +911,13 @@ final class FieldSchemaValidator
      * @param  array<string, mixed>  $anchor
      * @param  list<ValidationError>  $errors
      */
-    private function checkAnchorRequired(string $path, array $anchor, bool $fieldRequired, array &$errors): void
-    {
+    private function checkAnchorRequired(
+        string $path,
+        array $anchor,
+        bool $fieldRequired,
+        AnchorPlacementMode $mode,
+        array &$errors,
+    ): void {
         if (! array_key_exists('required', $anchor)) {
             return;
         }
@@ -925,24 +930,42 @@ final class FieldSchemaValidator
             return;
         }
 
-        if ($required || ! $fieldRequired) {
+        if ($required) {
             return;
         }
 
-        $errors[] = new ValidationError(
-            $path.'/required',
-            ValidationCode::AnchorOptionalOnRequiredField,
-            'anchor.required is false on a field whose own "required" is true. An absent anchor omits the field, '
-                .'and a required field that is never placed can never be completed. Make the field optional, or '
-                .'require the anchor.',
-        );
+        if ($fieldRequired) {
+            $errors[] = new ValidationError(
+                $path.'/required',
+                ValidationCode::AnchorOptionalOnRequiredField,
+                'anchor.required is false on a field whose own "required" is true. An absent anchor omits the field, '
+                    .'and a required field that is never placed can never be completed. Make the field optional, or '
+                    .'require the anchor.',
+            );
+
+            return;
+        }
+
+        // In cross-check mode the rectangle is authoritative and the anchor only confirms it, so
+        // "the text may be absent" has nothing to say: there is no placement waiting on the
+        // anchor to omit. Honouring it would delete a field the document positioned itself.
+        if ($mode === AnchorPlacementMode::CrossCheck) {
+            $errors[] = new ValidationError(
+                $path.'/required',
+                ValidationCode::InvalidFormat,
+                'anchor.required false means an absent anchor omits the field, which contradicts anchor.placement "'
+                    .AnchorPlacementMode::CrossCheck->value.'": there the declared rectangle is authoritative and the '
+                    .'anchor only checks it, so an absent anchor has nothing to omit. Use "'
+                    .AnchorPlacementMode::Replace->value.'", or require the anchor.',
+            );
+        }
     }
 
     /**
      * @param  array<string, mixed>  $anchor
      * @param  list<ValidationError>  $errors
      */
-    private function checkAnchorTolerance(string $path, array $anchor, ?AnchorPlacementMode $mode, array &$errors): void
+    private function checkAnchorTolerance(string $path, array $anchor, AnchorPlacementMode $mode, array &$errors): void
     {
         if (! array_key_exists('tolerance', $anchor)) {
             return;
@@ -999,8 +1022,8 @@ final class FieldSchemaValidator
     private function checkResolvedAnchor(
         string $path,
         mixed $resolved,
-        mixed $page,
-        ?PageSizes $pageSizes,
+        AnchorPlacementMode $mode,
+        mixed $fieldRect,
         array &$errors,
     ): void {
         if (! $this->isObject($resolved)) {
@@ -1054,9 +1077,105 @@ final class FieldSchemaValidator
             }
         }
 
-        foreach (['anchor_rect', 'rect'] as $name) {
-            if (array_key_exists($name, $resolved)) {
-                $this->checkRect($path.'/'.$name, $resolved[$name], $page, $pageSizes, $errors);
+        // `anchor_rect` records where the text was, not where anything goes. A run's nominal box
+        // is its advance by the font's ascent plus descent, so a heading near the top of the page
+        // legitimately starts above the CropBox edge, and a run touching the right margin
+        // legitimately ends on it. Checking it as a placement — non-negative, inside the page —
+        // would refuse ordinary documents, and would refuse receipts this service itself writes.
+        if (array_key_exists('anchor_rect', $resolved)) {
+            $this->checkMeasuredRect($path.'/anchor_rect', $resolved['anchor_rect'], $errors);
+        }
+
+        if (! array_key_exists('rect', $resolved)) {
+            return;
+        }
+
+        // The resolved rectangle *is* a placement, so it is checked like one. The page-fit check
+        // is deliberately not run here: it belongs to the field's own rect, which in `replace`
+        // mode is required to be this same rectangle.
+        $this->checkRect($path.'/rect', $resolved['rect'], null, null, $errors);
+
+        if ($mode !== AnchorPlacementMode::Replace || ! $this->isObject($fieldRect) || ! $this->isObject($resolved['rect'])) {
+            return;
+        }
+
+        // In `replace` mode the receipt's rectangle is where the field went, so the two must
+        // agree. Enforcing it keeps the receipt honest: a document whose field sits somewhere its
+        // own receipt does not describe is a document nobody can check.
+        foreach (self::RECT_REQUIRED as $name) {
+            $declared = $fieldRect[$name] ?? null;
+            $recorded = $resolved['rect'][$name] ?? null;
+
+            if (! is_int($declared) && ! is_float($declared)) {
+                return;
+            }
+
+            if (! is_int($recorded) && ! is_float($recorded)) {
+                return;
+            }
+
+            if (abs((float) $declared - (float) $recorded) > CanonicalNumber::TOLERANCE) {
+                $errors[] = new ValidationError(
+                    $path.'/rect/'.$name,
+                    ValidationCode::InvalidFormat,
+                    'anchor.resolved.rect must be the field\'s own rect when anchor.placement is "'
+                        .AnchorPlacementMode::Replace->value.'": the receipt records where the field was placed, and '
+                        .'this one says '.$this->describeNumber((float) $recorded).' where the field says '
+                        .$this->describeNumber((float) $declared).'.',
+                );
+
+                return;
+            }
+        }
+    }
+
+    /**
+     * A rectangle that records where something was, rather than where something goes.
+     *
+     * Finite, with non-negative extents, and nothing else: see {@see MeasuredRect} for why a
+     * negative coordinate and an overhanging edge are both ordinary here.
+     *
+     * @param  list<ValidationError>  $errors
+     */
+    private function checkMeasuredRect(string $path, mixed $rect, array &$errors): void
+    {
+        if (! $this->isObject($rect)) {
+            $errors[] = new ValidationError($path, ValidationCode::InvalidType, 'rect must be an object with x, y, width, and height.');
+
+            return;
+        }
+
+        $this->checkObjectShape($path, $rect, self::RECT_REQUIRED, [], $errors);
+
+        foreach (self::RECT_REQUIRED as $name) {
+            if (! array_key_exists($name, $rect)) {
+                continue;
+            }
+
+            $value = $rect[$name];
+
+            if (! is_int($value) && ! is_float($value)) {
+                $errors[] = new ValidationError($path.'/'.$name, ValidationCode::InvalidType, 'rect.'.$name.' must be a number.');
+
+                continue;
+            }
+
+            if (! is_finite((float) $value)) {
+                $errors[] = new ValidationError(
+                    $path.'/'.$name,
+                    ValidationCode::CoordinateNotFinite,
+                    'rect.'.$name.' must be a finite number; got '.var_export($value, true).'.',
+                );
+
+                continue;
+            }
+
+            if (($name === 'width' || $name === 'height') && (float) $value < 0.0) {
+                $errors[] = new ValidationError(
+                    $path.'/'.$name,
+                    ValidationCode::DimensionNotPositive,
+                    'rect.'.$name.' must not be negative; got '.$this->describeNumber((float) $value).'.',
+                );
             }
         }
     }

@@ -90,20 +90,20 @@ describe("parseFieldSchema", () => {
   it("keeps the anchor placement request verbatim", () => {
     const document = parseFieldSchema(fixture());
 
+    // `placement` and `required` are absent because they equal their defaults, and the
+    // canonical form omits a defaulted anchor property — which is what keeps a document written
+    // before those properties existed byte-identical, and its digest with it.
     expect(document.fields[5]!.anchor).toEqual({
       text: "Counterparty signature:",
       occurrence: "sole",
-      placement: "replace",
       origin: "bottom_left",
       offset: { dx: 0, dy: 12.5 },
-      required: true,
     });
     // The optional notes field carries the narrow compatibility option: its anchor may be
     // absent, and then the field is omitted rather than placed anywhere.
     expect(document.fields[9]!.anchor).toEqual({
       text: "Notes:",
       occurrence: 2,
-      placement: "replace",
       required: false,
     });
   });
@@ -137,30 +137,51 @@ describe("serializeFieldSchema", () => {
             page: 2,
             occurrence_index: 1,
             anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
-            rect: { x: 330, y: 646.9004, width: 170, height: 36 },
+            // In `replace` mode the receipt records where the field went, so it has to be the
+            // field's own rectangle — within the canonical tolerance, which is what makes the
+            // fractional tail here legal and the round trip exact.
+            rect: { x: 330, y: 650.0004, width: 170, height: 36 },
           };
         }),
       ),
     );
 
     expect(json).toContain('"occurrence_index":1');
-    expect(json).toContain('"rect":{"x":330,"y":646.9,"width":170,"height":36}');
+    expect(json).toContain('"rect":{"x":330,"y":650,"width":170,"height":36}');
     expect(serializeFieldSchema(parseFieldSchema(json))).toBe(json);
   });
 
-  it("states anchor.required even when the document left it out", () => {
+  it("omits a defaulted anchor property so an older document keeps its bytes", () => {
     const json = serializeFieldSchema(
       parseFieldSchema(
         brokenFixture((raw) => {
-          delete raw.fields[5].anchor.required;
+          raw.fields[5].anchor.placement = "replace";
+          raw.fields[5].anchor.required = true;
         }),
       ),
     );
 
-    // Same rule as the field's own `required`: a canonical document states it rather than
-    // leaning on a default, so nothing has to know the default to read the document.
-    expect(json).toContain('"placement":"replace","origin":"bottom_left"');
-    expect(json).toContain('"required":true');
+    // Written out explicitly, canonicalised away: an anchor authored before `placement` and
+    // `required` existed must produce exactly the bytes it always produced, because the
+    // field-schema digest is what every attestation on an anchored agreement is bound to.
+    expect(json).toContain('"anchor":{"text":"Counterparty signature:","occurrence":"sole","origin":"bottom_left"');
+    expect(json).not.toContain('"placement":"replace"');
+    expect(json).toBe(serializeFieldSchema(parseFieldSchema(fixture())));
+  });
+
+  it("keeps a non-default placement and a false anchor.required", () => {
+    const json = serializeFieldSchema(
+      parseFieldSchema(
+        brokenFixture((raw) => {
+          raw.fields[5].anchor.placement = "cross_check";
+          raw.fields[5].anchor.tolerance = 2;
+        }),
+      ),
+    );
+
+    expect(json).toContain('"placement":"cross_check"');
+    expect(json).toContain('"tolerance":2');
+    expect(json).toContain('"text":"Notes:","occurrence":2,"required":false');
   });
 
   it("preserves stable field ids and template aliases", () => {
@@ -471,12 +492,6 @@ describe("validateFieldSchema", () => {
       "/fields/5/anchor/offset",
     ],
     [
-      "an anchor that does not say which of the two positions governs",
-      (raw) => delete raw.fields[5].anchor.placement,
-      "missing_property",
-      "/fields/5/anchor",
-    ],
-    [
       "an undeclared anchor placement",
       (raw) => (raw.fields[5].anchor.placement = "nudge"),
       "invalid_format",
@@ -487,6 +502,43 @@ describe("validateFieldSchema", () => {
       (raw) => (raw.fields[5].anchor.required = false),
       "anchor_optional_on_required_field",
       "/fields/5/anchor/required",
+    ],
+    [
+      "an optional anchor that only cross-checks a rectangle it cannot omit",
+      (raw) => {
+        raw.fields[9].anchor.placement = "cross_check";
+        raw.fields[9].anchor.required = false;
+      },
+      "invalid_format",
+      "/fields/9/anchor/required",
+    ],
+    [
+      "a receipt describing a rectangle the field is not at",
+      (raw) => {
+        raw.fields[5].anchor.resolved = {
+          document_sha256: "c".repeat(64),
+          page: 2,
+          occurrence_index: 1,
+          anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
+          rect: { x: 999, y: 650, width: 170, height: 36 },
+        };
+      },
+      "invalid_format",
+      "/fields/5/anchor/resolved/rect/x",
+    ],
+    [
+      "a measured anchor rect with a negative extent",
+      (raw) => {
+        raw.fields[5].anchor.resolved = {
+          document_sha256: "c".repeat(64),
+          page: 2,
+          occurrence_index: 1,
+          anchor_rect: { x: 330, y: 622.4, width: -1, height: 12 },
+          rect: { x: 330, y: 650, width: 170, height: 36 },
+        };
+      },
+      "dimension_not_positive",
+      "/fields/5/anchor/resolved/anchor_rect/width",
     ],
     [
       "a tolerance on an anchor that decides the position outright",

@@ -46,21 +46,45 @@ final readonly class AnchorPlacement
     public const DEFAULT_ORIGIN = AnchorOrigin::TopLeft;
 
     /**
+     * What an anchor does to the field's rectangle when the document does not say.
+     *
+     * `replace` is not a guess between two equally plausible readings, which is what
+     * {@see AnchorOccurrence} refuses a default for. It is the only thing an anchor in this
+     * schema has ever meant: before `cross_check` existed, resolution wrote the resolved
+     * rectangle into the field and that was the whole behaviour. Defaulting to it is therefore
+     * what an already-stored document *said*, and reading one back has to keep saying it —
+     * an envelope's `field_schema_sha256` is bound by every attestation on it, so a canonical
+     * form that grew a property would invalidate the evidence for every anchored agreement
+     * already signed. `cross_check` is the new, narrower, opt-in mode and must be stated.
+     */
+    public const DEFAULT_PLACEMENT = AnchorPlacementMode::Replace;
+
+    /**
      * Whether the anchor text must be present. Omitted means true: an unstated requirement
      * fails closed, exactly like `FieldDefinition::$required`.
      */
     public const DEFAULT_REQUIRED = true;
 
+    /**
+     * A placement equal to the default is stored as null, so an anchor that states `replace`
+     * explicitly and one that leaves it out are the same value and canonicalise to the same
+     * bytes. Without that, `toArray(fromArray($x))` would not be idempotent for a document that
+     * spells out the default.
+     */
+    public readonly ?AnchorPlacementMode $placement;
+
     public function __construct(
         public string $text,
         public AnchorOccurrence $occurrence,
-        public AnchorPlacementMode $placement,
+        ?AnchorPlacementMode $placement = null,
         public ?AnchorOrigin $origin = null,
         public ?AnchorOffset $offset = null,
         public bool $required = self::DEFAULT_REQUIRED,
         public ?float $tolerance = null,
         public ?ResolvedAnchorRecord $resolved = null,
     ) {
+        $this->placement = $placement === self::DEFAULT_PLACEMENT ? null : $placement;
+
         if ($text === '') {
             throw new InvalidArgumentException('anchor.text must not be empty.');
         }
@@ -76,7 +100,7 @@ final readonly class AnchorPlacement
                 throw new InvalidArgumentException('anchor.tolerance must be a finite, non-negative number of points.');
             }
 
-            if ($placement !== AnchorPlacementMode::CrossCheck) {
+            if ($this->mode() !== AnchorPlacementMode::CrossCheck) {
                 throw new InvalidArgumentException(
                     'anchor.tolerance only means something with anchor.placement "'
                     .AnchorPlacementMode::CrossCheck->value.'"; in "'.AnchorPlacementMode::Replace->value
@@ -84,6 +108,20 @@ final readonly class AnchorPlacement
                 );
             }
         }
+
+        if (! $required && $this->mode() === AnchorPlacementMode::CrossCheck) {
+            throw new InvalidArgumentException(
+                'anchor.required false means an absent anchor omits the field, which contradicts '
+                .'anchor.placement "'.AnchorPlacementMode::CrossCheck->value.'": there the rectangle is '
+                .'authoritative and the anchor only checks it, so an absent anchor has nothing to omit.',
+            );
+        }
+    }
+
+    /** The placement mode, applying the documented default. */
+    public function mode(): AnchorPlacementMode
+    {
+        return $this->placement ?? self::DEFAULT_PLACEMENT;
     }
 
     /** The corner the offset is measured from, applying the documented default. */
@@ -125,6 +163,11 @@ final readonly class AnchorPlacement
         );
     }
 
+    public function replacesRect(): bool
+    {
+        return $this->mode()->replacesRect();
+    }
+
     /** The same request with a resolution receipt attached. */
     public function resolvedAs(ResolvedAnchorRecord $record): self
     {
@@ -160,7 +203,7 @@ final readonly class AnchorPlacement
             $occurrence === self::OCCURRENCE_SOLE
                 ? AnchorOccurrence::sole()
                 : AnchorOccurrence::index((int) $occurrence),
-            AnchorPlacementMode::from($anchor['placement']),
+            isset($anchor['placement']) ? AnchorPlacementMode::from($anchor['placement']) : null,
             isset($anchor['origin']) ? AnchorOrigin::from($anchor['origin']) : null,
             isset($anchor['offset']) ? AnchorOffset::fromArray($anchor['offset']) : null,
             $anchor['required'] ?? self::DEFAULT_REQUIRED,
@@ -170,8 +213,18 @@ final readonly class AnchorPlacement
     }
 
     /**
-     * Canonical export order: the required properties in schema declaration order, then the
-     * optional ones. `required` is always stated, like the field's own flag of the same name.
+     * Canonical export order: the declared properties in schema order, with anything that equals
+     * its default omitted.
+     *
+     * That is the anchor object's own convention — `origin` and `offset` have always been written
+     * only when present — and here it is load-bearing rather than stylistic. An anchor written
+     * before `placement` and `required` existed must canonicalise to exactly the bytes it
+     * canonicalised to then, because an envelope's `field_schema_sha256` is bound by every
+     * attestation on it. Emitting a defaulted property would change that digest for every
+     * anchored agreement already signed.
+     *
+     * The field's own `required` and `read_only` are always stated instead, because they were
+     * always in the schema; the two rules are the same rule applied to different histories.
      *
      * @return array<string, mixed>
      */
@@ -180,8 +233,11 @@ final readonly class AnchorPlacement
         $anchor = [
             'text' => $this->text,
             'occurrence' => $this->occurrence->isSole() ? self::OCCURRENCE_SOLE : (int) $this->occurrence->index,
-            'placement' => $this->placement->value,
         ];
+
+        if ($this->placement instanceof AnchorPlacementMode) {
+            $anchor['placement'] = $this->placement->value;
+        }
 
         if ($this->origin instanceof AnchorOrigin) {
             $anchor['origin'] = $this->origin->value;
@@ -191,7 +247,9 @@ final readonly class AnchorPlacement
             $anchor['offset'] = $this->offset->toArray();
         }
 
-        $anchor['required'] = $this->required;
+        if ($this->required !== self::DEFAULT_REQUIRED) {
+            $anchor['required'] = $this->required;
+        }
 
         if ($this->tolerance !== null) {
             $anchor['tolerance'] = CanonicalNumber::encode($this->tolerance);
@@ -211,7 +269,7 @@ final readonly class AnchorPlacement
             'anchor "%s" (occurrence %s, placement %s)',
             $this->text,
             $this->occurrence->describe(),
-            $this->placement->value,
+            $this->mode()->value,
         );
     }
 }

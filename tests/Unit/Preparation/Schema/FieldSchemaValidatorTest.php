@@ -87,6 +87,51 @@ class FieldSchemaValidatorTest extends TestCase
     /**
      * @return iterable<string, array{0: callable(array<string, mixed>): array<string, mixed>, 1: ValidationCode, 2: string}>
      */
+    /**
+     * A run's box is its advance by the font's ascent plus descent, so a heading near the top of
+     * the page starts above the CropBox edge and a run at the margin ends on it. Both are
+     * ordinary documents, and a receipt measuring one has to import — otherwise the service
+     * writes receipts it cannot read back, and an anchored request that worked yesterday fails.
+     */
+    public function test_a_receipt_may_measure_text_that_overhangs_the_page(): void
+    {
+        $document = FieldSchemaFixture::asArray();
+        $document['fields'][5]['anchor']['resolved'] = self::receipt([
+            'anchor_rect' => ['x' => -4, 'y' => -2.5, 'width' => 620, 'height' => 12],
+        ]);
+
+        $result = (new FieldSchemaValidator)->validate(
+            $document,
+            PageSizes::uniform(2, FieldSchemaFixture::LETTER_WIDTH, FieldSchemaFixture::LETTER_HEIGHT),
+        );
+
+        $this->assertTrue($result->isValid(), $result->describe());
+
+        // The same numbers in a *placement* are still refused: the distinction is the point.
+        $placed = FieldSchemaFixture::asArray();
+        $placed['fields'][5]['rect'] = ['x' => -4, 'y' => -2.5, 'width' => 620, 'height' => 12];
+
+        $this->assertTrue((new FieldSchemaValidator)->validate($placed)->hasCode(ValidationCode::CoordinateNegative));
+    }
+
+    /**
+     * A well-formed resolution receipt for the fixture's anchored counterparty signature, with
+     * one part swapped out. Its `rect` is the field's own, which `replace` mode requires.
+     *
+     * @param  array<string, mixed>  $overrides
+     * @return array<string, mixed>
+     */
+    private static function receipt(array $overrides = []): array
+    {
+        return array_replace([
+            'document_sha256' => str_repeat('a', 64),
+            'page' => 2,
+            'occurrence_index' => 1,
+            'anchor_rect' => ['x' => 330, 'y' => 622.4, 'width' => 165.6, 'height' => 12],
+            'rect' => ['x' => 330, 'y' => 650, 'width' => 170, 'height' => 36],
+        ], $overrides);
+    }
+
     public static function rejectionCases(): iterable
     {
         yield 'a partial document missing whole sections' => [
@@ -638,6 +683,87 @@ class FieldSchemaValidatorTest extends TestCase
             },
             ValidationCode::InvalidType,
             '/fields/5/anchor/occurrence',
+        ];
+
+        yield 'an optional anchor on a required field' => [
+            static function (array $document): array {
+                $document['fields'][5]['anchor']['required'] = false;
+
+                return $document;
+            },
+            ValidationCode::AnchorOptionalOnRequiredField,
+            '/fields/5/anchor/required',
+        ];
+
+        // In cross-check mode the rectangle is authoritative and the anchor only confirms it, so
+        // "the text may be absent" has nothing to omit — honouring it would delete a field the
+        // document positioned itself.
+        yield 'an optional anchor that only cross-checks a rectangle it cannot omit' => [
+            static function (array $document): array {
+                $document['fields'][9]['anchor']['placement'] = 'cross_check';
+                $document['fields'][9]['anchor']['required'] = false;
+
+                return $document;
+            },
+            ValidationCode::InvalidFormat,
+            '/fields/9/anchor/required',
+        ];
+
+        yield 'a tolerance on an anchor that decides the position outright' => [
+            static function (array $document): array {
+                $document['fields'][5]['anchor']['tolerance'] = 2;
+
+                return $document;
+            },
+            ValidationCode::InvalidFormat,
+            '/fields/5/anchor/tolerance',
+        ];
+
+        yield 'an undeclared anchor placement' => [
+            static function (array $document): array {
+                $document['fields'][5]['anchor']['placement'] = 'nudge';
+
+                return $document;
+            },
+            ValidationCode::InvalidFormat,
+            '/fields/5/anchor/placement',
+        ];
+
+        yield 'a resolution receipt whose digest is not one' => [
+            static function (array $document): array {
+                $document['fields'][5]['anchor']['resolved'] = self::receipt(['document_sha256' => 'not-a-digest']);
+
+                return $document;
+            },
+            ValidationCode::InvalidFormat,
+            '/fields/5/anchor/resolved/document_sha256',
+        ];
+
+        // The receipt records where the field went, so in `replace` mode it has to be the
+        // field's own rectangle. A document whose field sits somewhere its own receipt does not
+        // describe is a document nobody can check.
+        yield 'a receipt describing a rectangle the field is not at' => [
+            static function (array $document): array {
+                $document['fields'][5]['anchor']['resolved'] = self::receipt([
+                    'rect' => ['x' => 999, 'y' => 650, 'width' => 170, 'height' => 36],
+                ]);
+
+                return $document;
+            },
+            ValidationCode::InvalidFormat,
+            '/fields/5/anchor/resolved/rect/x',
+        ];
+
+        yield 'a measured anchor rect with a negative extent' => [
+            static function (array $document): array {
+                $document['fields'][5]['anchor']['resolved'] = self::receipt([
+                    'anchor_rect' => ['x' => 330, 'y' => 622.4, 'width' => -1, 'height' => 12],
+                ]);
+
+                return $document;
+            },
+            ValidationCode::DimensionNotPositive,
+            '/fields/5/anchor/resolved/anchor_rect/width',
         ];
 
         yield 'an anchor origin that is not a declared corner' => [

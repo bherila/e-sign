@@ -77,7 +77,7 @@ final readonly class FieldDefinition
             $this->recipientId,
             $this->type,
             $this->page,
-            $this->anchor->placement->replacesRect() ? $record->rect : $this->rect,
+            $this->anchor->replacesRect() ? $record->rect : $this->rect,
             $this->required,
             $this->readOnly,
             $this->label,

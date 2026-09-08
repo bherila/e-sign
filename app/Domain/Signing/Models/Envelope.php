@@ -113,7 +113,6 @@ class Envelope extends Model
         'document_sha256',
         'field_schema',
         'field_schema_sha256',
-        'omitted_anchor_fields',
         'render_settings',
         'consent_policy_version',
         'source_template_version_id',

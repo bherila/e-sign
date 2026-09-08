@@ -159,10 +159,14 @@ class FieldSchemaRoundTripTest extends TestCase
                 $anchor = [
                     'text' => 'Anchor '.$i.':',
                     'occurrence' => mt_rand(0, 3) === 0 ? AnchorPlacement::OCCURRENCE_SOLE : mt_rand(1, 4),
-                    'placement' => $crossCheck
-                        ? AnchorPlacementMode::CrossCheck->value
-                        : AnchorPlacementMode::Replace->value,
                 ];
+
+                // `replace` is the default and is canonicalised away, so it is deliberately
+                // *not* written here: an anchor that omits it and one that spells it out must
+                // produce the same bytes, which is what keeps a pre-existing document's digest.
+                if ($crossCheck) {
+                    $anchor['placement'] = AnchorPlacementMode::CrossCheck->value;
+                }
 
                 if (mt_rand(0, 1) === 1) {
                     $anchor['origin'] = AnchorOrigin::cases()[mt_rand(0, count(AnchorOrigin::cases()) - 1)]->value;
@@ -175,9 +179,12 @@ class FieldSchemaRoundTripTest extends TestCase
                     ];
                 }
 
-                // Always stated in the canonical form, like the field's own `required`, and
-                // only ever false on a field that is itself optional.
-                $anchor['required'] = $field['required'] ? true : mt_rand(0, 1) === 1;
+                // Only ever false on a field that is itself optional, and never together with
+                // a cross-check, which has no placement waiting on the anchor to omit. True is
+                // the default and is canonicalised away, so it is left out rather than written.
+                if (! $field['required'] && ! $crossCheck && mt_rand(0, 1) === 1) {
+                    $anchor['required'] = false;
+                }
 
                 if ($crossCheck && mt_rand(0, 1) === 1) {
                     $anchor['tolerance'] = self::generateNumber(0.0, 8.0);
@@ -191,7 +198,11 @@ class FieldSchemaRoundTripTest extends TestCase
                         'document_sha256' => str_pad(dechex($index * 31 + $i), 64, '0', STR_PAD_LEFT),
                         'page' => $field['page'],
                         'occurrence_index' => mt_rand(1, 4),
-                        'anchor_rect' => self::generateRect(),
+                        // A measurement, so it may start above the top of the page the way a
+                        // heading's ascender does; the field's own rect never can.
+                        'anchor_rect' => self::generateMeasuredRect(),
+                        // In `replace` mode the receipt records where the field went, so it is
+                        // the field's own rectangle.
                         'rect' => $field['rect'],
                     ];
                 }
@@ -215,6 +226,27 @@ class FieldSchemaRoundTripTest extends TestCase
     /**
      * @return array{x: int|float, y: int|float, width: int|float, height: int|float}
      */
+    /**
+     * A rectangle that records where text *was*, which is a different shape from a placement.
+     *
+     * It is generated with coordinates that may be negative and edges that may hang off the page,
+     * because those are the ordinary cases: a run's nominal box is its advance by the font's
+     * ascent plus descent, so a heading near the top of the page starts above the CropBox edge.
+     * A receipt carrying one of those has to round trip, or the service could write a document it
+     * cannot read back.
+     *
+     * @return array{x: int|float, y: int|float, width: int|float, height: int|float}
+     */
+    private static function generateMeasuredRect(): array
+    {
+        return [
+            'x' => CanonicalNumber::encode(self::generateNumber(-20.0, self::PAGE_WIDTH, false)),
+            'y' => CanonicalNumber::encode(self::generateNumber(-20.0, self::PAGE_HEIGHT, false)),
+            'width' => CanonicalNumber::encode(self::generateNumber(0.0, 200.0, false)),
+            'height' => CanonicalNumber::encode(self::generateNumber(0.0, 60.0, false)),
+        ];
+    }
+
     private static function generateRect(): array
     {
         $width = self::generateNumber(1.0, 200.0, false);

@@ -134,19 +134,34 @@ final readonly class EnvelopeStateMachine
      */
     public function send(Envelope $envelope, ?int $expectedVersion = null): TransitionResult
     {
+        // Outside the transaction on purpose. Resolving an anchor means reading a document object
+        // and parsing its content streams, which is orders of magnitude slower than anything else
+        // send() does, and doing it under `lockForUpdate()` would hold the envelope row for the
+        // length of a PDF parse. It is safe out here because resolution is a pure function of the
+        // copied field schema and the document's bytes, and both are pinned by the version
+        // compare-and-swap below: any change to either bumps `version`, and a stale resolution is
+        // therefore a `StaleEnvelope` rather than a wrong rectangle. The re-check inside the lock
+        // says so rather than relying on the reader to know it.
+        /** @var list<array{code: string, message: string}> $anchorProblems */
+        $anchorProblems = [];
+        $prepared = $envelope->state === EnvelopeState::Draft
+            ? $this->resolveAnchors($envelope, $anchorProblems)
+            // Not a draft as far as the caller's copy knows, so `assertLegal()` is about to
+            // refuse this anyway and there is no point parsing a PDF to find that out. If the
+            // copy is wrong, the version compare-and-swap refuses it instead.
+            : AnchorResolutionOutcome::unchanged($envelope->fieldSchema());
+
         return $this->withLockedEnvelope(
             $envelope,
             $expectedVersion,
-            function (Envelope $locked) use ($envelope): TransitionResult {
-                /** @var list<array{code: string, message: string}> $anchorProblems */
-                $anchorProblems = [];
+            function (Envelope $locked) use ($envelope, $prepared, $anchorProblems): TransitionResult {
                 $from = $this->assertLegal('send', $locked);
 
                 // Anchors first: the gate below reasons about the field set that will actually
                 // be sent, which is the resolved one. A field whose optional anchor was absent
                 // is gone by then, and a field that could not be placed is reported alongside
                 // every other reason this envelope is not ready.
-                $resolution = $this->resolveAnchors($locked, $anchorProblems);
+                $resolution = $this->resolutionFor($locked, $prepared, $anchorProblems);
                 $this->assertSendable($locked, $resolution->schema, $anchorProblems);
 
                 $now = CarbonImmutable::now();
@@ -935,15 +950,45 @@ final readonly class EnvelopeStateMachine
      *
      * @param  list<array{code: string, message: string}>  $anchorProblems  Filled in on failure.
      */
-    private function resolveAnchors(Envelope $locked, array &$anchorProblems): AnchorResolutionOutcome
+    private function resolveAnchors(Envelope $envelope, array &$anchorProblems): AnchorResolutionOutcome
     {
         try {
-            return $this->anchors->forEnvelope($locked);
+            return $this->anchors->forEnvelope($envelope);
         } catch (AnchorResolutionFailed $failed) {
             $anchorProblems = $failed->toSendProblems();
 
-            return AnchorResolutionOutcome::unchanged($locked->fieldSchema());
+            return AnchorResolutionOutcome::unchanged($envelope->fieldSchema());
         }
+    }
+
+    /**
+     * The resolution to commit, confirmed against the row actually holding the lock.
+     *
+     * {@see send()} resolves before opening the transaction so a PDF parse does not happen under
+     * the row lock. The version check has already established that the locked row is the one the
+     * caller read, so the pre-computed outcome is almost always the right one — but "almost
+     * always" is not a guarantee, and a caller may pass an `expectedVersion` that does not match
+     * the instance it handed in. So the digest of the schema the resolution was computed from is
+     * compared with the locked row's, and a disagreement resolves again, inside the lock, rather
+     * than committing rectangles measured against a different field set.
+     *
+     * @param  list<array{code: string, message: string}>  $anchorProblems
+     */
+    private function resolutionFor(
+        Envelope $locked,
+        AnchorResolutionOutcome $prepared,
+        array &$anchorProblems,
+    ): AnchorResolutionOutcome {
+        if (hash_equals($locked->field_schema_sha256, $prepared->sourceSchemaSha256)) {
+            return $prepared;
+        }
+
+        // The locked row is not the field set the pre-computed pass ran against, so that pass —
+        // and any problems it found — describes something else. Discard both and resolve again
+        // under the lock: correctness outranks the lock-duration saving.
+        $anchorProblems = [];
+
+        return $this->resolveAnchors($locked, $anchorProblems);
     }
 
     /**

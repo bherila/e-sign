@@ -129,20 +129,23 @@ consumer-generated document should use explicit rectangles instead. What follows
 |---|---|---|
 | `text` | yes | exact string to locate |
 | `occurrence` | yes | `"sole"`, or a 1-based index in document order |
-| `placement` | yes | `"replace"` (the anchor decides x and y) or `"cross_check"` (the rect decides, and the anchor must agree) |
+| `placement` | no, default `replace` | `"replace"` (the anchor decides x and y) or `"cross_check"` (the rect decides, and the anchor must agree) |
 | `origin` | no, default `top_left` | corner of the matched text the offset is measured from; one of `top_left`, `top_right`, `bottom_left`, `bottom_right` |
 | `offset` | no | `dx`, `dy` in the declared unit, `dy` downwards, either may be negative |
-| `required` | no, default `true` | false says the text may legitimately be absent, and is only accepted on a field that is itself optional |
+| `required` | no, default `true` | false says the text may legitimately be absent; only accepted on a field that is itself optional and whose placement is `replace` |
 | `tolerance` | no | how far, in points, a `cross_check` anchor may resolve from the declared rect; meaningless with `replace` |
-| `resolved` | written by the service | the receipt: the digest of the bytes the text was found in, the page, the occurrence taken, and both rectangles |
+| `resolved` | written by the service | the receipt: the digest of the bytes the text was found in, the page, the occurrence taken, and both rectangles. `anchor_rect` is a `measured_rect` — an observation of where the text was, which may overhang the page — while `rect` is a placement and, in `replace` mode, must be the field's own |
 
-`occurrence` and `placement` are **required and have no default**, for the same reason. The
-resolver refuses a "first match wins" fallback, because silently taking the first match moves a
-signature box the moment the contract text changes; and a field always carries a rect, so a field
-that also carries an anchor makes two statements about where it goes and has to say which one
-governs. An unstated placement rule is a guess. The resolver's third occurrence mode, `all`,
-places one box per match, which a single field with a single id cannot represent, so it is not a
-document value: a document that wants several boxes says so with several fields.
+`occurrence` is **required and has no default**: the resolver refuses a "first match wins"
+fallback, because silently taking the first match moves a signature box the moment the contract
+text changes. Its third mode, `all`, places one box per match, which a single field with a single
+id cannot represent, so it is not a document value: a document that wants several boxes says so
+with several fields.
+
+`placement` is defaulted rather than required, and `anchors.md` explains why the two are treated
+differently: `replace` is not a guess between readings but the only behaviour an anchor has ever
+had here, and defaulting it is what keeps an already-written anchor's canonical bytes — and the
+field-schema digest every attestation is bound to — unchanged.
 
 `occurrence` and `origin` are the serialised form of `Text\AnchorOccurrence` and
 `Text\AnchorOrigin`, so the document cannot express a placement the resolver does not implement,
@@ -168,8 +171,10 @@ bytes on both the server and the client:
 
 1. Properties in the order above, at every level. Fixed, not alphabetical, so the emitted document
    reads like the schema file and the specification example.
-2. `required` and `read_only` always stated, and `anchor.required` with them. (`anchor.occurrence`
-   and `anchor.placement` are required by the schema itself, so they are always present.)
+2. `required` and `read_only` always stated. Inside `anchor` the opposite rule applies: `placement`
+   and `required` are written only when they differ from their defaults, which is what keeps an
+   anchor written before those properties existed byte-identical. (`anchor.occurrence` is required
+   by the schema itself, so it is always present.)
 3. Coordinates rounded once to **three decimals**, half away from zero (0.001 pt is roughly a
    third of a micron; no drag can express less). Integral values are written `60`, never `60.0`.
 4. No insignificant whitespace; slashes and non-ASCII characters unescaped.
