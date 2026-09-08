@@ -146,6 +146,14 @@ worse than none — a receiver that files an executed agreement twice has two of
 deduplicating on the event id cannot help when the ids differ because they really are two
 events.
 
+**One hole this suite opened is now closed.** `tests/EndToEnd/` found that nothing in `app/`
+dispatched `FinalizeEnvelope`, so an envelope reaching `finalizing` waited for a worker nobody
+had told ([#94](https://github.com/bherila/e-sign/issues/94)). `FinalizationTrigger` dispatches
+it after the last acceptance commits, `esign:finalization:resume` re-dispatches a job that was
+lost, and the `finalization_backlog` probe counts the same set — `FinalizationTriggerTest`,
+`FinalizationResumeCommandTest`, `FinalizationBacklogProbeTest`, and the end-to-end harness,
+which now asserts the application queued the job instead of queueing it itself.
+
 **One hole is recorded rather than closed:** `publish()` does not re-check that its uploaded
 objects still exist ([`review-2026-09.md`](review-2026-09.md) B-2). The window is now bounded by
 a one-hour floor on the staging pruner's `--older-than`, which is a mitigation and not the fix.
@@ -248,7 +256,7 @@ identifier ([`review-2026-09.md`](review-2026-09.md) G-3).
 | No remote signing service in the path | proven by construction — sealing is in-process; the only outbound calls are the TSA and webhooks, both through `DestinationPolicy` |
 | Docker image builds; web role answers `/up` and `esign-healthcheck`; role dispatch works | proven — the `image` job |
 | cPanel runtime diagnostics | proven — `DoctorCommandTest`, `PhpRuntimeProbeTest`, `WebPhpVersionProbeTest`, `ResourceLimitsProbeTest`, `WritablePathsProbeTest` |
-| The functional flow such a smoke test would run — authenticate with a service credential, prepare, invite, sign, seal, download, validate, deliver a **verified** webhook, and recover after a worker interruption — end to end, on both PHP versions and all three database engines | proven, new in this branch — `tests/EndToEnd/` (25 cases), which runs inside the `test` and `database` jobs |
+| The functional flow such a smoke test would run — authenticate with a service credential, prepare, invite, sign, seal, download, validate, deliver a **verified** webhook, and recover after a worker interruption — end to end, on both PHP versions and all three database engines | proven — `tests/EndToEnd/` (25 cases), which runs inside the `test` and `database` jobs. Finalization is now started by the application rather than by the harness ([#94](https://github.com/bherila/e-sign/issues/94)); the suite asserts the job was queued and then runs it, as a worker would. |
 | **That same flow on a deployment profile** | **not proven.** The `image` job checks that the container starts and answers a health probe; `docs/HANDOFF.md` section 13 is explicit that *"a deployment is not 'working' merely because its home page loads"*, and a suite inside the test process is not a deployment. Issue [#38](https://github.com/bherila/e-sign/issues/38) for Docker; the cPanel path has `scripts/build-release.sh` and a runbook but no automated smoke test. |
 | **A host without pcntl / process-spawning** | **not proven** — claimed support, no CI entry |
 
@@ -307,7 +315,7 @@ consumer).
 | Key rotation preserves historical verification: a key id is recorded on every artifact and the certificate for every key id is retained | proven — `tests/Feature/Evidence/SealKeyManagementTest.php`, `docs/operations/seal-key-management.md` |
 | Webhook backlog visible and replayable; a disabled endpoint is a visible state | proven — `WebhookConsoleTest`, `WebhookBacklogProbeTest`, `esign:webhooks:replay` |
 | Mail backlog visible and resendable | proven — `MailConsoleCommandTest`, `MailBacklogProbeTest` |
-| Pending finalization visible | proven — `finalization_runs` and the health probes; `ArtifactIntegrityProbe` |
+| Pending finalization visible, and started | proven — `finalization_runs`, the `finalization_backlog` probe, and `esign:finalization:resume`, which re-dispatches a finalization whose queued job never ran; `FinalizationBacklogProbeTest`, `FinalizationResumeCommandTest` |
 | **A restore drill exercised against a real backup on real infrastructure** | **not proven** — the runbook exists (`docs/operations/backups.md`); the drill has not been run |
 | **Key rotation exercised end to end on a deployment** | **not proven** — the command and the invariants are tested; no deployment has rotated |
 
@@ -338,7 +346,6 @@ Ordered by what a first production use would most want closed.
 | No aggregate decompression budget or xref-entry cap in preflight | 3 | new — [`review-2026-09.md`](review-2026-09.md) U-1, U-2 |
 | The hazard scan fails open past depth 32, and on a null-resolving xref entry | 3 | new — [`review-2026-09.md`](review-2026-09.md) U-3, U-4 |
 | **No static analysis beyond formatting and `tsc`** (the `composer audit` / `pnpm audit` half of [`review-2026-09.md`](review-2026-09.md) X-13 landed as the `audit` job) | all | new — [`review-2026-09.md`](review-2026-09.md) X-13 |
-| Nothing in `app/` dispatches `FinalizeEnvelope`: an envelope that reaches `finalizing` waits for something to start the work, and in `tests/EndToEnd/` the harness plays that part | 6, 11 | new — found by [#36](https://github.com/bherila/e-sign/issues/36) |
 | `publish()` does not re-check object presence before committing | 6 | new — [`review-2026-09.md`](review-2026-09.md) B-2 |
 | `updateDraft()` races `send()` without a lock | 5 | [#33](https://github.com/bherila/e-sign/issues/33) |
 | No browser-driven accessibility or mobile check | 15 | new |

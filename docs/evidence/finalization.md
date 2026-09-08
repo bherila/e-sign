@@ -18,6 +18,46 @@ So the work is staged, and the stages are arranged so that **every crash point l
 that is either correct or visibly incomplete**. There is no window in which the system claims
 completion it cannot back up.
 
+## How finalization starts
+
+Three things, in order of how often each one is what happened
+([issue #94](https://github.com/bherila/e-sign/issues/94)).
+
+**The trigger.** `App\Domain\Evidence\Finalization\FinalizationTrigger` is an
+`EnvelopeEventSink`, composed into the container's sink alongside the audit store and the
+webhook outbox by `EvidenceServiceProvider`. When the state machine publishes
+`signing_request.recipient.signed` **and** the envelope it publishes it for is now
+`finalizing`, it dispatches `FinalizeEnvelope` with `->afterCommit()`. That pair is the exact
+condition: the event alone fires for every acceptance, and the state is already committed by
+the time the sink is called, so nothing has to recount outstanding recipients.
+
+`afterCommit()` is not a detail. The sink is called *inside* the acceptance transaction, and a
+worker that could see the job before that transaction commits would find an envelope that is
+not `finalizing` — or, if the acceptance rolled back, one that never was. Everything else in
+the sink is a database write; this is the one member that is not, which is why it is last in
+the composite and why its single side effect is deferred.
+
+**The resume sweep.** `esign:finalization:resume`, every five minutes in `routes/console.php`
+with `withoutOverlapping()`. A dispatch is not a guarantee of execution: a worker can be killed
+before it starts the job, a `jobs` table can come back from a backup without it, a queue can be
+purged during an incident. Nothing further ever happens to an envelope in `finalizing`, so no
+later transition would notice. The sweep re-dispatches any envelope that has been waiting
+longer than `esign.finalization.resume_after_minutes` (default 10) — measured from its newest
+`finalization_runs` row, or from the envelope itself if there is none. It is a prompt, not an
+authority: a second attempt on an envelope a worker is quietly still sealing loses the
+compare-and-swap in step 3 rather than doing any harm.
+
+It deliberately never touches `finalization_failed`. That state is a *visible* failure an
+operator retries on purpose (`retryFinalization()` plus a fresh dispatch); sweeping it would
+turn one legible failure into a new one every five minutes.
+
+**The `finalization_backlog` readiness probe.** Counts exactly the set the sweep would
+re-dispatch, so the two cannot disagree — both read
+`App\Domain\Evidence\Finalization\StalledFinalizations`. Any waiting envelope is a `warn`;
+more than ten, or one that has waited an hour, is a `fail`. A backlog that survives into the
+next scrape means the sweep itself is not running, or the work is not being picked up. See
+[`docs/operations/health.md`](../operations/health.md).
+
 ## The four steps
 
 `App\Domain\Evidence\Finalization\EnvelopeFinalizer` is the whole of it. The queued entry
@@ -117,7 +157,7 @@ can name a storage key (which contains a digest), a certificate subject, or a TS
 
 | Crash point | What is left behind | What the retry does |
 |---|---|---|
-| before step 1 commits | nothing | the envelope is still `finalizing`; dispatch again |
+| before step 1 commits | nothing | the envelope is still `finalizing`; `esign:finalization:resume` dispatches again |
 | during render or seal | run `failed`, no objects | re-renders from the same immutable input |
 | after upload, before publish | run `failed` **with `outputs`**, objects in storage, no rows | **republishes those exact bytes** |
 | after publish commits | everything | step 1 refuses: the envelope is no longer `finalizing` |
