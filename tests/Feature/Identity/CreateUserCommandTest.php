@@ -10,6 +10,7 @@ use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Hash;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 /**
@@ -67,13 +68,31 @@ class CreateUserCommandTest extends TestCase
         $this->assertAuthenticated();
     }
 
-    public function test_a_generated_password_with_console_markup_characters_is_shown_verbatim(): void
+    /**
+     * @return list<array{0: string}>
+     */
+    public static function consoleHostilePasswords(): array
     {
-        // Str::password() draws from a symbol set that includes < and >; the console formatter
-        // would otherwise treat "<b>...</b>" as a style tag and print a different password than
-        // the one that was hashed.
-        $pinned = 'Ab<b>cd</b>Ef<info>12345678!';
+        return [
+            // The console formatter reads <...> as a style tag.
+            ['Ab<b>cd</b>Ef<info>12345678!'],
+            // A backslash immediately before < or >. OutputFormatter::escape() skips a `<`
+            // that already has a backslash in front of it, so this sequence used to arrive
+            // at the formatter unescaped and the formatter ate the backslash as if it were
+            // the escape: the operator was shown a password one character short of the one
+            // that was hashed and could not sign in. Str::password() draws from a symbol set
+            // containing both characters, so it happened to about one generated password in
+            // 130 and looked exactly like a typo.
+            ['Abcd'.'\\'.'<efgh12345678!'],
+            ['Abcd'.'\\'.'>efgh12345678!'],
+            // A trailing backslash, which escape() also rewrites.
+            ['Abcdefgh12345678!'.'\\'],
+        ];
+    }
 
+    #[DataProvider('consoleHostilePasswords')]
+    public function test_a_generated_password_is_shown_verbatim_whatever_it_contains(string $pinned): void
+    {
         $this->app[Kernel::class]->registerCommand(new class($pinned) extends CreateUserCommand
         {
             public function __construct(private readonly string $pinned)

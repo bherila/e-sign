@@ -16,6 +16,14 @@ use App\Domain\Evidence\Finalization\CompletionReportDocument;
 use App\Domain\Evidence\Finalization\Console\PruneStagingArtifactsCommand;
 use App\Domain\Evidence\Finalization\EnvelopeFinalizer;
 use App\Domain\Evidence\Finalization\ExecutedDocumentRenderer;
+use App\Domain\Evidence\Retention\Console\EraseRecipientCommand;
+use App\Domain\Evidence\Retention\Console\PlaceLegalHoldCommand;
+use App\Domain\Evidence\Retention\Console\PurgeRetainedBlobsCommand;
+use App\Domain\Evidence\Retention\Console\ReleaseLegalHoldCommand;
+use App\Domain\Evidence\Retention\Console\RunRetentionCommand;
+use App\Domain\Evidence\Retention\Console\VerifyArtifactsCommand;
+use App\Domain\Evidence\Retention\Console\VerifyRestoreCommand;
+use App\Domain\Evidence\Retention\Console\WriteBackupManifestCommand;
 use App\Domain\Evidence\Sealing\ConfiguredSealIdentity;
 use App\Domain\Evidence\Sealing\Console\SealStatusCommand;
 use App\Domain\Evidence\Sealing\HttpTimestampAuthority;
@@ -133,6 +141,19 @@ final class EvidenceServiceProvider extends ServiceProvider
             $this->commands([
                 SealStatusCommand::class,
                 PruneStagingArtifactsCommand::class,
+
+                // Retention, legal hold, privacy, and the backup/restore drill (issue #40).
+                // Registered here, alongside the rest of the Evidence module, because
+                // Laravel's command discovery only scans app/Console/Commands and never
+                // looks inside a domain module.
+                PlaceLegalHoldCommand::class,
+                ReleaseLegalHoldCommand::class,
+                RunRetentionCommand::class,
+                PurgeRetainedBlobsCommand::class,
+                EraseRecipientCommand::class,
+                VerifyArtifactsCommand::class,
+                WriteBackupManifestCommand::class,
+                VerifyRestoreCommand::class,
             ]);
         }
     }

@@ -77,6 +77,45 @@ final readonly class DocumentBlobStore
     }
 
     /**
+     * Remove one document object.
+     *
+     * The only caller is the retention sweep in `App\Domain\Evidence\Retention`, and it
+     * calls this only for an object whose rows it has already deleted in a transaction,
+     * having first proved that no envelope and no template version referenced them
+     * (docs/operations/retention.md).
+     *
+     * Two rules from docs/BLOB_STORAGE.md are the caller's, not this method's, and are
+     * restated here because this is where somebody looking for a way to delete files will
+     * arrive: an object is garbage only by *set membership* against every mapped column,
+     * never by the age of its prefix, and a soft-deleted row still counts as a reference. A
+     * caller that passes a prefix, or that reasons about the age of an object rather than
+     * about the rows naming it, is wrong however this method behaves.
+     *
+     * Returns false when the object was not there. That is not an error: the row-then-bytes
+     * ordering means a re-run of an interrupted sweep will legitimately find some objects
+     * already gone.
+     *
+     * @throws DocumentStorageException When the adapter refused the deletion.
+     */
+    public function delete(string $disk, string $path): bool
+    {
+        $filesystem = $this->disk($disk);
+
+        try {
+            if (! $filesystem->exists($path)) {
+                return false;
+            }
+
+            return $filesystem->delete($path);
+        } catch (Throwable $exception) {
+            throw new DocumentStorageException(
+                "Deleting document object {$path} on disk [{$disk}] failed: ".$exception->getMessage(),
+                previous: $exception,
+            );
+        }
+    }
+
+    /**
      * The SHA-256 of a stored object, computed by streaming it back.
      *
      * @throws DocumentStorageException When the object is missing or unreadable.

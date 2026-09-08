@@ -12,6 +12,7 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Str;
 use Symfony\Component\Console\Formatter\OutputFormatter;
 use Symfony\Component\Console\Input\StreamableInputInterface;
+use Symfony\Component\Console\Output\OutputInterface;
 
 /**
  * Create a local user account for a standalone installation.
@@ -103,9 +104,23 @@ class CreateUserCommand extends Command
         if ($generated) {
             $this->newLine();
             $this->line('Generated password (shown once, not recoverable):');
-            // Escaped: the console formatter treats <...> as style tags and would silently
-            // strip them from a password drawn from a symbol set that includes < and >.
-            $this->line('  '.OutputFormatter::escape($password));
+            /*
+             * Written raw, not escaped, so the formatter never touches it.
+             *
+             * `Str::password()` draws from a symbol set that contains `<`, `>`, and `\`, and
+             * the console formatter reads `<...>` as a style tag. Escaping looks like the
+             * answer and is not quite: `OutputFormatter::escape()` skips a `<` that is
+             * already preceded by a backslash, so a password containing the two-character
+             * sequence `\<` or `\>` passes through unescaped, and the formatter then eats the
+             * backslash as if it were the escape. The operator is shown a password one
+             * character short of the one that was hashed and cannot sign in — about one
+             * generated password in 130, which is often enough to be seen and rare enough to
+             * look like a typo.
+             *
+             * OUTPUT_RAW disables tag parsing for this one write, so whatever was hashed is
+             * exactly what appears.
+             */
+            $this->output->write('  '.$password, true, OutputInterface::OUTPUT_RAW);
         }
 
         $this->newLine();
