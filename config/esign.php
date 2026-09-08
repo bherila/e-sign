@@ -203,4 +203,28 @@ return [
 
     'auth_mode' => env('ESIGN_AUTH_MODE', 'auto'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Templates (Stage 2, issue #21)
+    |--------------------------------------------------------------------------
+    |
+    | The consent policy version a new template version records when the
+    | caller does not name one. A template version snapshots it, so the
+    | attestation can say which consent text the signer was shown even after
+    | this setting has moved on (docs/HANDOFF.md sections 6 and 8).
+    |
+    | It is deployment configuration rather than a table: the consent policy is
+    | drafted and approved outside this application, and its history outlives
+    | anything this schema owns. Changing it affects versions published after
+    | the change and nothing else — the point of the snapshot.
+    |
+    */
+
+    'templates' => [
+        'default_consent_policy_version' => (string) env(
+            'ESIGN_CONSENT_POLICY_VERSION',
+            '2026-09-01'
+        ),
+    ],
+
 ];
