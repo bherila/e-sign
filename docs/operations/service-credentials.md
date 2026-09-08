@@ -191,9 +191,24 @@ keys must not bypass scope."
 | Workspace soft-deleted | 401 | `Invalid API credential.` |
 | Valid credential, scope not granted | 403 | `This API credential is not granted '<scope>'.` |
 
+| Too many failed attempts from this address in a minute | 429 | `Too many failed authentication attempts. Try again shortly.` (with `Retry-After`) |
+
 An unknown prefix and a wrong secret give the same answer on purpose: a caller that has not
 proved it holds a secret learns nothing about which prefixes exist. Once the secret has
 matched, a specific reason is safe and saves an integrator an afternoon.
+
+They also cost the same. Until the September 2026 review the known prefix eager-loaded its
+workspace, so it took one more database round trip than an unknown one and reached a digest an
+unknown one did not — identical answers, distinguishable timing
+([`docs/security/review-2026-09.md`](../security/review-2026-09.md), finding A-5). The workspace
+is now loaded after the secret matches, and a miss pays for an equivalent digest against a dummy
+salt.
+
+**Failures are counted; successes are not.** `ESIGN_API_AUTH_FAILURES_PER_MINUTE` (30, `0` to
+disable) is a per-client-address ceiling on *failed* authentications only, so a working
+integration's throughput never depends on it. It exists because nothing else on `/api/v1`
+limited anything: every failed attempt cost an indexed query and a `Log::warning` write, to
+anyone who asked, forever.
 
 ## How secrets are stored, and what is in the logs
 

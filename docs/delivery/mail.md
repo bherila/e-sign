@@ -139,9 +139,16 @@ report when it was read.
 must never carry a link at all: a code and a one-click URL in the same message would let one
 forwarded mail satisfy both halves of the check the code exists to separate. It follows that
 the code is stored — the outbox renders from a persisted context, which is what makes delivery
-survive a crash — so a live code sits in `outbound_mails.context` for the ten minutes it is
-worth anything. `docs/signing/guest-access.md` states that limit rather than implying the code
-is a secret from the operator.
+survive a crash — so it sits in `outbound_mails.context` between enqueue and send.
+
+`markSentToProvider()` then drops it from the row. That bounds the exposure to the queue's own
+latency: seconds under a worker, up to one cron interval on the shared-hosting profile. It used
+to be unbounded, because nothing prunes `outbound_mails` and `RecipientEraser` rewrites only the
+two name fields, so every code ever mailed stayed readable in the database and in every backup
+([`docs/security/review-2026-09.md`](../security/review-2026-09.md), finding D-4). A retry before
+a successful send still has the code, because a retry still has to render; `resend()` mints a
+fresh row from a fresh context. `docs/signing/guest-access.md` states the remaining limit rather
+than implying the code is a secret from the operator.
 
 The completion mail does **not** attach the executed PDF. That is a decision, not an
 unfinished feature: mail is not a place to put an executed instrument that has to stay

@@ -24,6 +24,13 @@ People provide electronic signatures. The service then cryptographically seals t
 That seal is an organizational service seal, not a personal certificate controlled by each signer.
 The product must never describe it otherwise.
 
+**[docs/assurance.md](docs/assurance.md) is the full statement of what this product claims and
+what it does not** — the seal's exact profile, why a stock deployment's certificate will show as
+untrusted in a PDF viewer, what "TSA trusted" would require, the absence of any eIDAS
+advanced/qualified or WORM/legal-hold-by-storage claim, the residual threats from a compromised
+application, key, or host administrator, and why ESIGN/UETA support is a workflow objective
+needing counsel's review rather than a feature. Read it before relying on an executed document.
+
 ## Tech stack
 
 - **Backend**: Laravel 13 on PHP 8.4+ (8.5 is the Docker target). MySQL 8 or MariaDB in production;
@@ -77,6 +84,8 @@ pnpm run type-check && pnpm run lint && pnpm run test && pnpm run build
 | `app/Domain/` | Module boundaries: Identity, Preparation, Signing, Evidence, Delivery, Integration. One signing state machine, shared by UI, native API, and the Firma facade. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). |
 | `docs/HANDOFF.md` | The implementation specification: data model, invariants, native JSON schema, compatibility contract, security policy, deployment profiles, release gates. |
 | `docs/BRIEF.md` | The project brief that motivated the specification. |
+| `docs/assurance.md` | What the product claims and does not: the seal's profile, self-issued-certificate consequences, no eIDAS advanced/qualified claim, no WORM or storage-enforced legal hold, residual threats, the evidence bundle's digests, and the validators used with their stated limits. |
+| `docs/security/` | [`review-2026-09.md`](docs/security/review-2026-09.md) is the adversarial security review with each finding's severity, reproduction, and fix or accepted residual. [`release-gates.md`](docs/security/release-gates.md) maps every release gate in `docs/HANDOFF.md` section 14 to the test or CI job that proves it, or an explicit "not yet proven". |
 | `docs/adr/` | Architecture decision records. |
 | `docs/api/` | The HTTP surfaces. [`native-v1.md`](docs/api/native-v1.md) documents `/api/v1`: authentication, scopes, idempotency, pagination, errors, and the endpoint table. The OpenAPI 3.1 document is committed at [`resources/api/openapi-v1.json`](resources/api/openapi-v1.json) and served at `GET /api/v1/openapi.json`. |
 | `docs/operations/` | Operator runbooks. [`bootstrap.md`](docs/operations/bootstrap.md) provisions the first workspace owner; there is no default administrator. [`retention.md`](docs/operations/retention.md) covers deletion policies and legal hold — executed agreements are never deleted automatically until an operator configures a reviewed policy — and [`backups.md`](docs/operations/backups.md) covers the four separate backups and the restore drill. |

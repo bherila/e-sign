@@ -227,14 +227,34 @@ Concretely, and each for its own reason:
   rendered from all of them; changing one would leave every digest in `evidence.json`
   describing bytes that no longer exist.
 - **The executed PDF, the completion report, and the evidence document.** Published,
-  content-addressed, immutable. The name on the signature line is part of the instrument.
+  content-addressed, immutable. The name on the signature line is part of the instrument —
+  **and so is the address beside it**: the completion report renders `Name <email>` for each
+  party, and that page is also the last page of the executed PDF. Somebody answering a
+  deletion request should say so plainly rather than discover it later.
+- **`finalization_runs.input_snapshot`.** Holds each attestation's recipient name and address,
+  and is covered by `finalization_runs.input_sha256`. Rewriting it would break the digest that
+  makes a republish provably the same input.
+- **`outbox_events.payload` and `outbox_events.canonical_body`.** Every `signing_request.*`
+  event carries the party's name and address, and `canonical_body` is the exact byte string a
+  webhook signature was computed over. The rows refuse deletion by design.
+
+The last three were found by the September 2026 security review
+([`docs/security/review-2026-09.md`](../security/review-2026-09.md), findings E-1, E-2, B-6),
+which had to decide between a complete erasure and a verifiable record. The record wins: every
+one of them sits inside something digested, and rewriting it would break a hash this product
+asks a relying party to check. What changed is this list, which was incomplete in a way that
+looked accidental.
 
 The audit event records which columns were rewritten, how many message rows were touched,
 the reason, and an explicit list of what was retained and why. It never records the values
 that were erased — an erasure whose own trail quotes the address has erased nothing.
 
 An erasure on a held envelope is refused. Running it twice is refused, so the trail cannot
-imply two requests where there was one.
+imply two requests where there was one. **An erasure on a live envelope is refused too** —
+`completed`, `cancelled`, `declined`, `expired`, and `finalization_failed` are the only states
+it will act in. Erasing a recipient of an agreement that is still moving rewrites the address
+its invitations and codes go to, so the signer becomes unreachable; and if the other parties
+finish, the sealed executed PDF names that party as `Erased recipient` for good.
 
 ## Integrity verification
 
