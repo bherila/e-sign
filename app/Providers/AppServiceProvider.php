@@ -7,7 +7,11 @@ use Illuminate\Auth\Events\Login;
 use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
+use RuntimeException;
 use Spatie\Csp\AddCspHeaders;
+use Symfony\Component\Mailer\Bridge\Brevo\Transport\BrevoTransportFactory;
+use Symfony\Component\Mailer\Transport\Dsn;
+use Symfony\Component\Mailer\Transport\TransportInterface;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -31,5 +35,18 @@ class AppServiceProvider extends ServiceProvider
             $this->app->make(Kernel::class)
                 ->pushMiddleware(AddCspHeaders::class);
         }
+
+        // Brevo API transport (Symfony bridge) so MAIL_MAILER=brevo or =hybrid works. The DSN
+        // lives in services.brevo.dsn; an unset DSN fails loudly at send time rather than
+        // silently degrading to another mailer.
+        $this->app['mail.manager']->extend('brevo', function (array $config): TransportInterface {
+            $dsn = (string) $this->app->make('config')->get('services.brevo.dsn');
+
+            if ($dsn === '') {
+                throw new RuntimeException('MAILER_DSN is not set; the brevo mailer cannot be built.');
+            }
+
+            return (new BrevoTransportFactory)->create(Dsn::fromString($dsn));
+        });
     }
 }
