@@ -637,9 +637,6 @@ final class SyntheticConsumer
     /* ========================================================================= booting */
 
     /**
-     * Put the application into the shape a deployment is in, with only external I/O faked.
-     */
-    /**
      * One clock for the scenario, anchored to a whole second, moved only by `travel()`.
      *
      * Two decisions in this suite are made at second granularity and neither should be left
@@ -667,6 +664,9 @@ final class SyntheticConsumer
         $this->test->travelTo(CarbonImmutable::now()->startOfSecond());
     }
 
+    /**
+     * Put the application into the shape a deployment is in, with only external I/O faked.
+     */
     private function bootApplicationUnderTest(): void
     {
         // One consent version, everywhere.
