@@ -179,7 +179,10 @@ class FirmaCreateAndSendTest extends TestCase
             ->assertJsonPath('error', 'invalid_request')
             ->assertJsonPath('details.property', 'position.y');
 
+        // Refused before the bytes were stored: a coordinate needs no page size to be
+        // out of range, so this request leaves nothing behind at all.
         $this->assertSame(0, Envelope::query()->count());
+        $this->assertSame(0, $this->ingestedCount());
     }
 
     /** A rectangle that fits on the page individually but runs off its edge. */
@@ -262,6 +265,13 @@ class FirmaCreateAndSendTest extends TestCase
             ->assertJsonPath('error', 'invalid_request');
 
         $this->assertSame(0, Envelope::query()->count());
+
+        // The document *is* retained here, and that is intake's rule rather than an
+        // oversight: an anchor can only be judged against the document's own text, so the
+        // bytes had to be stored to reach this refusal, and the report of what was uploaded
+        // is the only evidence an operator has when a sender reports a rejection. Nothing
+        // references it; the blob pruner reclaims it.
+        $this->assertSame(1, $this->ingestedCount());
     }
 
     /**
@@ -375,6 +385,8 @@ class FirmaCreateAndSendTest extends TestCase
             ->assertStatus(400)
             ->assertJsonPath('error', 'invalid_request')
             ->assertJsonPath('details.recipient_index', 1);
+
+        $this->assertSame(0, $this->ingestedCount());
     }
 
     /** An approver or a copy recipient is a 501, not a signer by another name. */
@@ -395,6 +407,8 @@ class FirmaCreateAndSendTest extends TestCase
             ->assertStatus(501)
             ->assertJsonPath('error', 'unsupported')
             ->assertJsonPath('details.unsupported_option', 'recipients[].designation=Approver');
+
+        $this->assertSame(0, $this->ingestedCount());
     }
 
     /**
@@ -421,6 +435,8 @@ class FirmaCreateAndSendTest extends TestCase
             ->assertStatus(501)
             ->assertJsonPath('error', 'unsupported')
             ->assertJsonPath('details.unsupported_option', 'fields[].type=radio_buttons');
+
+        $this->assertSame(0, $this->ingestedCount());
     }
 
     /**

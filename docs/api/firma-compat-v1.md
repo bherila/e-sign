@@ -378,6 +378,15 @@ carrying the parser's findings, **before any signing request exists** — so thi
 leave a half-built draft behind. The original is retained byte-for-byte and never
 re-rendered.
 
+**What "rolled back" covers.** No signing request is ever half-created: creation is one
+transaction, and everything that can be judged without the document — an unsupported option,
+an out-of-range percentage, an unplaceable field type, a recipient with no `order`, an
+approver — is refused *before* the bytes are stored, so those requests leave nothing at all.
+A refusal that genuinely needed the document (a page it does not have, an anchor whose text is
+not in it) does leave the document, because keeping an upload with its preflight report is
+intake's own rule: that report is the only evidence of what was uploaded when a sender reports
+a rejection. Nothing references it, and fixing the request and retrying uploads it again.
+
 A field names its owner by `recipient_id` (a temporary id), `recipient_email`, or `order`.
 With more than one recipient, a field that names none is a `400`: ownership is never assigned
 by elimination or by signing position. With exactly one recipient there is nothing to choose

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Integration\Firma;
 
 use App\Domain\Preparation\Contracts\PdfTextLocator;
+use App\Domain\Preparation\Documents\DocumentIntake;
 use App\Domain\Preparation\Geometry\FacadeCoordinateTranslator;
 use App\Domain\Preparation\Geometry\NativeRect;
 use App\Domain\Preparation\Geometry\PageGeometry;
@@ -155,6 +156,51 @@ final readonly class FieldPlacement
         }
 
         return $planned;
+    }
+
+    /**
+     * The checks that do not need the document, run before it is stored.
+     *
+     * `schema()` cannot run until the page sizes are known, and the page sizes are not known
+     * until the bytes have been parsed — which, on `create-and-send`, means after
+     * {@see DocumentIntake} has written them. Most bad
+     * requests do not need the page, though: a percentage outside 0..100, a field type this
+     * build cannot place, a recipient with no `order`, an approver. Refusing those first means
+     * the common mistakes leave nothing behind at all, rather than an uploaded document
+     * attached to a signing request that was never created.
+     *
+     * What is left over is genuinely document-dependent — a page the document does not have,
+     * an anchor whose text is not in it — and for those the document is retained with its
+     * preflight report, which is intake's own rule.
+     *
+     * @param  list<array<string, mixed>>  $fields
+     *
+     * @throws FirmaException
+     */
+    public function validateWithoutDocument(array $fields): void
+    {
+        if ($fields === []) {
+            throw FirmaException::of(
+                FirmaErrorCode::InvalidRequest,
+                'A signing request needs at least one field: a document with nothing to sign cannot be signed.',
+            );
+        }
+
+        foreach (array_values($fields) as $index => $field) {
+            if (! is_array($field)) {
+                throw FirmaException::of(
+                    FirmaErrorCode::InvalidRequest,
+                    'Field '.($index + 1).' is not an object.',
+                    ['field_index' => $index + 1],
+                );
+            }
+
+            // Throws 501 for a type upstream declares and this build cannot place.
+            FirmaFieldType::inbound((string) ($field['type'] ?? ''));
+
+            self::pageNumber($field, $index);
+            self::assertPercentages(self::position($field, $index), $index);
+        }
     }
 
     /**
@@ -338,6 +384,33 @@ final readonly class FieldPlacement
      */
     private function rect(PageGeometry $page, array $position, int $index): NativeRect
     {
+        [$x, $y, $width, $height] = self::assertPercentages($position, $index);
+
+        return $this->coordinates->toNative(
+            FirmaProfile::COORDINATES,
+            $page,
+            $x,
+            $y,
+            $width,
+            $height,
+            FirmaProfile::NAME,
+        );
+    }
+
+    /**
+     * Every rule the profile's own schema states about a `position`, and nothing about the page.
+     *
+     * `0..100` on each member, `x + width <= 100`, `y + height <= 100`, and a positive area.
+     * Out of range is refused rather than reinterpreted as points: the unit is declared by the
+     * profile and is never guessed from a value's magnitude (disagreement D4, `AGENTS.md`).
+     *
+     * @param  array<string, mixed>  $position
+     * @return array{float, float, float, float}
+     *
+     * @throws FirmaException
+     */
+    private static function assertPercentages(array $position, int $index): array
+    {
         foreach (['x', 'y', 'width', 'height'] as $key) {
             $value = $position[$key] ?? null;
 
@@ -370,21 +443,13 @@ final readonly class FieldPlacement
         if ($x + $width > 100.0 || $y + $height > 100.0) {
             throw FirmaException::of(
                 FirmaErrorCode::InvalidRequest,
-                'Field '.($index + 1).' extends past the edge of page '.$page->pageNumber.'. This profile '
-                .'requires `x + width <= 100` and `y + height <= 100`, both as percentages of the page.',
+                'Field '.($index + 1).' extends past the edge of its page. This profile requires '
+                .'`x + width <= 100` and `y + height <= 100`, both as percentages of the page.',
                 ['field_index' => $index + 1],
             );
         }
 
-        return $this->coordinates->toNative(
-            FirmaProfile::COORDINATES,
-            $page,
-            $x,
-            $y,
-            $width,
-            $height,
-            FirmaProfile::NAME,
-        );
+        return [$x, $y, $width, $height];
     }
 
     /**

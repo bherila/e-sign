@@ -55,6 +55,21 @@ use App\Domain\Signing\Models\Envelope;
  * structurally unsupported PDF is refused here with the parser's own findings, before any
  * envelope exists. `create-and-send` therefore cannot leave a half-built draft behind — the
  * atomicity upstream's own `500` description promises.
+ *
+ * ## What "rolled back" does and does not cover
+ *
+ * **No signing request is ever half-created.** Creation is one transaction, and everything
+ * that can be judged without the document — an unsupported option, an out-of-range
+ * percentage, an unplaceable field type, a recipient with no `order`, an approver — is
+ * refused before the bytes are stored, so those requests leave nothing at all.
+ *
+ * **A stored document is not rolled back**, and deliberately so. It is intake's own rule
+ * that an upload is kept with its report, because that report is the only evidence of what
+ * was uploaded when a sender says "the system rejected our contract". So a request refused
+ * for a reason that genuinely needed the document — a page it does not have, an anchor whose
+ * text is not in it — leaves the document behind, and a caller who fixes the request and
+ * retries uploads it again. Nothing references the first one; `docs/BLOB_STORAGE.md`'s pruner
+ * is what reclaims unreferenced objects.
  */
 final readonly class SigningRequestCreation
 {
@@ -217,6 +232,18 @@ final readonly class SigningRequestCreation
         $bytes = self::decode($base64);
         $title = self::string($body, 'name') ?? 'Untitled agreement';
 
+        $recipients = $this->placement->recipients(
+            is_array($body['recipients'] ?? null) ? array_values($body['recipients']) : [],
+        );
+
+        $fields = is_array($body['fields'] ?? null) ? array_values($body['fields']) : [];
+
+        // Everything that can be judged without the document, judged before it is stored.
+        // A percentage outside 0..100, an unplaceable field type, an approver, a recipient
+        // with no order — none of those need a page size, so none of them should leave an
+        // uploaded document behind attached to a signing request that was never created.
+        $this->placement->validateWithoutDocument($fields);
+
         $document = $this->intake->intakeBytes(
             $workspace,
             $bytes,
@@ -232,11 +259,6 @@ final readonly class SigningRequestCreation
             throw self::preflightRefused($document);
         }
 
-        $recipients = $this->placement->recipients(
-            is_array($body['recipients'] ?? null) ? array_values($body['recipients']) : [],
-        );
-
-        $fields = is_array($body['fields'] ?? null) ? array_values($body['fields']) : [];
         $settings = is_array($body['settings'] ?? null) ? $body['settings'] : [];
 
         $schema = $this->placement->schema(
