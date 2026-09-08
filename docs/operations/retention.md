@@ -64,6 +64,7 @@ php artisan esign:privacy:erase-recipient <recipient> --reason="Article 17 reque
 
 php artisan esign:artifacts:verify                       # every published artifact
 php artisan esign:artifacts:verify --workspace=<ulid> --since=-30days
+php artisan esign:artifacts:verify --key-id=seal-2026-a  # one seal key generation
 ```
 
 `esign:retention:run` and `esign:retention:purge-blobs` prompt for confirmation when

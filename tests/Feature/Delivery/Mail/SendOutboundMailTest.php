@@ -25,6 +25,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Symfony\Component\Mailer\Exception\TransportException;
 use Symfony\Component\Mailer\SentMessage;
+use Symfony\Component\Mailer\Transport\AbstractTransport;
+use Symfony\Component\Mime\Message;
 use Tests\TestCase;
 
 /**
@@ -38,6 +40,37 @@ use Tests\TestCase;
 class SendOutboundMailTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_the_ses_transports_message_id_is_stored_rather_than_the_rfc_5322_header(): void
+    {
+        /*
+         * The reconciliation that makes SES feedback match anything at all (issue #35).
+         *
+         * SES reports `mail.messageId` in every bounce, complaint, and delivery
+         * notification, and that is SES's own identifier — the value `SendRawEmail` returns
+         * and echoes back as `X-SES-Message-ID`. It is *not* the RFC 5322 `Message-ID`
+         * header, which Symfony generates locally before the message is handed over.
+         *
+         * Laravel's `Illuminate\Mail\Transport\SesTransport` adds the SES id as those two
+         * headers and never calls `SentMessage::setMessageId()`, so `getMessageId()` returns
+         * the RFC 5322 one. Storing that would have made every SES notification an orphan
+         * and left every message stuck at `sent_to_provider` forever, with nothing in the
+         * logs to say why.
+         *
+         * The transport here is a stand-in shaped exactly like Laravel's: it sets the two
+         * headers and nothing else. Depending on the real one would mean configuring an SES
+         * client and credentials to assert a header read.
+         */
+        Mail::extend('ses_stub', fn (): SesLikeTransport => new SesLikeTransport('0100019a7f3c0001-a1b2c3d4'));
+        config()->set('mail.mailers.ses_stub', ['transport' => 'ses_stub']);
+        config()->set('mail.default', 'ses_stub');
+
+        $mail = OutboundMail::factory()->create();
+
+        $this->app->make(OutboundMailSender::class)->send($mail);
+
+        $this->assertSame('0100019a7f3c0001-a1b2c3d4', $mail->refresh()->message_id);
+    }
 
     public function test_a_successful_send_records_sent_to_provider_and_the_provider_message_id(): void
     {
@@ -395,5 +428,36 @@ class SendOutboundMailTest extends TestCase
             new MailErrorRedactor,
             $this->app->make(RestoreDrill::class),
         );
+    }
+}
+
+/**
+ * A transport shaped like Laravel's SES transport, for the header question only.
+ *
+ * It reproduces the one behaviour that matters: the provider's identifier arrives as the
+ * `X-Message-ID`/`X-SES-Message-ID` headers on the original message, and
+ * `SentMessage::setMessageId()` is never called — so `getMessageId()` still answers with the
+ * locally generated RFC 5322 header.
+ */
+final class SesLikeTransport extends AbstractTransport
+{
+    public function __construct(private readonly string $sesMessageId)
+    {
+        parent::__construct();
+    }
+
+    public function __toString(): string
+    {
+        return 'ses_stub://';
+    }
+
+    protected function doSend(SentMessage $message): void
+    {
+        $original = $message->getOriginalMessage();
+
+        if ($original instanceof Message) {
+            $original->getHeaders()->addHeader('X-Message-ID', $this->sesMessageId);
+            $original->getHeaders()->addHeader('X-SES-Message-ID', $this->sesMessageId);
+        }
     }
 }

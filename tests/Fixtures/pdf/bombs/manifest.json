@@ -1,0 +1,62 @@
+[
+    {
+        "description": "One page whose single FlateDecode content stream inflates to 12 MiB.",
+        "expected_preflight": "reject",
+        "expected_rejections": [
+            "decompression_limit_exceeded"
+        ],
+        "decoded_bytes_if_unbounded": 12582912,
+        "proves": "A single stream cannot inflate past the decompression ceiling, and the refusal is a named, actionable finding rather than \"unparseable\".",
+        "name": "single-stream-bomb",
+        "file": "single-stream-bomb.pdf",
+        "bytes": 12802
+    },
+    {
+        "description": "16 FlateDecode content streams of 1 MiB each: 16 MiB decoded in total, no single stream anywhere near a per-stream ceiling.",
+        "expected_preflight": "reject",
+        "expected_rejections": [
+            "decompression_limit_exceeded"
+        ],
+        "decoded_bytes_if_unbounded": 16777216,
+        "per_stream_decoded_bytes": 1048576,
+        "proves": "The budget is aggregate. A per-stream ceiling alone accepts this document and retains 16 MiB for it; the running total is what refuses it.",
+        "name": "many-small-streams-bomb",
+        "file": "many-small-streams-bomb.pdf",
+        "bytes": 18736
+    },
+    {
+        "description": "An indirect object holding 400 levels of directly nested arrays.",
+        "expected_preflight": "reject",
+        "expected_rejections": [
+            "unparseable"
+        ],
+        "nesting_depth": 400,
+        "proves": "Nesting fails closed inside the parser (256-level ceiling) instead of recursing until the stack or the memory limit decides.",
+        "name": "deep-nesting-bomb",
+        "file": "deep-nesting-bomb.pdf",
+        "bytes": 1389
+    },
+    {
+        "description": "A cross-reference stream whose /Index declares 5,000,000 entries from 20 bytes of dictionary.",
+        "expected_preflight": "reject",
+        "expected_rejections": [
+            "object_limit_exceeded"
+        ],
+        "declared_objects": 5000000,
+        "proves": "The object ceiling is consulted while the cross-reference data is read, before the entries it declares are built.",
+        "name": "object-count-bomb",
+        "file": "object-count-bomb.pdf",
+        "bytes": 481
+    },
+    {
+        "description": "40 pages of ordinary contract prose across 40 FlateDecode content streams.",
+        "expected_preflight": "accept",
+        "expected_rejections": [],
+        "decoded_bytes_if_unbounded": 2437600,
+        "page_count": 40,
+        "proves": "The ceilings admit a document that is genuinely large. If this one is refused, the budget is set wrong rather than the document being hostile.",
+        "name": "large-legitimate-control",
+        "file": "large-legitimate-control.pdf",
+        "bytes": 70638
+    }
+]

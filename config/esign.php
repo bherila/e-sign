@@ -1,6 +1,7 @@
 <?php
 
 use App\Domain\Delivery\Outbound\DestinationAllowlist;
+use App\Domain\Evidence\Sealing\SealCertificateDirectory;
 
 return [
 
@@ -53,10 +54,22 @@ return [
     | text-dense pages). They are configuration, not an invariant, and are
     | expected to move once there is a corpus of real uploads.
     |
-    | Nesting depth and the decompression ceiling are not separately
-    | configurable: the object-graph walk fixes its recursion depth at 32, and
-    | decompression is bounded by `max_decoded_stream_bytes` per stream. See
-    | App\Domain\Preparation\Preflight\PreflightLimits.
+    | Decompression is bounded twice: `max_decoded_stream_bytes` bounds any one
+    | stream, and `max_decompressed_bytes` bounds every stream in a document
+    | added up. The aggregate one is the control. A per-stream ceiling alone is
+    | not a budget: sixteen streams each just under it are sixteen times the
+    | ceiling of retained memory from one small upload, which is the shape of
+    | findings U-1 and U-2 in docs/security/review-2026-09.md.
+    |
+    | The time and memory budgets are backstops, not controls. They catch what
+    | the byte and object budgets do not model, and they are set generously
+    | because a symptom makes a poor gate: memory usage depends on everything
+    | else the request has done, and a wall clock rejects a legitimate document
+    | on a loaded host.
+    |
+    | Object-graph recursion depth is not separately configurable: the hazard
+    | walk fixes its recursion depth at 32 and the parser refuses nesting past
+    | 256. See App\Domain\Preparation\Preflight\PreflightLimits.
     |
     */
 
@@ -69,6 +82,20 @@ return [
         'max_pages' => (int) env('ESIGN_DOCUMENTS_MAX_PAGES', 500),
         'max_objects' => (int) env('ESIGN_DOCUMENTS_MAX_OBJECTS', 100_000),
         'max_decoded_stream_bytes' => (int) env('ESIGN_DOCUMENTS_MAX_DECODED_STREAM_BYTES', 33_554_432),
+
+        // Every decoded stream in one document, added up. 8x the upload ceiling:
+        // large enough that no legitimate document reaches it (Flate content
+        // streams expand by roughly an order of magnitude, and DCT/JPX image
+        // payloads are handed back untouched), small enough that the whole
+        // budget still fits inside the 512 MB `memory_limit` the shipped
+        // php.ini sets. 20x would be 640 MiB and could never bind before the
+        // process died, which is the failure this ceiling exists to prevent.
+        'max_decompressed_bytes' => (int) env('ESIGN_DOCUMENTS_MAX_DECOMPRESSED_BYTES', 268_435_456),
+
+        // Backstops. Checked between units of work while the document is read,
+        // for the cases the byte and object budgets do not catch. 0 disables.
+        'preflight_time_budget_seconds' => (float) env('ESIGN_DOCUMENTS_PREFLIGHT_TIME_BUDGET_SECONDS', 30),
+        'preflight_memory_budget_bytes' => (int) env('ESIGN_DOCUMENTS_PREFLIGHT_MEMORY_BUDGET_BYTES', 268_435_456),
 
         // The MIME types the upload Form Request accepts, checked against the
         // file's sniffed type rather than its name or its declared header. This
@@ -136,6 +163,31 @@ return [
         // CMS digest algorithm. sha256, sha384, and sha512 are accepted; SHA-1
         // is not offered.
         'digest_algorithm' => env('ESIGN_SEAL_DIGEST_ALGORITHM', 'sha256'),
+
+        /*
+        | Certificates of key versions this deployment has retired.
+        |
+        | Sealing always uses the active key above. Verification cannot: an
+        | artifact records the key id that sealed it and keeps it forever, so
+        | after a rotation this deployment holds documents whose key id is no
+        | longer the active one. Those certificates live here, and
+        | App\Domain\Evidence\Sealing\SealCertificateDirectory resolves an
+        | artifact's recorded key id through this list.
+        |
+        | Certificates only. Verifying never needs — and must never be given —
+        | a retired private key; the private half should already have been
+        | destroyed on the schedule the key policy sets.
+        |
+        | Compact form, comma-separated, fields separated by "|":
+        |
+        |   ESIGN_SEAL_RETIRED_KEYS="seal-2026-a|/srv/esign-keys/2026-01/seal.crt|/srv/esign-keys/2026-01/chain.crt,seal-2025-a|/srv/esign-keys/2025-01/seal.crt"
+        |
+        | The chain path is optional. See docs/operations/seal-key-management.md
+        | for why this is an environment list rather than a directory scan.
+        */
+        'retired_keys' => SealCertificateDirectory::parseEnvironment(
+            env('ESIGN_SEAL_RETIRED_KEYS')
+        ),
     ],
 
     /*
@@ -285,14 +337,83 @@ return [
         'brevo_webhook_token' => env('ESIGN_MAIL_BREVO_WEBHOOK_TOKEN', ''),
 
         /*
-        | SES publishes feedback through SNS. The endpoint checks the topic ARN
-        | against this value and then asks an SnsSignatureVerifier to prove the
-        | message came from AWS. No verifier is implemented (the
-        | aws/aws-sns-message-validator package is not a dependency), so the
-        | endpoint currently rejects everything: unverified input never
-        | mutates a mail row. See docs/delivery/mail.md.
+        | SES publishes feedback through SNS, and POST /webhooks/mail/ses
+        | verifies the SNS signature with aws/aws-php-sns-message-validator
+        | before anything reaches a mail row. See docs/delivery/mail.md.
+        |
+        | `topic_arns` is the allowlist and it is the switch: with nothing in
+        | it the endpoint binds RejectingSnsMessageVerifier and refuses every
+        | message, so an unconfigured deployment fails closed. A topic ARN is
+        | not a secret — it is in console URLs and CloudTrail — so this is a
+        | routing decision, not the authentication; the signature is.
+        |
+        | `ESIGN_MAIL_SES_TOPIC_ARNS` is comma-separated. The older singular
+        | `ESIGN_MAIL_SES_TOPIC_ARN` is still read, so an existing .env keeps
+        | working.
         */
-        'ses_topic_arn' => env('ESIGN_MAIL_SES_TOPIC_ARN', ''),
+        'ses' => [
+            'topic_arns' => array_values(array_filter(
+                array_map(
+                    static fn (string $arn): string => trim($arn),
+                    explode(',', (string) env(
+                        'ESIGN_MAIL_SES_TOPIC_ARNS',
+                        (string) env('ESIGN_MAIL_SES_TOPIC_ARN', '')
+                    ))
+                ),
+                static fn (string $arn): bool => $arn !== ''
+            )),
+
+            /*
+            | Confirming an SNS subscription is an outbound request to a URL
+            | that arrived in a request body, and it is what makes this
+            | deployment start receiving a topic's traffic. Off by default:
+            | an operator confirms the subscription in the SNS console once,
+            | which is a deliberate act by someone who can see what they are
+            | subscribing to. Turn it on for an automated deployment that
+            | recreates its topic subscription, and understand that a verified
+            | message from an allowlisted topic can then make the application
+            | call AWS.
+            */
+            'auto_confirm_subscriptions' => filter_var(
+                env('ESIGN_MAIL_SES_AUTO_CONFIRM_SUBSCRIPTIONS', false),
+                FILTER_VALIDATE_BOOLEAN
+            ),
+
+            /*
+            | SNS still signs some messages with SignatureVersion 1, which is
+            | SHA-1. Refused unless this is on, because a signature scheme
+            | whose hash has practical collisions is not evidence. AWS
+            | publishes a per-topic SignatureVersion setting; set it to 2 on
+            | the topic rather than turning this on.
+            */
+            'allow_signature_version_1' => filter_var(
+                env('ESIGN_MAIL_SES_ALLOW_SIGNATURE_VERSION_1', false),
+                FILTER_VALIDATE_BOOLEAN
+            ),
+
+            /*
+            | A signature stays valid forever, so a captured notification can
+            | be replayed to walk a message's state. Messages outside this
+            | window either side of now are refused. AWS's own guidance is one
+            | hour; 15 minutes is enough for clock skew and SNS retries.
+            */
+            'replay_window_seconds' => (int) env('ESIGN_MAIL_SES_REPLAY_WINDOW_SECONDS', 900),
+
+            /*
+            | Signing certificates are cached by URL so a notification flood is
+            | not also a certificate-fetch flood against AWS. SNS rotates the
+            | certificate rarely and publishes a new URL when it does, so a
+            | long TTL costs nothing.
+            */
+            'certificate_cache_ttl_seconds' => (int) env('ESIGN_MAIL_SES_CERT_CACHE_TTL_SECONDS', 3600),
+
+            /*
+            | Refusals are recorded, not swallowed — but this is an
+            | unauthenticated POST surface, so one row per reason per window,
+            | not one row per hostile request.
+            */
+            'refusal_record_window_seconds' => (int) env('ESIGN_MAIL_SES_REFUSAL_WINDOW_SECONDS', 300),
+        ],
 
         // Backlog thresholds for the mail_backlog readiness probe: the age in
         // seconds of the oldest message still `queued`, and the number of

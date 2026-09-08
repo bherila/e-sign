@@ -45,6 +45,9 @@ class PreparationServiceProvider extends ServiceProvider
                 maxPages: (int) $config->get('esign.documents.max_pages'),
                 maxObjects: (int) $config->get('esign.documents.max_objects'),
                 maxDecodedStreamBytes: (int) $config->get('esign.documents.max_decoded_stream_bytes'),
+                maxDecompressedBytes: (int) $config->get('esign.documents.max_decompressed_bytes'),
+                timeBudgetSeconds: (float) $config->get('esign.documents.preflight_time_budget_seconds'),
+                memoryBudgetBytes: (int) $config->get('esign.documents.preflight_memory_budget_bytes'),
             );
         });
 

@@ -21,6 +21,7 @@ use Illuminate\Support\Facades\Storage;
 use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
 use Tests\Support\DocumentWorkspace;
+use Tests\Support\PdfBombFixtures;
 use Tests\Support\PdfFixtures;
 use Tests\TestCase;
 
@@ -366,6 +367,115 @@ class DocumentIntakeTest extends TestCase
         );
 
         $this->assertSame('Mutual NDA 2026', $document->title);
+    }
+
+    /**
+     * Issue #88 / review U-1: a decompression bomb never becomes a preparable document.
+     *
+     * The original bytes are still kept — that is the deliberate policy in
+     * docs/preparation/documents.md, and a hostile upload is precisely the file an operator
+     * needs to be able to examine. What must not exist is anything downstream of preflight:
+     * no review revision, no `ready` status, no normalized copy. Nothing that was refused is
+     * ever shown for assent.
+     */
+    public function test_a_decompression_bomb_is_refused_before_anything_downstream_of_preflight_runs(): void
+    {
+        config()->set('esign.documents.max_decompressed_bytes', 4 * 1_048_576);
+        config()->set('esign.documents.max_decoded_stream_bytes', 2 * 1_048_576);
+
+        $document = $this->bombIntake('many-small-streams-bomb');
+
+        $this->assertSame(DocumentStatus::PreflightFailed, $document->status);
+        $this->assertNull($document->page_count);
+        $this->assertNull($document->reviewRevision(), 'A refused bomb must never gain a review revision.');
+        $this->assertCount(1, $document->revisions()->get(), 'Only the original is recorded.');
+        $this->assertCount(
+            1,
+            Storage::disk('documents')->allFiles(),
+            'Only the original bytes are written; nothing normalized a document preflight refused.',
+        );
+
+        $this->assertSame(
+            ['decompression_limit_exceeded'],
+            array_values(array_unique(array_column(
+                array_filter(
+                    $document->preflight_report['findings'],
+                    static fn (array $f): bool => $f['severity'] === 'reject',
+                ),
+                'code',
+            ))),
+        );
+    }
+
+    public function test_the_configured_aggregate_decompression_ceiling_is_enforced(): void
+    {
+        config()->set('esign.documents.max_decompressed_bytes', 4_096);
+
+        $document = $this->bombIntake('large-legitimate-control');
+
+        $this->assertSame(DocumentStatus::PreflightFailed, $document->status);
+        $this->assertStringContainsString(
+            '4096 bytes',
+            implode("\n", array_column($document->preflight_report['findings'], 'message')),
+        );
+    }
+
+    public function test_the_configured_object_ceiling_is_enforced_while_the_document_is_read(): void
+    {
+        config()->set('esign.documents.max_objects', 1_000);
+
+        $document = $this->bombIntake('object-count-bomb');
+
+        $this->assertSame(DocumentStatus::PreflightFailed, $document->status);
+        $this->assertStringContainsString(
+            'more than 1000 indirect objects',
+            implode("\n", array_column($document->preflight_report['findings'], 'message')),
+        );
+        $this->assertLessThan(100, $document->preflight_report['metrics']['object_count']);
+    }
+
+    public function test_a_large_but_legitimate_document_passes_on_the_shipped_defaults(): void
+    {
+        $document = $this->bombIntake('large-legitimate-control');
+
+        $this->assertSame(DocumentStatus::Ready, $document->status);
+        $this->assertSame(40, $document->page_count);
+    }
+
+    /**
+     * The numbers docs/preparation/documents.md publishes are the numbers that ship.
+     *
+     * PdfPreflightLimitsTest proves the mechanism at a scale that is fast to test; this is
+     * what pins the defaults themselves, so lowering the aggregate budget below the
+     * per-stream ceiling — which would make the per-stream one unreachable — cannot happen
+     * silently.
+     */
+    public function test_the_shipped_ceilings_are_the_documented_ones(): void
+    {
+        $this->assertSame(33_554_432, config('esign.documents.max_bytes'));
+        $this->assertSame(33_554_432, config('esign.documents.max_decoded_stream_bytes'));
+        $this->assertSame(268_435_456, config('esign.documents.max_decompressed_bytes'));
+        $this->assertSame(100_000, config('esign.documents.max_objects'));
+        $this->assertSame(30.0, config('esign.documents.preflight_time_budget_seconds'));
+        $this->assertSame(268_435_456, config('esign.documents.preflight_memory_budget_bytes'));
+
+        $this->assertSame(
+            8,
+            intdiv(
+                (int) config('esign.documents.max_decompressed_bytes'),
+                (int) config('esign.documents.max_bytes'),
+            ),
+            'The aggregate budget is 8x the upload ceiling; see the reasoning in config/esign.php.',
+        );
+    }
+
+    private function bombIntake(string $fixture): Document
+    {
+        return app(DocumentIntake::class)->intake(
+            $this->workspace,
+            $this->sender,
+            DocumentWorkspace::uploadOfBytes(PdfBombFixtures::bytes($fixture), $fixture.'.pdf'),
+        );
     }
 
     private function intake(string $fixture): Document

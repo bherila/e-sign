@@ -24,6 +24,8 @@ SUBJECT_ROOT='/O=BWH eSign TEST FIXTURES/CN=BWH eSign TEST SEAL ROOT - NOT FOR U
 SUBJECT_SEAL='/O=BWH eSign TEST FIXTURES/CN=BWH eSign TEST SEAL - NOT FOR USE'
 SUBJECT_EXPIRED='/O=BWH eSign TEST FIXTURES/CN=BWH eSign TEST SEAL EXPIRED - NOT FOR USE'
 SUBJECT_UNTRUSTED='/O=BWH eSign TEST FIXTURES/CN=BWH eSign TEST SEAL UNTRUSTED - NOT FOR USE'
+SUBJECT_ROOT_B='/O=BWH eSign TEST FIXTURES/CN=BWH eSign TEST SEAL ROOT B - NOT FOR USE'
+SUBJECT_SEAL_B='/O=BWH eSign TEST FIXTURES/CN=BWH eSign TEST SEAL B - NOT FOR USE'
 
 rm -rf ca
 rm -f ./*.test.crt ./*.test.pkey ./*.test.csr ./*.srl seal.ext
@@ -127,6 +129,51 @@ openssl req -x509 -new -nodes -sha256 -days 7300 \
   -addext 'keyUsage=critical,digitalSignature,nonRepudiation' \
   -addext 'extendedKeyUsage=emailProtection,1.2.840.113583.1.1.5' \
   -addext 'subjectKeyIdentifier=hash'
+
+# --- Rotation target: key B under its own root ------------------------------
+# The second half of the rotation drill (issue #29). seal.test.crt is key A,
+# the material a deployment starts on and later retires; seal-b.test.crt is
+# key B, the material it rotates to.
+#
+# Key B is issued by a SECOND root rather than by root.test.crt on purpose.
+# Two things need it:
+#
+#  1. The first release seals under a self-issued certificate (ADR 0003), so a
+#     real rotation on that profile does change the trust anchor. Modelling the
+#     easy case — same CA, new leaf — would make the drill weaker than the
+#     deployment it describes.
+#  2. It gives scripts/validate-seal.sh two anchors that actually discriminate.
+#     With one shared root, pyHanko would judge an artifact sealed under either
+#     key VALID under the same --trust file, and "each artifact verifies against
+#     its own certificate" would be indistinguishable from "both artifacts
+#     verify against everything". The manifest therefore validates the retired
+#     artifact under root.test.crt only and the active one under root-b.test.crt
+#     only, and asserts each is INVALID under the other.
+openssl req -x509 -new -nodes -sha256 -days 7300 \
+  -newkey rsa:3072 \
+  -keyout root-b.test.pkey \
+  -out root-b.test.crt \
+  -subj "$SUBJECT_ROOT_B" \
+  -addext 'basicConstraints=critical,CA:TRUE,pathlen:0' \
+  -addext 'keyUsage=critical,keyCertSign,cRLSign' \
+  -addext 'subjectKeyIdentifier=hash'
+
+openssl req -new -nodes -sha256 \
+  -newkey rsa:3072 \
+  -keyout seal-b.test.pkey \
+  -out seal-b.test.csr \
+  -subj "$SUBJECT_SEAL_B"
+
+cat > seal.ext <<'EXT'
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,nonRepudiation
+extendedKeyUsage=emailProtection,1.2.840.113583.1.1.5
+subjectKeyIdentifier=hash
+authorityKeyIdentifier=keyid,issuer
+EXT
+
+openssl x509 -req -in seal-b.test.csr -CA root-b.test.crt -CAkey root-b.test.pkey \
+  -CAcreateserial -days 7300 -sha256 -extfile seal.ext -out seal-b.test.crt
 
 # --- Unrelated key (wrong-key fixture) --------------------------------------
 # A key that does not belong to seal.test.crt, for the mismatched-material test.
