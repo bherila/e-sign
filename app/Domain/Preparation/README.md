@@ -8,6 +8,7 @@ See docs/ARCHITECTURE.md for what this module owns. Keep cross-module calls behi
 |---|---|
 | `Contracts/` | The module's ports: `PdfPreflight`, `PdfAssembler`, `PdfTextLocator`. |
 | `Geometry/` | The native coordinate space and the transform to and from PDF user space. |
+| `Schema/` | The versioned native field definition schema: value objects, importer, validator. |
 | `Preflight/` | Classification result types: findings, codes, limits, metrics. |
 | `Assembly/` | Overlay and output value types for document assembly. |
 | `Text/` | Positioned text runs, anchor semantics and the library-independent resolver. |
@@ -22,6 +23,13 @@ One space, defined in [docs/preparation/coordinate-space.md](../../../docs/prepa
 `pt`, origin top-left, CropBox, rotation as displayed, 1-based pages. Compatibility
 profiles declare their convention; conversions are never inferred from a number's
 magnitude.
+
+## Field definitions
+
+The versioned native field schema is documented in
+[docs/preparation/field-schema.md](../../../docs/preparation/field-schema.md); the contract itself
+is `resources/schema/field-schema-1.0.json`, shared with the editor and the native API. `Schema/`
+stores rectangles as plain numbers in the space above and leaves every conversion to `Geometry/`.
 
 ## Stage 0 status
 
