@@ -15,12 +15,33 @@ This runbook covers both installation shapes:
 Run every command as the application user, from the application root, with the deployment's
 `.env` in place.
 
-> **Not yet complete.** Steps 1, 2, and 3 work today. Step 4 — the browser login that turns
-> the provisioned binding into a real session — needs the SSO login and callback routes,
-> which are **not implemented yet** (issue #12). Until that lands, an SSO owner can be
-> provisioned and verified in the database but cannot sign in, and `last_seen_at` on their
-> identity binding stays null. A standalone owner uses the local login provided by
-> `bherila/auth-laravel`.
+---
+
+## Step 0 — choose the mode
+
+`ESIGN_AUTH_MODE` decides which sign-in surface exists. Exactly one mode's routes are
+registered; the other mode's endpoints are absent, not merely disabled, so a standalone
+installation has no OAuth callback to probe and an SSO installation has no password form to
+attack.
+
+| Value | Behaviour |
+|---|---|
+| `auto` (default) | SSO when `OAUTH_CLIENT_ID` and `OAUTH_PROVIDER_URL` are set, standalone when they are not. |
+| `sso` | Always SSO. A missing OAuth setting is then a 503, not a silent fall back to a password form. |
+| `local` | Always standalone password login, even where an OAuth client is configured. |
+
+Set `ESIGN_AUTH_MODE=sso` on a deployment that is meant to use a provider. Under `auto`, an
+`.env` that failed to load would quietly serve a password form instead of an outage.
+
+Routes are decided at boot, so after changing this:
+
+```bash
+php artisan config:clear
+php artisan route:clear
+```
+
+In either mode the person who signs in is not an administrator. They land on a page telling
+them they have no workspace until an owner grants them a membership.
 
 ---
 
@@ -34,8 +55,9 @@ At the identity provider, register this deployment as an application. Provide:
 |---|---|
 | Application label | the name operators and signers will see, e.g. `Acme eSign` |
 | Homepage | the application's `APP_URL` |
-| Redirect URI | exactly `<APP_URL>/oauth/callback`, or whatever `OAUTH_REDIRECT_URI` is set to — an exact string, no wildcards |
+| Redirect URI | exactly `<APP_URL>/auth/callback`, or whatever `OAUTH_REDIRECT_URI` is set to — an exact string, no wildcards |
 | Role-management deep link | the application's workspace members page, so the provider can link an operator straight to it |
+| Post-logout redirect | `<APP_URL>/`, which is where the application asks the provider to return people after sign-out |
 
 Registration returns a client id and client secret. Put them in `.env`:
 
@@ -44,7 +66,7 @@ OAUTH_PROVIDER=your-provider-key
 OAUTH_PROVIDER_URL=https://identity.example.com
 OAUTH_CLIENT_ID=...
 OAUTH_CLIENT_SECRET=...
-OAUTH_REDIRECT_URI="${APP_URL}/oauth/callback"
+OAUTH_REDIRECT_URI="${APP_URL}/auth/callback"
 ```
 
 `OAUTH_PROVIDER` is the issuer key you will pass to `--issuer`. It is stored on every
@@ -97,13 +119,38 @@ php artisan esign:bootstrap-owner \
 
 ### Standalone mode
 
-The local user must already exist. The command looks users up; it never creates one from an
-email address.
+The local user must already exist. `esign:bootstrap-owner` looks users up; it never creates
+one from an email address, because an address is contact data and "provision the owner with
+this email" is not a thing it can be asked to do.
+
+Create the account first:
+
+```bash
+php artisan esign:create-user --name="Ada Lovelace" --email="ada@example.com"
+```
+
+`esign:create-user` creates an account and nothing else — no workspace, no membership, no
+role. It prompts for a password when there is a terminal to prompt at, generates a strong one
+otherwise, and prints a generated password exactly once. There is no way to recover it
+afterwards; if it scrolls away, delete the account and run the command again.
+
+| Option | Meaning |
+|---|---|
+| `--name` | required; the display name |
+| `--email` | required; contact address, and what this person types at the login form |
+| `--password` | optional. Prefer the prompt: an option value is in your shell history and in the process list. Minimum 12 characters either way, so there is no such thing as `--password=admin`. |
+
+It refuses an address that already belongs to a local account. Local sign-in resolves an
+account by address, so local addresses must not repeat — `users.email` deliberately carries
+no unique index (two identity-provider subjects reporting one address are two people), which
+is why this is enforced here and in the login controller rather than by the database.
+
+Then grant owner:
 
 ```bash
 php artisan esign:bootstrap-owner --user=1 --workspace="acme" --name="Acme"
 # or
-php artisan esign:bootstrap-owner --user="admin@example.com" --workspace="acme"
+php artisan esign:bootstrap-owner --user="ada@example.com" --workspace="acme"
 ```
 
 ### What to expect
@@ -138,18 +185,52 @@ is written — the whole run is one transaction.
 
 ## Step 4 — complete a browser login
 
-*SSO mode: **not available yet.*** The login and callback routes that exchange an
-authorization code for a session, resolve the `(issuer, subject)` binding to the local user,
-and stamp `last_seen_at` are issue #12 and are not implemented. Provisioning is finished and
-correct without them; the owner simply cannot sign in until that issue lands. Nothing in this
-runbook needs to be re-run afterwards.
+### SSO mode
 
-Once issue #12 is deployed, the owner opens `APP_URL`, is redirected to the identity
-provider, authenticates there, and returns signed in. Their real name and email replace the
-placeholders, and `last_seen_at` is set.
+The owner opens `<APP_URL>/login` and clicks the single sign-on button. That starts an
+authorization-code flow with PKCE at `/auth/redirect`; the provider authenticates them and
+returns them to `/auth/callback`, which resolves the `(issuer, subject)` tuple to the local
+user, stamps `last_seen_at`, and opens a session.
 
-*Standalone mode:* the owner signs in at the local login page with their existing
-credentials.
+Their real name and email replace the placeholders the bootstrap command left. The email is
+written as contact data and read by nothing that decides who they are.
+
+Signing out posts to `/auth/logout`, which ends the local session and then hands off to the
+provider's end-session endpoint. Ending only the local session would leave the provider still
+recognising them, so the next protected page would hand them straight back with no prompt.
+
+| Route | Method | Purpose |
+|---|---|---|
+| `/login` | GET | the sign-in page |
+| `/auth/redirect` | GET | begins the authorization request |
+| `/auth/callback` | GET | exchanges the code, resolves the binding, opens the session |
+| `/auth/logout` | POST | signs out here and at the provider |
+
+There is no `/login` POST, no registration route, and no way to become an administrator by
+signing in.
+
+### Standalone mode
+
+The owner signs in at `<APP_URL>/login` with the address and password from
+`esign:create-user`, and signs out by posting to `/logout`.
+
+Failed attempts are counted in `auth_audit_log` and lock the account+source pair out after
+five failures in fifteen minutes (`BHERILA_AUTH_THROTTLE_*`). Behind a proxy or CDN,
+configure Laravel's trusted proxies as well, or every request resolves to the proxy's address
+and the source half of that key groups every visitor together.
+
+### Somebody who is admitted but has no workspace
+
+Both modes land such a person on a page that says so and tells them to ask an owner. That is
+the expected result of a directory grant on its own: authentication admits somebody to the
+application, and a membership row is the only thing that gives them anything to do in it.
+
+### Withdrawing access
+
+Set `users.disabled_at` to refuse an account at every entry point — the SSO callback, the
+password form, and the package's own middleware all consult the same gate. Deleting the
+identity binding stops them authenticating at all. Neither touches an envelope, an artifact,
+or an audit event.
 
 ## Step 5 — verify
 
@@ -175,8 +256,8 @@ php artisan tinker --execute="
 "
 ```
 
-A null `last_seen_at` means the owner has not signed in yet. Before issue #12 lands, that is
-the expected state for an SSO owner.
+A null `last_seen_at` means the owner has not signed in yet. After step 4 it should carry a
+timestamp; if it is still null, the browser login did not reach the callback.
 
 **The audit trail recorded it.**
 
@@ -208,3 +289,13 @@ php artisan tinker --execute="
   application code.
 - Rotating `OAUTH_CLIENT_SECRET` does not affect existing bindings. Changing
   `OAUTH_PROVIDER` does — it is part of the binding tuple.
+- An SSO-only deployment should also set `routes.password_resets`, `routes.change_password`,
+  and `routes.two_factor` to false in `config/bherila-auth.php`. Nothing in SSO mode can use
+  a local password — there is no password login route, and the standalone controller refuses
+  any account that has an identity binding — but an endpoint that sets a credential nobody
+  needs is still an endpoint worth not having. Leave them on in standalone mode; that is
+  where they are the supporting flows for the login form.
+- Authentication events (sign-in, sign-out, failures, lockouts) are in `auth_audit_log`.
+  Provisioning and other application events are in the append-only `esign_audit_events`.
+  Retention for the first is off by default; set `BHERILA_AUTH_AUDIT_RETENTION_DAYS` and
+  schedule `bherila-auth:prune-audit-log` if a deployment needs it.

@@ -13,7 +13,11 @@ See docs/ARCHITECTURE.md for what this module owns. Keep cross-module calls behi
 | `Models/IdentityBinding.php` | The `(issuer, subject)` tuple a local user is bound to. Never email. |
 | `Policies/WorkspacePolicy.php` | Every workspace-scoped ability. Registered in `AppServiceProvider`, since auto-discovery does not look in domain modules. |
 | `Services/OwnerBootstrapper.php` | The only code that grants `owner`, in one transaction, idempotently. |
+| `Services/IdentityResolver.php` | Turns a validated provider identity into the local user it belongs to, provisioning a user and a binding — and no membership — for an unknown subject. |
+| `Enums/AuthMode.php` | Whether this deployment exposes single sign-on or a local password form. Chooses which routes exist at all (`routes/web.php`). |
+| `Auth/EsignUserPolicy.php` | The single `canLogin()` gate, bound over the package default so every entry point shares one answer. Reads `users.disabled_at`. |
 | `Console/BootstrapOwnerCommand.php` | `esign:bootstrap-owner`. See `docs/operations/bootstrap.md`. |
+| `Console/CreateUserCommand.php` | `esign:create-user`, so a standalone install can reach a first sign-in without a database client. Creates an account and no authority. |
 | `Audit/` | The append-only `esign_audit_events` writer. |
 | `Credentials/Scope.php` | The scope vocabulary API credentials are granted from. Nothing is implied by anything else. |
 | `Credentials/ServiceCredential.php` | An API caller as a principal: one workspace, a scope list, a salted digest of its secret. |
@@ -51,6 +55,13 @@ The HTTP adapters for credentials are `app/Http/Middleware/AuthenticateServiceCr
   Loading by id and comparing the workspace afterwards leaks existence even when it 403s.
 - **A secret is shown once and stored as a digest.** There is no read-back command because
   there is nothing to read back, and nothing logs a secret: failures log the public prefix.
+- **`users.email` has no unique index, and that is deliberate.** Two identity-provider
+  subjects that report the same address are two people until the provider says otherwise, so
+  they get two rows. Local password login therefore refuses an address that resolves to more
+  than one account rather than picking one, and `esign:create-user` refuses to create a
+  duplicate in the first place.
+- **One mode's routes exist, the other's do not.** `AuthMode` decides at boot. An absent
+  endpoint cannot be probed, misconfigured, or reached by a request that should not have one.
 - **Cross-workspace isolation is a suite, not a check.** New surfaces (imports, downloads,
   queue jobs) add their cases to
   `tests/Feature/Identity/CrossWorkspaceIsolationTest.php` rather than testing isolation
