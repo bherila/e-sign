@@ -6,6 +6,9 @@
 #                unreadable  pyHanko refuses the file before reaching the signature
 #   trust-mode:  fixture-only          --trust-replace --trust root.test.crt
 #                fixture-plus-system   --trust root.test.crt, OS trust kept
+#                rotation-target-only  --trust-replace --trust root-b.test.crt
+# A file may appear more than once, under different trust modes: that is how the
+# rotation rows prove each artifact verifies against its own key and not the other.
 sealed-b-b.pdf	valid	fixture-only	PAdES B-B, sealed by the fixture leaf under the fixture root.
 negative-modified-content.pdf	invalid	fixture-only	Page geometry changed inside the signed byte range, same file length.
 negative-byte-range-overclaim.pdf	invalid	fixture-only	The /ByteRange claims past the end of a file that still parses, so the coverage rule is what refuses it.
@@ -14,5 +17,9 @@ negative-incremental-update.pdf	invalid	fixture-only	An unexpected revision appe
 negative-forged-cms.pdf	invalid	fixture-only	The CMS of another sealed document spliced into /Contents.
 negative-untrusted-signer.pdf	invalid	fixture-only	Cryptographically sound but sealed with a key outside the trusted root.
 finalized-executed.pdf	valid	fixture-only	The executed agreement produced by the staged finalization: reviewed revision, field values, appended completion report, sealed at PAdES B-B under the fixture root.
+rotation-retired-key.pdf	valid	fixture-only	Sealed under the RETIRED key (fixture-seal-2026-a), validated against the retired certificate's own anchor. A rotation does not invalidate what the old key sealed.
+rotation-active-key.pdf	valid	rotation-target-only	Sealed under the ACTIVE key after rotation (fixture-seal-2026-b), validated against the new certificate's anchor.
+rotation-retired-key.pdf	invalid	rotation-target-only	The retired artifact under the NEW key's anchor: refused. The two anchors discriminate, so the VALID verdicts above are about the right certificate and not about a validator that trusts everything.
+rotation-active-key.pdf	invalid	fixture-only	The active artifact under the RETIRED key's anchor: refused. The complement of the row above.
 sealed-b-t.pdf	valid	fixture-plus-system	PAdES B-T. The TSA certificate chains to a publicly trusted root, so the timestamp is trusted as well as sound.
 sealed-b-t-untrusted-tsa.pdf	invalid	fixture-only	PAdES B-T with a cryptographically sound timestamp from an authority whose root is trusted nowhere: judged invalid on TSA trust alone.

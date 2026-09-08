@@ -1,6 +1,7 @@
 <?php
 
 use App\Domain\Delivery\Outbound\DestinationAllowlist;
+use App\Domain\Evidence\Sealing\SealCertificateDirectory;
 
 return [
 
@@ -162,6 +163,31 @@ return [
         // CMS digest algorithm. sha256, sha384, and sha512 are accepted; SHA-1
         // is not offered.
         'digest_algorithm' => env('ESIGN_SEAL_DIGEST_ALGORITHM', 'sha256'),
+
+        /*
+        | Certificates of key versions this deployment has retired.
+        |
+        | Sealing always uses the active key above. Verification cannot: an
+        | artifact records the key id that sealed it and keeps it forever, so
+        | after a rotation this deployment holds documents whose key id is no
+        | longer the active one. Those certificates live here, and
+        | App\Domain\Evidence\Sealing\SealCertificateDirectory resolves an
+        | artifact's recorded key id through this list.
+        |
+        | Certificates only. Verifying never needs — and must never be given —
+        | a retired private key; the private half should already have been
+        | destroyed on the schedule the key policy sets.
+        |
+        | Compact form, comma-separated, fields separated by "|":
+        |
+        |   ESIGN_SEAL_RETIRED_KEYS="seal-2026-a|/srv/esign-keys/2026-01/seal.crt|/srv/esign-keys/2026-01/chain.crt,seal-2025-a|/srv/esign-keys/2025-01/seal.crt"
+        |
+        | The chain path is optional. See docs/operations/seal-key-management.md
+        | for why this is an environment list rather than a directory scan.
+        */
+        'retired_keys' => SealCertificateDirectory::parseEnvironment(
+            env('ESIGN_SEAL_RETIRED_KEYS')
+        ),
     ],
 
     /*

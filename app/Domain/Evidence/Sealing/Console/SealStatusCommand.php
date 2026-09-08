@@ -7,6 +7,7 @@ namespace App\Domain\Evidence\Sealing\Console;
 use App\Domain\Evidence\Contracts\SealIdentity;
 use App\Domain\Evidence\Sealing\AssuranceLevel;
 use App\Domain\Evidence\Sealing\Exceptions\SealingException;
+use App\Domain\Evidence\Sealing\SealCertificateDirectory;
 use DateTimeImmutable;
 use Illuminate\Console\Command;
 
@@ -24,6 +25,13 @@ use Illuminate\Console\Command;
  * part for a monitoring hook: 0 when the material is usable and not expiring inside the
  * warning window, 1 otherwise, so `esign:seal:status` can be a cron check rather than
  * something a person has to read.
+ *
+ * It also reports the **retired** key versions, which is the half a rotation makes matter.
+ * Retired keys are listed with their certificates' state, and an expired retired certificate
+ * is reported as expired without being reported as a problem: the artifacts it sealed were
+ * sealed while it was valid, and the deployment keeps it only so those artifacts stay
+ * attributable. A retired certificate that cannot be *loaded* is a different matter and does
+ * fail the exit status, because it means published evidence has become unattributable here.
  */
 final class SealStatusCommand extends Command
 {
@@ -32,7 +40,7 @@ final class SealStatusCommand extends Command
 
     protected $description = 'Report the configured service seal material: key id, subject, expiry, fingerprint, and TSA';
 
-    public function handle(SealIdentity $seal): int
+    public function handle(SealIdentity $seal, SealCertificateDirectory $directory): int
     {
         $warnDays = $this->warnDays();
 
@@ -68,6 +76,8 @@ final class SealStatusCommand extends Command
 
         $this->table(['Property', 'Value'], $rows);
 
+        $retiredIsBroken = $this->reportRetired($directory);
+
         if (! $timestampAuthority) {
             $this->comment(
                 'No RFC 3161 timestamp authority is configured, so PAdES '.AssuranceLevel::PadesBT->value
@@ -77,6 +87,10 @@ final class SealStatusCommand extends Command
         }
 
         $remaining = $this->daysUntil($notAfter);
+
+        if ($retiredIsBroken) {
+            return self::FAILURE;
+        }
 
         if ($remaining <= $warnDays) {
             $this->warn(sprintf(
@@ -92,6 +106,65 @@ final class SealStatusCommand extends Command
         $this->info('The configured seal material is usable.');
 
         return self::SUCCESS;
+    }
+
+    /**
+     * List the retired key versions and whether each certificate still loads.
+     *
+     * @return bool True when at least one retired certificate could not be loaded, which is an
+     *              evidence gap and must be reflected in the exit status.
+     */
+    private function reportRetired(SealCertificateDirectory $directory): bool
+    {
+        $retired = $directory->retiredKeyIds();
+
+        if ($retired === []) {
+            $this->line('');
+            $this->line('No retired seal keys are configured (ESIGN_SEAL_RETIRED_KEYS is empty). That is '
+                .'correct for a deployment that has never rotated. After a rotation, the outgoing key\'s '
+                .'certificate belongs here or its artifacts stop being verifiable.');
+
+            return false;
+        }
+
+        $rows = [];
+        $broken = false;
+
+        foreach ($retired as $keyId) {
+            $problem = $directory->problemWith($keyId);
+
+            if ($problem !== null) {
+                $broken = true;
+                $rows[] = [$keyId, 'UNRESOLVABLE', '', $problem];
+
+                continue;
+            }
+
+            $certificate = $directory->certificateFor($keyId);
+
+            $rows[] = [
+                $keyId,
+                // Expired is the expected state for a retired key, not a fault: the artifacts
+                // it sealed were sealed while it was valid.
+                $certificate->isExpired() ? 'expired (fine)' : 'still valid',
+                substr($certificate->fingerprint, 0, 16).'…',
+                $certificate->notAfter->format(DATE_ATOM),
+            ];
+        }
+
+        $this->line('');
+        $this->line('Retired seal keys — kept so artifacts sealed before a rotation stay verifiable:');
+        $this->table(['Key id', 'Certificate', 'SHA-256', 'Valid until / problem'], $rows);
+
+        if ($broken) {
+            $this->error(
+                'At least one retired seal certificate could not be loaded. Artifacts sealed under that '
+                .'key id cannot be verified on this deployment until it is. Only the certificate is '
+                .'needed; the retired private key is not, and must not be restored for this.'
+            );
+        }
+
+        return $broken;
     }
 
     private function warnDays(): int

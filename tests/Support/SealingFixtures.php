@@ -28,7 +28,11 @@ final class SealingFixtures
     /** Passphrase of seal-encrypted.test.pkey, as written by generate.sh. */
     public const TEST_PASSPHRASE = 'esign-fixture-passphrase-not-a-secret';
 
+    /** Key A: the material a deployment starts on and later retires. */
     public const KEY_ID = 'fixture-seal-2026-a';
+
+    /** Key B: the rotation target, issued by the second fixture root. */
+    public const KEY_ID_B = 'fixture-seal-2026-b';
 
     public static function cryptoPath(string $file = ''): string
     {
@@ -84,14 +88,32 @@ final class SealingFixtures
         string $privateKey = 'seal.test.pkey',
         string $passphrase = '',
         string $chain = 'root.test.crt',
+        string $keyId = self::KEY_ID,
     ): SealMaterial {
         return SealMaterial::fromPem(
-            keyId: self::KEY_ID,
+            keyId: $keyId,
             certificatePem: self::pem($certificate),
             privateKeyPem: self::pem($privateKey),
             chainPem: $chain === '' ? '' : self::pem($chain),
             digestAlgorithm: 'sha256',
             passphrase: $passphrase,
+        );
+    }
+
+    /**
+     * Key B's material: the rotation target, under its own root.
+     *
+     * Separate anchors are deliberate; see tests/Fixtures/crypto/README.md. An artifact sealed
+     * with this must NOT validate against root.test.crt, which is what makes "each artifact
+     * verifies against its own certificate" a claim with teeth.
+     */
+    public static function materialB(): SealMaterial
+    {
+        return self::material(
+            certificate: 'seal-b.test.crt',
+            privateKey: 'seal-b.test.pkey',
+            chain: 'root-b.test.crt',
+            keyId: self::KEY_ID_B,
         );
     }
 
