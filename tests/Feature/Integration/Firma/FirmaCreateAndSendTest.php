@@ -4,14 +4,14 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Integration\Firma;
 
-use App\Domain\Delivery\Events\SigningUrlMinter;
 use App\Domain\Identity\Credentials\IssuedServiceCredential;
 use App\Domain\Preparation\Documents\Models\Document;
 use App\Domain\Signing\Envelopes\EnvelopeState;
 use App\Domain\Signing\Models\Envelope;
+use App\Domain\Signing\Sessions\Models\RecipientInvitation;
+use App\Domain\Signing\Sessions\OtpRequirement;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
-use Tests\Support\FakeSigningUrlMinter;
 use Tests\Support\FirmaFacadeScenario;
 use Tests\Support\PdfFixtures;
 use Tests\TestCase;
@@ -211,7 +211,6 @@ class FirmaCreateAndSendTest extends TestCase
     public function test_the_document_is_ingested_and_the_request_is_sent(): void
     {
         [, $issued] = $this->scenario();
-        $this->app->instance(SigningUrlMinter::class, new FakeSigningUrlMinter);
 
         $response = $this->postJson(self::BASE.'/create-and-send', [
             'name' => 'Synthetic two-party agreement',
@@ -232,7 +231,20 @@ class FirmaCreateAndSendTest extends TestCase
         $response->assertJsonPath('status', 'sent');
         $response->assertJsonPath('first_signer.email', 'dana@buyer.example.test');
         $response->assertJsonPath('credits_remaining', null);
-        $this->assertStringStartsWith('https://', (string) $response->json('first_signer.signing_link'));
+        // The link is this application's own stable resolver, not `app.firma.dev`'s, and it
+        // names the first signer's own recipient id — the only handle a signing session binds
+        // to. A consumer must read this field instead of constructing a URL.
+        $firstSigner = $response->json('first_signer.id');
+        $this->assertSame(
+            route('signing.legacy.show', ['recipient' => $firstSigner]),
+            $response->json('first_signer.signing_link'),
+        );
+        $this->assertStringNotContainsString('firma.dev', (string) $response->json('first_signer.signing_link'));
+
+        // Deliberately *not* a freshly minted invitation. A recipient has at most one live
+        // invitation and issuing another revokes the previous one, so a link minted for this
+        // response would either kill the one the invitation email carries or be killed by it.
+        $this->assertSame(0, RecipientInvitation::query()->count());
 
         $envelope = Envelope::query()->where('public_id', $response->json('id'))->firstOrFail();
         $this->assertSame(EnvelopeState::Sent, $envelope->state);
@@ -385,16 +397,17 @@ class FirmaCreateAndSendTest extends TestCase
     }
 
     /**
-     * The second unsupported option a consumer is likely to send.
+     * `settings.require_otp_verification` is honoured, not refused.
      *
-     * A request for a stronger identity check than the service performs is an error, never a
-     * silent downgrade (AGENTS.md).
+     * Mailbox OTP is per-envelope (`envelopes.require_otp`), so this one *can* be granted —
+     * and a requested identity check that is not performed would be exactly the silent
+     * downgrade AGENTS.md forbids, so granting it is the only alternative to a 501.
      */
-    public function test_require_otp_verification_is_not_implemented(): void
+    public function test_require_otp_verification_is_honoured(): void
     {
         [, $issued] = $this->scenario();
 
-        $this->postJson(self::BASE.'/create-and-send', [
+        $response = $this->postJson(self::BASE.'/create-and-send', [
             'name' => 'Synthetic OTP agreement',
             'document' => base64_encode(PdfFixtures::bytes('single-page-letter')),
             'recipients' => [['first_name' => 'Dana', 'email' => 'dana@buyer.example.test', 'order' => 1]],
@@ -404,9 +417,43 @@ class FirmaCreateAndSendTest extends TestCase
                 'position' => ['x' => 10.0, 'y' => 80.0, 'width' => 25.0, 'height' => 4.0],
             ]],
             'settings' => ['require_otp_verification' => true],
-        ], FirmaFacadeScenario::headers($issued))
-            ->assertStatus(501)
-            ->assertJsonPath('details.unsupported_option', 'settings.require_otp_verification');
+        ], FirmaFacadeScenario::headers($issued))->assertStatus(201);
+
+        $envelope = Envelope::query()->where('public_id', $response->json('id'))->firstOrFail();
+        $this->assertTrue($envelope->require_otp);
+        $this->assertTrue(app(OtpRequirement::class)->for($envelope));
+
+        // The polling response reports the *resolved* requirement, so a caller sees what its
+        // guests will actually be asked for.
+        $this->assertTrue($this->getJson(
+            self::BASE.'/'.$envelope->public_id,
+            FirmaFacadeScenario::headers($issued),
+        )->assertOk()->json('settings.require_otp_verification'));
+    }
+
+    /**
+     * Saying nothing is not the same as saying false.
+     *
+     * `envelopes.require_otp` stays null so the envelope inherits its workspace and then the
+     * deployment default, which is the whole reason the column is a nullable boolean.
+     */
+    public function test_omitting_the_otp_setting_leaves_the_envelope_undecided(): void
+    {
+        [, $issued] = $this->scenario();
+
+        $response = $this->postJson(self::BASE.'/create-and-send', [
+            'name' => 'Synthetic agreement with no OTP preference',
+            'document' => base64_encode(PdfFixtures::bytes('single-page-letter')),
+            'recipients' => [['first_name' => 'Dana', 'email' => 'dana@buyer.example.test', 'order' => 1]],
+            'fields' => [[
+                'type' => 'signature',
+                'page_number' => 1,
+                'position' => ['x' => 10.0, 'y' => 80.0, 'width' => 25.0, 'height' => 4.0],
+            ]],
+        ], FirmaFacadeScenario::headers($issued))->assertStatus(201);
+
+        $envelope = Envelope::query()->where('public_id', $response->json('id'))->firstOrFail();
+        $this->assertNull($envelope->require_otp);
     }
 
     /** Upstream's separate `anchor_tags[]` collection is out of profile. */

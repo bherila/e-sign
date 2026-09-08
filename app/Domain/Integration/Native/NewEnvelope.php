@@ -22,6 +22,13 @@ final readonly class NewEnvelope
      *                                                                                        Contact details for schema recipient ids.
      * @param  array<string, mixed>  $values  Sender prefills: schema field id => value.
      * @param  bool  $expirySpecified  Whether `expires_in_hours` was present at all.
+     * @param  bool|null  $requireOtp  Whether this envelope's guests answer a mailed code as
+     *                                 well as following the link. **Null is not false**: it
+     *                                 means "not decided here", so the envelope inherits its
+     *                                 workspace and then the deployment default
+     *                                 (App\Domain\Signing\Sessions\OtpRequirement). An
+     *                                 explicit false overrules both, which is a different
+     *                                 instruction from saying nothing.
      */
     public function __construct(
         public ?string $templateVersionId = null,
@@ -35,6 +42,7 @@ final readonly class NewEnvelope
         public ?int $expiresInHours = null,
         public ?string $consentPolicyVersion = null,
         public bool $expirySpecified = false,
+        public ?bool $requireOtp = null,
     ) {}
 
     /**
@@ -69,6 +77,7 @@ final readonly class NewEnvelope
             // instruction from omitting the key (take the seven-day default). Only the
             // presence of the key distinguishes them.
             expirySpecified: array_key_exists('expires_in_hours', $input),
+            requireOtp: is_bool($input['require_otp'] ?? null) ? $input['require_otp'] : null,
         );
     }
 

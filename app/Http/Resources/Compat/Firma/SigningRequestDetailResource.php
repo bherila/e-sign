@@ -51,6 +51,7 @@ class SigningRequestDetailResource extends JsonResource
     public function __construct(
         Envelope $envelope,
         private readonly SigningRequestDownloads $downloads,
+        private readonly SigningRequestSettings $settings,
     ) {
         parent::__construct($envelope);
     }
@@ -80,9 +81,9 @@ class SigningRequestDetailResource extends JsonResource
             'document_url_expires_at' => $expiresAt->toIso8601String(),
             'document_page_count' => $revision?->page_count,
         ]
-            + SigningRequestSettings::deprecatedIntegers($envelope)
+            + $this->settings->deprecatedIntegers($envelope)
             + [
-                'settings' => SigningRequestSettings::for($envelope),
+                'settings' => $this->settings->for($envelope),
                 'expiration_hours' => $envelope->expiration_hours,
                 'expires_at' => $envelope->expires_at?->toIso8601String(),
                 // See the class docblock: no credit system, and null is the honest answer.

@@ -17,8 +17,7 @@ namespace App\Domain\Integration\Firma;
  *
  * | Option | Why |
  * |---|---|
- * | `settings.hand_drawn_only: true` | Signature capture offers typed **or** drawn (`RenderSettings::$signatureAppearance`). There is no mode that refuses a typed signature, so promising one would mean accepting an agreement captured under assurance the sender did not ask for. |
- * | `settings.require_otp_verification: true` | Step-up verification is not bound to this surface. A request for a stronger identity check that is not performed is exactly the "silent downgrade" `AGENTS.md` forbids. |
+ * | `settings.hand_drawn_only: true` | `RenderSettings::$signatureAppearance` records a preference (`drawn`, `typed`, `either`) and **nothing in the signing flow enforces it**: a typed signature is accepted whatever it says. Recording the setting would therefore promise a caller something nothing keeps — an agreement captured under an assurance the sender was told they had asked for. |
  * | `settings.allow_editing_before_sending: true` | A sent envelope's content is frozen; a correction is a new envelope with renewed signatures. |
  * | `settings.attach_pdf_on_finish: true` | The completion mail carries an authorized link, not the bytes. Attaching an executed agreement to an email takes it outside the boundary that authorizes it. |
  * | `settings.identity_editable_fields` (non-empty) | A recipient cannot rewrite their own identity here: it is recorded in the attestation. |
@@ -40,12 +39,9 @@ final class UnsupportedOptions
      * @var array<string, string>
      */
     private const REFUSED_WHEN_TRUE = [
-        'hand_drawn_only' => 'Signature capture in this build accepts a typed or a drawn signature; there is no '
-            .'drawn-only mode. Accepting this option would mean recording an agreement under an assurance the '
-            .'sender did not get.',
-        'require_otp_verification' => 'One-time-passcode verification is not bound to the signing flow in this '
-            .'build. A request for a stronger identity check than the service performs is an error, never a '
-            .'silent downgrade.',
+        'hand_drawn_only' => 'Signature capture in this build accepts a typed or a drawn signature, and nothing '
+            .'in the signing flow refuses a typed one — the appearance is a rendering preference, not a rule. '
+            .'Recording this option would promise an assurance nothing enforces.',
         'allow_editing_before_sending' => 'A signing request cannot be edited once it has been built from its '
             .'document: the snapshot is immutable, and a correction is a new request with renewed signatures.',
         'attach_pdf_on_finish' => 'The completion email carries an authorized download link rather than the '

@@ -32,8 +32,9 @@ This facade reproduces **an HTTP API**. It does not reproduce a company.
 - **The signing UI.** Signers land on this application's own pages, served locally and
   visibly branded as this product. A client that constructs
   `https://app.firma.dev/signing/{recipientId}` itself is building a link to somebody else's
-  website; read `first_signer.signing_link` from the response instead. This is the one change
-  a migrating consumer *must* make.
+  website; read `first_signer.signing_link` from the response instead. The *path shape* is
+  the same — `/signing/{recipientId}` on this host — so the change is the base URL, but it is
+  the one change a migrating consumer *must* make.
 - **The JavaScript SDK and the hosted field editor.** Placing fields on a rendered PDF is
   this application's own editor. There is no drop-in replacement for a third-party SDK
   bundle, and a compatibility shim that loaded one would be loading their code.
@@ -200,8 +201,7 @@ Refused options, and why each one:
 
 | Option | Why |
 |---|---|
-| `settings.hand_drawn_only: true` | Signature capture offers typed **or** drawn. There is no mode that refuses a typed signature, so promising one would record an agreement under assurance the sender did not get. |
-| `settings.require_otp_verification: true` | Step-up verification is not bound to the signing flow. A request for a stronger identity check than the service performs is an error, never a silent downgrade. |
+| `settings.hand_drawn_only: true` | The template's `signature_appearance` records a *preference* and **nothing in the signing flow enforces it** — a typed signature is accepted whatever it says. Recording the option would promise an assurance nothing keeps. |
 | `settings.allow_editing_before_sending: true` | A request's document and field schema are one immutable snapshot; a correction is a new request with renewed signatures. |
 | `settings.attach_pdf_on_finish: true` | The completion email carries an authorized link, not the bytes. |
 | `settings.identity_editable_fields` | Who signed is recorded in their attestation; an editable identity field would let that record change after the fact. |
@@ -385,6 +385,26 @@ between.
 
 The response carries `first_signer.signing_link` — **read this instead of building a URL**.
 
+That link is this application's stable `/signing/{recipientId}` resolver, and deliberately
+**not** a freshly minted invitation. A recipient has at most one live invitation and issuing
+another revokes the previous one, which is what makes "resend the link" mean something; a
+credential minted for this response would therefore either kill the link the invitation email
+is about to carry or be killed by it, depending on when the queue ran. The resolver authorizes
+nothing on its own: it reaches a form, and stating the address the invitation went to plus
+reading a code delivered there is what turns it into a session. `docs/HANDOFF.md` §8 refuses
+"possession of the recipient id is the authorization" outright and names exactly this resolver
+as the way to keep the URL shape without it.
+
+### `settings.require_otp_verification`
+
+Honoured. It is written to the request itself, and **null is not false**: saying nothing leaves
+the request inheriting its workspace's setting and then the deployment default, while an
+explicit `false` overrules both. `GET /signing-requests/{id}` reports the *resolved* value, so
+a caller that set nothing still sees what its guests will be asked for.
+
+The code is a second check on the **same** factor — continued access to the mailbox the link
+went to — not a second factor, and not an eIDAS advanced or qualified signature.
+
 ### The polling response
 
 `GET /signing-requests/{id}` is the endpoint a consumer loops on. Its full key set is
@@ -399,10 +419,11 @@ asserted against all four recorded workflows. The parts worth calling out:
 - **`certificate`** maps onto the **completion report**: a statement of what happened, not an
   X.509 certificate and not a credential belonging to any signer. `generated` becomes true in
   the transaction that completes the request, so never before the evidence is retrievable.
-- **`settings`** carries all fourteen upstream members. Two are real (`use_signing_order`,
-  `allow_download`); the other twelve are `false` or `null` with a documented reason each,
-  because a plausible value for something this product does not model is worse than an honest
-  absence. The same five settings also appear at the top level as deprecated `0`/`1`
+- **`settings`** carries all fourteen upstream members. Three are real
+  (`use_signing_order`, `allow_download`, and `require_otp_verification`, which reports the
+  resolved requirement); the other eleven are `false` or `null` with a documented reason
+  each, because a plausible value for something this product does not model is worse than an
+  honest absence. The same five settings also appear at the top level as deprecated `0`/`1`
   integers — both forms, each with the right type in its own place (matrix D5).
 - **`credit_cost`** is `null`. There is no credit system; omitting the key would break a
   consumer that reads it, and a number would invent a billing fact.

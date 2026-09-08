@@ -45,6 +45,7 @@ class SigningRequestCreateResource extends JsonResource
         Envelope $envelope,
         private readonly SigningRequestFields $fields,
         private readonly SigningRequestDownloads $downloads,
+        private readonly SigningRequestSettings $settings,
     ) {
         parent::__construct($envelope);
     }
@@ -66,7 +67,7 @@ class SigningRequestCreateResource extends JsonResource
             'document_url' => $this->downloads->documentUrl($envelope, $expiresAt),
             'page_count' => $envelope->documentRevision?->page_count,
             'expiration_hours' => $envelope->expiration_hours,
-            'settings' => SigningRequestSettings::for($envelope),
+            'settings' => $this->settings->for($envelope),
             'recipients' => $this->recipients($envelope),
             'fields' => $this->fields->createResults($envelope),
             'created_date' => $envelope->created_at?->toIso8601String(),

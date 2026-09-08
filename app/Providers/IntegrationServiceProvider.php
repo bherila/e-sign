@@ -87,8 +87,7 @@ final class IntegrationServiceProvider extends ServiceProvider
      * queue keep reporting the same exceptions exactly as before; and only to refusals the
      * surface's own map recognises, so anything genuinely unexpected is still reported in
      * full and still answers 500. Each surface is asked its own question, because the two
-     * maps classify differently — a `SigningUrlUnavailable` is an unimplemented option on the
-     * facade and an application fault on the native API.
+     * maps classify the same exception differently.
      *
      * Registered here rather than in bootstrap/app.php because it is a fact about these two
      * surface, not about the application, and it belongs next to the module that decides

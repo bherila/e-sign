@@ -4,14 +4,13 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Compat\Firma;
 
-use App\Domain\Delivery\Events\Exceptions\SigningUrlUnavailable;
-use App\Domain\Delivery\Events\SigningUrlMinter;
 use App\Domain\Integration\Firma\FirmaErrorCode;
 use App\Domain\Integration\Firma\FirmaException;
 use App\Domain\Integration\Firma\SigningRequestCreation;
 use App\Domain\Integration\Firma\SigningRequestDownloads;
 use App\Domain\Integration\Firma\SigningRequestFields;
 use App\Domain\Integration\Firma\SigningRequestLocator;
+use App\Domain\Integration\Firma\SigningRequestSettings;
 use App\Domain\Integration\Firma\SigningRequestUsers;
 use App\Domain\Integration\Firma\UnsupportedOptions;
 use App\Domain\Integration\Native\EnvelopeService;
@@ -59,7 +58,7 @@ class SigningRequestController extends Controller
         private readonly SigningRequestFields $fields,
         private readonly SigningRequestUsers $users,
         private readonly SigningRequestDownloads $downloads,
-        private readonly SigningUrlMinter $signingUrls,
+        private readonly SigningRequestSettings $settings,
     ) {}
 
     /** `POST /signing-requests` — a draft, from a template or from an inline document. */
@@ -68,7 +67,7 @@ class SigningRequestController extends Controller
         $envelope = $this->creation->create($request->workspace(), $request->credential(), $request->body());
 
         return response()->json(
-            (new SigningRequestCreateResource($envelope, $this->fields, $this->downloads))->resolve($request),
+            (new SigningRequestCreateResource($envelope, $this->fields, $this->downloads, $this->settings))->resolve($request),
             201,
         );
     }
@@ -104,7 +103,7 @@ class SigningRequestController extends Controller
     public function show(FirmaRequest $request): JsonResponse
     {
         return response()->json(
-            (new SigningRequestDetailResource($request->signingRequest(), $this->downloads))->resolve($request),
+            (new SigningRequestDetailResource($request->signingRequest(), $this->downloads, $this->settings))->resolve($request),
         );
     }
 
@@ -351,21 +350,29 @@ class SigningRequestController extends Controller
     }
 
     /**
-     * The signer's own link, from the same minter the invitation email uses.
+     * The signer's link: the stable resolver, **not** a fresh invitation credential.
      *
-     * Null when guest signing is not bound in this deployment. That case is deliberately not
-     * a failure of the whole call: the request has been created and sent by the time this
-     * runs, and turning that into a `501` would report a failure for something that
-     * succeeded. The invitation mail refuses separately and visibly
-     * (App\Domain\Delivery\Events\PlaceholderSigningUrlMinter), so nothing is quietly lost.
+     * This deliberately does *not* call `SigningUrlMinter`, even though that is what the
+     * invitation email uses. A recipient has at most one live invitation and issuing another
+     * revokes the previous one (`InvitationIssuer`), so minting one here would either kill
+     * the link the invitation email is about to send or be killed by it, depending on when
+     * the queue got to the job. Either way the URL in this response would be a link that
+     * goes nowhere, which is the exact failure the placeholder minter was written to
+     * prevent. Handing out a second live credential would also widen the set of people who
+     * can execute the agreement, which is the reason only one is ever live.
+     *
+     * `signing.legacy.show` is stable, revokes nothing, and authorizes nothing on its own:
+     * a bare recipient identifier reaches a form, and stating the address the invitation
+     * went to plus reading a code delivered there is what turns it into a session
+     * (`docs/HANDOFF.md` §8 — "A public recipient UUID alone must not authorize signing …
+     * a legacy `/signing/{recipientId}` resolver can require mailbox verification").
+     *
+     * It is also the same *path shape* the consumer already hardcodes, so the change it has
+     * to make is the host and nothing else.
      */
-    private function signingLink(EnvelopeRecipient $recipient): ?string
+    private function signingLink(EnvelopeRecipient $recipient): string
     {
-        try {
-            return $this->signingUrls->signingUrlFor($recipient);
-        } catch (SigningUrlUnavailable) {
-            return null;
-        }
+        return route('signing.legacy.show', ['recipient' => $recipient->public_id]);
     }
 
     /**

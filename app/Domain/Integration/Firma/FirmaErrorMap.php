@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Domain\Integration\Firma;
 
-use App\Domain\Delivery\Events\Exceptions\SigningUrlUnavailable;
 use App\Domain\Evidence\Finalization\Exceptions\FinalizationException;
 use App\Domain\Integration\Native\ApiException;
 use App\Domain\Integration\Native\ErrorCode;
@@ -126,14 +125,6 @@ final class FirmaErrorMap
                 FirmaErrorCode::InvalidRequest,
                 $exception->getMessage(),
                 ['reason' => $exception->code()],
-            ),
-
-            // Guest signing is not bound in this deployment, so no signing link exists to
-            // return. Failing closed rather than inventing a URL is the whole reason
-            // App\Domain\Delivery\Events\PlaceholderSigningUrlMinter throws.
-            $exception instanceof SigningUrlUnavailable => FirmaException::unsupported(
-                'first_signer.signing_link',
-                $exception->getMessage(),
             ),
 
             $exception instanceof FinalizationException => FirmaException::of(

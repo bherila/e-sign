@@ -21,17 +21,29 @@ use Illuminate\Http\Resources\Json\JsonResource;
  *
  * ## `first_signer.signing_link`
  *
- * The one field where compatibility and honesty pull hardest in opposite directions. The
- * consumer currently constructs `https://app.firma.dev/signing/{recipientId}` itself; this
- * service does not impersonate that site, and its signing UI is served from this application
- * and visibly branded as this product (`docs/HANDOFF.md` section 10). So the link is real and
- * it is ours, minted by App\Domain\Delivery\Events\SigningUrlMinter — the same minter the
- * invitation email uses, so the link in this response and the link in the signer's inbox are
- * the same session and not two.
+ * The one field where compatibility and honesty pull hardest in opposite directions, and the
+ * resolution is worth reading.
  *
- * The consumer has to stop building the URL and start reading this field. That is recorded in
- * the capability matrix as an intentional difference, and it is not negotiable: a hardcoded
- * third-party host is a link to somebody else's product.
+ * The consumer currently constructs `https://app.firma.dev/signing/{recipientId}` itself.
+ * This service does not impersonate that site: its signing pages are served from this
+ * application and visibly branded as this product (`docs/HANDOFF.md` §10). So the link is
+ * ours, and it is the **stable resolver** `signing.legacy.show` — the same path shape, on
+ * this host — rather than a freshly minted invitation.
+ *
+ * Not an invitation, for a specific reason. A recipient has at most one live invitation and
+ * issuing another revokes the previous one, which is what makes "resend the link" mean
+ * something. Minting one for this response would therefore either kill the link the
+ * invitation email is about to carry, or be killed by it, depending on when the queue ran —
+ * and either way this field would be a URL that goes nowhere. It would also put a second
+ * live bearer credential for the same agreement into a second place.
+ *
+ * The resolver authorizes nothing by itself: a bare recipient identifier reaches a form, and
+ * mailbox verification is what turns it into a session (`docs/HANDOFF.md` §8 refuses
+ * "possession of the identifier is the authorization" outright and names this resolver as the
+ * way to keep the URL shape without it).
+ *
+ * The consumer still has to stop building the URL and read this field — the host is
+ * different, and a hardcoded third-party host is a link to somebody else's product.
  *
  * ## `credits_remaining`
  *
@@ -45,9 +57,8 @@ class CreateAndSendResource extends JsonResource
     public static $wrap = null;
 
     /**
-     * @param  string|null  $signingLink  Null only when guest signing is not bound in this
-     *                                    deployment, which the error boundary would otherwise
-     *                                    have turned into a 501 before the request was sent.
+     * @param  string|null  $signingLink  Null only when the request has no recipients at all,
+     *                                    which creation refuses.
      */
     public function __construct(
         Envelope $envelope,

@@ -116,6 +116,7 @@ final readonly class SigningRequestCreation
                 values: $this->prefills($schema, is_array($body['fields'] ?? null) ? $body['fields'] : []),
                 expiresInHours: self::expirationHours($body),
                 expirySpecified: array_key_exists('expiration_hours', $body),
+                requireOtp: self::requireOtp($body),
             ),
             $credential,
         );
@@ -260,6 +261,7 @@ final readonly class SigningRequestCreation
                 values: self::placedPrefills($schema, $fields),
                 expiresInHours: self::expirationHours($body),
                 expirySpecified: array_key_exists('expiration_hours', $body),
+                requireOtp: self::requireOtp($body),
             ),
             $credential,
         );
@@ -396,6 +398,27 @@ final readonly class SigningRequestCreation
             'The document was refused by the PDF preflight check, so no signing request was created.',
             ['findings' => array_values($findings)],
         );
+    }
+
+    /**
+     * `settings.require_otp_verification`, honoured rather than echoed.
+     *
+     * Null means the caller said nothing, and that is **not** false: the envelope then
+     * inherits its workspace's setting and the deployment default
+     * (App\Domain\Signing\Sessions\OtpRequirement). An explicit `false` overrules both,
+     * which a caller migrating from a workspace that required a code needs to be able to say.
+     *
+     * `GET /signing-requests/{id}` reports the *resolved* value, so a caller that set nothing
+     * still sees what its guests will be asked for.
+     *
+     * @param  array<string, mixed>  $body
+     */
+    private static function requireOtp(array $body): ?bool
+    {
+        $settings = is_array($body['settings'] ?? null) ? $body['settings'] : [];
+        $value = $settings['require_otp_verification'] ?? null;
+
+        return is_bool($value) ? $value : null;
     }
 
     /**
