@@ -127,6 +127,19 @@ final class DestinationPolicy
             return [$literal];
         }
 
+        // ASCII first, and before the hostname filter, because that filter's alnum test is
+        // locale-dependent: on a Latin-1-ish locale `a\xffb.test` passes it. A host this
+        // process validates and resolves as raw bytes, while libcurl (built with libidn2)
+        // IDN-converts before looking the name up in the `CURLOPT_RESOLVE` table, is a host
+        // where the pin misses and curl performs its own unvalidated resolution — a full
+        // policy bypass with no rebinding race needed
+        // (docs/security/review-2026-09.md finding D-2). A destination is either an ASCII
+        // hostname or it is refused; an operator with an internationalised domain converts it
+        // to punycode once, in configuration, where it can be read.
+        if (preg_match('/^[\x21-\x7e]+$/', $host) !== 1) {
+            throw $this->refuse('URL host must be ASCII; convert an internationalised name to punycode first.');
+        }
+
         if (filter_var($host, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false) {
             throw $this->refuse('URL does not name a valid host.');
         }
@@ -186,8 +199,17 @@ final class DestinationPolicy
      */
     private function isInExtraReservedRange(string $address): bool
     {
-        // ::ffff:a.b.c.d is the same destination as a.b.c.d, so it is judged as one.
-        $candidate = preg_replace('/^::ffff:/i', '', $address) ?? $address;
+        // ::ffff:a.b.c.d is the same destination as a.b.c.d, so it is judged as one — but
+        // only when what follows really is a dotted quad. Stripping unconditionally turned
+        // `::ffff:0:7f00:1` (RFC 2765 IPv4-translated) into `0:7f00:1`, which `inet_pton`
+        // rejects, so the whole prefix check returned false and the address passed
+        // (docs/security/review-2026-09.md finding D-1).
+        $candidate = $address;
+        $mapped = preg_replace('/^::ffff:/i', '', $address) ?? $address;
+
+        if ($mapped !== $address && filter_var($mapped, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false) {
+            $candidate = $mapped;
+        }
 
         $packed = @inet_pton($candidate);
         if ($packed === false) {
@@ -200,6 +222,7 @@ final class DestinationPolicy
                 ['192.0.0.0', 24],    // RFC 6890 IETF protocol assignments
                 ['192.88.99.0', 24],  // RFC 7526 6to4 relay anycast
                 ['198.18.0.0', 15],   // RFC 2544 benchmarking
+                ['224.0.0.0', 4],     // RFC 5771 multicast: a group, never a receiver
             ]);
         }
 
@@ -209,6 +232,13 @@ final class DestinationPolicy
             ['2002::', 16],       // RFC 3056 6to4
             ['2001::', 32],       // RFC 4380 Teredo
             ['100::', 64],        // RFC 6666 discard-only
+            // RFC 2765 IPv4-translated. The sibling of the IPv4-*mapped* ::ffff:0:0/96 that
+            // PHP already treats as reserved, and the one transition prefix that was missing:
+            // `[::ffff:0:7f00:1]` passed the whole policy, and behind a SIIT/NAT64 translator
+            // it is 127.0.0.1 (docs/security/review-2026-09.md finding D-1). Note the strip
+            // above cannot help here — `::ffff:0:7f00:1` is not `::ffff:` followed by dotted
+            // quad, so `inet_pton` sees the v6 form.
+            ['::ffff:0:0:0', 96],
         ]);
     }
 

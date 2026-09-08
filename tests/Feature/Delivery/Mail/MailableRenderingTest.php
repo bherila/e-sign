@@ -9,6 +9,7 @@ use App\Domain\Delivery\Mail\MailKind;
 use App\Mail\CompletedMail;
 use App\Mail\DeclinedMail;
 use App\Mail\InvitationMail;
+use App\Mail\MailCopy;
 use App\Mail\OutboundMailable;
 use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -177,6 +178,53 @@ class MailableRenderingTest extends TestCase
         $this->assertSame([], $this->foreignLinksIn($rendered));
         // The text still reaches the reader; only its link syntax is inert.
         $this->assertStringContainsString('Restore this agreement', $rendered);
+    }
+
+    /**
+     * docs/security/review-2026-09.md finding D-6.
+     *
+     * Link injection was already blocked; block structure was not. A decline reason is typed
+     * by an external signer, `max:500` with newlines intact, and is rendered inside a `> `
+     * blockquote — so only its first line stayed quoted, and everything after a blank line
+     * became top-level content of a notice the sender receives from their own agreement
+     * service. A forged `# heading` is a phishing frame even without a link in it.
+     */
+    #[DataProvider('kindsWithFreeText')]
+    public function test_markdown_in_a_free_text_field_cannot_forge_a_heading_or_escape_its_quote(MailKind $kind): void
+    {
+        $context = new MailContext(
+            recipientName: 'Blake Sender',
+            senderName: 'Example Holdings',
+            agreementTitle: 'Mutual Nondisclosure Agreement',
+            actorName: 'Avery Counterparty',
+            reason: "Wrong signatory.\n\n# Your agreement was suspended\n\nCall +1 555 0100 to restore it.",
+            failureSummary: "Finalization failed.\n\n## Contact support immediately",
+            reference: "env-1\n\n---\n\nUrgent",
+        );
+
+        $rendered = $kind->mailable($context)->render();
+
+        // No heading the template did not write itself. The templates use `#`/`##` for their
+        // own title, so the test is about the injected text, not about headings in general.
+        $this->assertStringNotContainsString('Your agreement was suspended</h', $rendered);
+        $this->assertStringNotContainsString('Contact support immediately</h', $rendered);
+
+        // The words still reach the reader; only their block syntax is inert.
+        $this->assertStringContainsString('Your agreement was suspended', $rendered);
+        $this->assertStringContainsString('Wrong signatory.', $rendered);
+    }
+
+    public function test_an_ordinary_reason_is_not_disfigured_by_the_block_escape(): void
+    {
+        // The escape earns its keep only if prose survives it. Laravel renders the plain-text
+        // alternative from the same Blade view with no Markdown pass, so a backslash added
+        // here is a backslash somebody reads.
+        $this->assertSame('We are not proceeding - the terms changed.', MailCopy::escape(
+            'We are not proceeding - the terms changed.',
+        ));
+        $this->assertSame('Budget cut by 30% (see note 4.2).', MailCopy::escape(
+            'Budget cut by 30% (see note 4.2).',
+        ));
     }
 
     #[DataProvider('kindsWithFreeText')]

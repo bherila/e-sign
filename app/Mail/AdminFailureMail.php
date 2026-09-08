@@ -27,7 +27,7 @@ class AdminFailureMail extends OutboundMailable
 
     public function subjectLine(): string
     {
-        return sprintf('[%s] Action needed: %s', $this->brand(), (string) $this->context->reference);
+        return sprintf('[%s] Action needed: %s', $this->subjectPart($this->brand()), $this->subjectPart($this->context->reference));
     }
 
     protected function markdownView(): string

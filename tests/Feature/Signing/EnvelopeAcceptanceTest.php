@@ -6,11 +6,14 @@ namespace Tests\Feature\Signing;
 
 use App\Domain\Signing\Envelopes\AcceptanceRequest;
 use App\Domain\Signing\Envelopes\AttestationDigest;
+use App\Domain\Signing\Envelopes\EnvelopeState;
 use App\Domain\Signing\Envelopes\VerificationMethod;
 use App\Domain\Signing\Exceptions\ConsentMismatch;
+use App\Domain\Signing\Exceptions\IllegalTransition;
 use App\Domain\Signing\Exceptions\RequiredFieldsMissing;
 use App\Domain\Signing\Exceptions\StaleReview;
 use App\Domain\Signing\Models\RecipientAttestation;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use InvalidArgumentException;
 use RuntimeException;
@@ -313,6 +316,109 @@ class EnvelopeAcceptanceTest extends TestCase
         } catch (RequiredFieldsMissing $e) {
             $this->assertSame('buyer', $e->recipientId);
             $this->assertEqualsCanonicalizing(['buyer_ack', 'buyer_signature'], $e->fieldIds);
+        }
+
+        $this->assertSame(0, RecipientAttestation::query()->count());
+    }
+
+    /**
+     * docs/security/review-2026-09.md finding S-1.
+     *
+     * `buyer_ack` is a required checkbox — a tick box beside a term, which FieldMateriality
+     * describes as the term being accepted. Storing `false` for it wrote a row, and the
+     * completeness check counted rows, so an acknowledgement could be recorded as accepted
+     * while its value said the opposite. The only place that knew `false` is not an answer
+     * was the browser.
+     */
+    public function test_a_required_checkbox_left_false_is_not_a_completed_field(): void
+    {
+        $scenario = SigningScenario::create();
+        $envelope = $scenario->sent();
+        $buyer = $scenario->recipient($envelope, 'buyer');
+
+        $scenario->machine()->submitValues($buyer, [
+            'buyer_ack' => false,
+            'buyer_signature' => 'data:image/png;base64,AAAA',
+        ]);
+
+        try {
+            $scenario->machine()->accept(
+                $buyer->refresh(),
+                $scenario->acceptanceRequest($envelope->refresh(), 'session-buyer'),
+            );
+            $this->fail('An unticked acknowledgement is not an acknowledgement.');
+        } catch (RequiredFieldsMissing $e) {
+            $this->assertSame(['buyer_ack'], $e->fieldIds);
+        }
+
+        $this->assertSame(0, RecipientAttestation::query()->count());
+
+        // And ticking it is what completes the agreement, so the rule refuses the right thing.
+        $scenario->machine()->submitValues($buyer->refresh(), ['buyer_ack' => true]);
+
+        $result = $scenario->machine()->accept(
+            $buyer->refresh(),
+            $scenario->acceptanceRequest($envelope->refresh(), 'session-buyer'),
+        );
+
+        $this->assertNotNull($result->attestation->accepted_at);
+    }
+
+    /**
+     * docs/security/review-2026-09.md finding S-2. The same defect for text: a row holding
+     * `"   "` is a blank box that happens to contain spaces. `TrimStrings` catches it on an
+     * HTTP request, but the state machine is also reachable from a job and a console command,
+     * and an invariant must not depend on an HTTP middleware.
+     */
+    public function test_a_required_text_field_holding_only_whitespace_is_not_completed(): void
+    {
+        $scenario = SigningScenario::create();
+        $envelope = $scenario->sent();
+        $buyer = $scenario->recipient($envelope, 'buyer');
+
+        $scenario->machine()->submitValues($buyer, [
+            'buyer_ack' => true,
+            'buyer_signature' => "   \t  ",
+        ]);
+
+        try {
+            $scenario->machine()->accept(
+                $buyer->refresh(),
+                $scenario->acceptanceRequest($envelope->refresh(), 'session-buyer'),
+            );
+            $this->fail('Whitespace is not a signature.');
+        } catch (RequiredFieldsMissing $e) {
+            $this->assertSame(['buyer_signature'], $e->fieldIds);
+        }
+    }
+
+    /**
+     * docs/security/review-2026-09.md finding S-4.
+     *
+     * `ExpireCommand` runs hourly, so `expires_at` passing and the state becoming `expired`
+     * are up to an hour apart — and unbounded if the scheduler has stopped. The state machine
+     * read only the state, so inside that gap a recipient could still sign an agreement whose
+     * sender had been told it had closed.
+     */
+    public function test_a_recipient_cannot_sign_after_the_expiry_the_sweep_has_not_applied_yet(): void
+    {
+        $scenario = SigningScenario::create();
+        $envelope = $scenario->sent();
+        $buyer = $scenario->recipient($envelope, 'buyer');
+        $scenario->completeRequiredFieldsFor($envelope, $buyer);
+
+        // The clock has passed; the sweep has not run, so the state is untouched.
+        $envelope->forceFill(['expires_at' => CarbonImmutable::now()->subMinute()])->save();
+        $this->assertSame(EnvelopeState::InProgress, $envelope->refresh()->state);
+
+        try {
+            $scenario->machine()->accept(
+                $buyer->refresh(),
+                $scenario->acceptanceRequest($envelope, 'session-buyer'),
+            );
+            $this->fail('An envelope past its expiry does not take a signature.');
+        } catch (IllegalTransition $e) {
+            $this->assertSame('expired', $e->from);
         }
 
         $this->assertSame(0, RecipientAttestation::query()->count());

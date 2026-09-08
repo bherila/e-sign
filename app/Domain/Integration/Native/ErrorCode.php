@@ -87,6 +87,16 @@ enum ErrorCode: string
     /** An event name that is neither in the compatibility profile nor prefixed `esign.`. */
     case UnknownEventName = 'unknown_event_name';
 
+    /* ------------------------------------------------------------------------ 429 */
+
+    /**
+     * Too many failed authentications from this client address in the last minute.
+     *
+     * Counted on failures only, so a working integration never sees it. The answer carries
+     * `Retry-After` (docs/security/review-2026-09.md finding A-1).
+     */
+    case TooManyRequests = 'too_many_requests';
+
     /* ------------------------------------------------------------------------ 501 */
 
     /**
@@ -122,6 +132,7 @@ enum ErrorCode: string
             self::TemplateState,
             self::DestinationRefused,
             self::UnknownEventName => Response::HTTP_UNPROCESSABLE_ENTITY,
+            self::TooManyRequests => Response::HTTP_TOO_MANY_REQUESTS,
             self::Unsupported => Response::HTTP_NOT_IMPLEMENTED,
             self::InternalError => Response::HTTP_INTERNAL_SERVER_ERROR,
         };

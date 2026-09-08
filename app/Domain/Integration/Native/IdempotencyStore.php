@@ -56,8 +56,17 @@ final class IdempotencyStore
      * so a client that serialises its map in a different order on the retry still replays
      * rather than being told it reused the key. Anything that is not JSON is hashed as
      * bytes, which is the only honest thing to do with an opaque payload.
+     *
+     * The **query string is part of the request** and is hashed too, sorted so parameter
+     * order cannot defeat a legitimate replay. Leaving it out was not cosmetic: every Form
+     * Request on this surface validates `$request->all()`, which merges the query, so
+     * `POST …/rotate-secret?grace_hours=24` and `POST …/rotate-secret?grace_hours=0` had the
+     * same method, path, and (empty) body — the same fingerprint. The second was answered
+     * with a replay of the first, so an operator cutting a leaked secret over immediately got
+     * a 200 carrying a secret, and no rotation at all
+     * (docs/security/review-2026-09.md finding A-3).
      */
-    public static function hashRequest(string $method, string $path, string $body): string
+    public static function hashRequest(string $method, string $path, string $body, string $query = ''): string
     {
         $decoded = json_decode($body, true);
 
@@ -65,7 +74,28 @@ final class IdempotencyStore
             $body = self::canonicalJson($decoded);
         }
 
-        return hash('sha256', strtoupper($method)."\n".'/'.ltrim($path, '/')."\n".$body);
+        return hash(
+            'sha256',
+            strtoupper($method)."\n".'/'.ltrim($path, '/')."\n".self::canonicalQuery($query)."\n".$body,
+        );
+    }
+
+    /**
+     * A query string in a stable order, so `?a=1&b=2` and `?b=2&a=1` are one request.
+     *
+     * `parse_str` is what Laravel's own input resolution uses, so the canonical form is built
+     * from the same parse that decides what the request actually said.
+     */
+    private static function canonicalQuery(string $query): string
+    {
+        if (trim($query) === '') {
+            return '';
+        }
+
+        parse_str($query, $parameters);
+        ksort($parameters);
+
+        return (string) json_encode($parameters, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     }
 
     /**

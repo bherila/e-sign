@@ -29,6 +29,20 @@ final class EnvironmentProbe implements HealthProbe
             return ProbeResult::fail($this->name(), 'APP_KEY is not set. Run php artisan key:generate.');
         }
 
+        // Nothing else refuses this combination, and `.env.example` ships APP_DEBUG=true, so
+        // an operator who sets APP_ENV=production and forgets the other line gets stack
+        // traces, environment dumps, and SQL rendered to whoever caused the error — with no
+        // signal anywhere (docs/security/review-2026-09.md finding X-7). A failing readiness
+        // probe is the signal, and it fails rather than warns because for a product holding
+        // seal keys and signer evidence this is not a preference.
+        if (app()->environment('production') && (bool) config('app.debug')) {
+            return ProbeResult::fail(
+                $this->name(),
+                'APP_DEBUG is true with APP_ENV=production. Set APP_DEBUG=false: debug output renders '
+                .'stack traces, configuration, and SQL to whoever triggered the error.',
+            );
+        }
+
         if (! $envExists) {
             return ProbeResult::warn(
                 $this->name(),

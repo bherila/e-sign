@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Evidence\Retention\Console;
 
 use App\Domain\Evidence\Retention\BlobPurger;
+use App\Domain\Evidence\Retention\RestoreDrill;
 use App\Domain\Evidence\Retention\RetentionPolicy;
 use App\Domain\Identity\Audit\AuditActor;
 use Illuminate\Console\Command;
@@ -34,8 +35,16 @@ final class PurgeRetainedBlobsCommand extends Command
 
     protected $description = 'Remove the artifact objects of envelopes retention soft-deleted beyond the grace period';
 
-    public function handle(BlobPurger $purger, Repository $config): int
+    public function handle(BlobPurger $purger, Repository $config, RestoreDrill $drill): int
     {
+        // A restore drill is a full copy of production: the same envelopes, the same
+        // `deleted_at` values, the same held agreements. Running a destructive retention pass
+        // against one destroys whatever bucket the copied `.env` names, and `ConfirmableTrait`
+        // does not prompt because the drill runbook sets `APP_ENV=drill`
+        // (docs/security/review-2026-09.md finding B-8). Outbound paths already refuse on this
+        // flag at both ends; deletion is at least as irreversible as a mailshot.
+        $drill->assertNotDrilling('to purge retained blobs');
+
         $policy = RetentionPolicy::fromConfig($config);
         $planned = $purger->plan($policy);
 

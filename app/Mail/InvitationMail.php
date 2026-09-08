@@ -26,7 +26,7 @@ class InvitationMail extends OutboundMailable
 
     public function subjectLine(): string
     {
-        return sprintf('%s asked you to sign "%s"', $this->context->senderName, $this->title());
+        return sprintf('%s asked you to sign "%s"', $this->subjectPart($this->context->senderName), $this->title());
     }
 
     protected function markdownView(): string

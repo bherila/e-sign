@@ -119,6 +119,44 @@ class SignatureImageTest extends TestCase
         }
     }
 
+    /**
+     * docs/security/review-2026-09.md finding G-2.
+     *
+     * The byte ceiling used to be measured on the *decoded* bytes, so a caller could spend
+     * the whole 64 MB request body the shipped `public/.user.ini` allows and the process
+     * would run a regular expression, take a capture group, strip whitespace, and base64
+     * decode all of it before discovering the value was three hundred times its ceiling.
+     * The encoded length is now measured first, so an oversized submission costs one
+     * `strlen`.
+     */
+    public function test_an_oversized_payload_is_refused_before_it_is_decoded(): void
+    {
+        $images = $this->images(['max_signature_image_bytes' => 1_024]);
+
+        // Well-formed for the data-URL grammar, and vastly over the ceiling. If the guard
+        // were removed this would still be refused — one decode later, and after allocating
+        // several copies of it.
+        $submitted = 'data:image/png;base64,'.str_repeat('A', 1_024 * 8);
+
+        try {
+            $images->reencode($submitted);
+            $this->fail('Expected the submission to be refused.');
+        } catch (SignatureImageRejected $rejected) {
+            $this->assertSame('too_many_bytes', $rejected->reason);
+            $this->assertStringContainsString((string) strlen($submitted), $rejected->getMessage());
+        }
+    }
+
+    public function test_a_submission_at_the_ceiling_still_passes_the_encoded_length_guard(): void
+    {
+        // Base64 is 4 characters per 3 bytes, so the encoded form of a submission at the
+        // ceiling is about 1.34x the ceiling. The guard is at 2x; this pins that it cannot
+        // be tightened into rejecting a legitimate signature.
+        $stored = $this->images()->reencode(SyntheticImages::pngDataUrl(1_000, 400));
+
+        $this->assertStringStartsWith('data:image/png;base64,', $stored);
+    }
+
     public function test_the_output_always_fits_the_column_it_is_stored_in(): void
     {
         $stored = $this->images()->reencode(SyntheticImages::pngDataUrl(1_000, 400));

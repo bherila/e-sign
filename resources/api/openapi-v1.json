@@ -1848,6 +1848,7 @@
                   "invalid_snapshot",
                   "unknown_recipient",
                   "template_state",
+                  "too_many_requests",
                   "destination_refused",
                   "unknown_event_name",
                   "unsupported",

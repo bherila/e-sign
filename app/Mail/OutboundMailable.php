@@ -42,6 +42,17 @@ abstract class OutboundMailable extends Mailable
     /** Beyond this the subject is truncated; mail clients elide it anyway. */
     private const MAX_SUBJECT_TITLE_LENGTH = 120;
 
+    /**
+     * Ceiling for every *other* interpolated subject component.
+     *
+     * Shorter than the title's, because a name or a reference in a subject is context rather
+     * than content. Only the title used to be bounded, so a long workspace name — the sender
+     * name an invitation falls back to — made every subject overflow the `VARCHAR(255)`
+     * column and threw inside `MailOutbox::enqueue()`, silently stopping invitations for that
+     * workspace (docs/security/review-2026-09.md finding D-9).
+     */
+    private const MAX_SUBJECT_PART_LENGTH = 60;
+
     public function __construct(protected readonly MailContext $context)
     {
         $missing = $context->missing($this->requiredFields());
@@ -105,5 +116,11 @@ abstract class OutboundMailable extends Mailable
     protected function title(): string
     {
         return Str::limit($this->context->agreementTitle, self::MAX_SUBJECT_TITLE_LENGTH);
+    }
+
+    /** Any other context value going into a subject line. See MAX_SUBJECT_PART_LENGTH. */
+    protected function subjectPart(?string $value): string
+    {
+        return Str::limit((string) $value, self::MAX_SUBJECT_PART_LENGTH);
     }
 }

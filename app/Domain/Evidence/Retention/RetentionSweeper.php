@@ -235,6 +235,13 @@ final readonly class RetentionSweeper
         // after the grace period, so a soft-deleted envelope is still protecting the
         // revision it was built from (docs/BLOB_STORAGE.md, "soft-deleted rows still count").
         $candidates = $this->db->table('documents')
+            // A soft-deleted document is a reversible action, and hard-deleting its rows and
+            // bytes would make it permanent. The sibling abandoned-drafts query has always
+            // excluded them; this one did not, so the first "delete document" button in the
+            // UI would have turned an undo into destruction on the next sweep
+            // (docs/security/review-2026-09.md finding B-3; docs/BLOB_STORAGE.md, "reap blobs
+            // only once the row is hard-deleted").
+            ->whereNull('deleted_at')
             ->where('created_at', '<', $cutoff)
             ->whereNotExists(fn ($query) => $query->from('document_revisions')
                 ->whereColumn('document_revisions.document_id', 'documents.id')

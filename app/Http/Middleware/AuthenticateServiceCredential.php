@@ -10,6 +10,7 @@ use App\Domain\Identity\Credentials\ServiceCredential;
 use App\Domain\Identity\Models\Workspace;
 use Carbon\CarbonImmutable;
 use Closure;
+use Illuminate\Cache\RateLimiter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -72,10 +73,24 @@ class AuthenticateServiceCredential
      */
     public const LAST_USED_THROTTLE_SECONDS = 60;
 
-    public function __construct(private readonly CurrentPrincipal $principal) {}
+    /** Window the failure ceiling is counted over. */
+    public const FAILURE_WINDOW_SECONDS = 60;
+
+    private const FAILURE_LIMITER_PREFIX = 'esign:api:auth-failure:';
+
+    public function __construct(
+        private readonly CurrentPrincipal $principal,
+        private readonly RateLimiter $limiter,
+    ) {}
 
     public function handle(Request $request, Closure $next): Response
     {
+        $tooMany = $this->refuseWhenFailing($request);
+
+        if ($tooMany !== null) {
+            return $tooMany;
+        }
+
         $header = (string) $request->header('Authorization', '');
         $presented = $this->presentedSecret($header);
 
@@ -96,20 +111,27 @@ class AuthenticateServiceCredential
                 return $this->deny($request, 'Invalid API credential.', null, 'malformed_secret');
             }
 
+            // No eager load here, deliberately. Eager-loading the workspace makes a *known*
+            // prefix cost a second SELECT that an unknown one does not, which is a timing
+            // oracle for prefix existence on top of two answers that are otherwise
+            // byte-identical. The workspace is loaded below, after the secret has matched.
             $credential = ServiceCredential::query()
                 ->forPrefix($prefix)
-                ->with('workspace')
                 ->first();
+
+            if (! $credential instanceof ServiceCredential) {
+                // Pay for a verification that cannot happen, so "no such prefix" and "wrong
+                // secret" cost the same. Unknown prefix and wrong secret already return the
+                // same status, body, and headers; this is the rest of that promise.
+                CredentialSecret::burnVerification($presented);
+
+                return $this->deny($request, 'Invalid API credential.', $prefix, 'unknown_prefix');
+            }
 
             // Unknown prefix and wrong secret get the same answer. A caller that has not
             // proved it holds a secret learns nothing about which prefixes exist.
-            if (! $credential instanceof ServiceCredential || ! $credential->matches($presented)) {
-                return $this->deny(
-                    $request,
-                    'Invalid API credential.',
-                    $prefix,
-                    $credential === null ? 'unknown_prefix' : 'secret_mismatch',
-                );
+            if (! $credential->matches($presented)) {
+                return $this->deny($request, 'Invalid API credential.', $prefix, 'secret_mismatch');
             }
 
             // Past this point the caller has proved it holds the secret, so a specific
@@ -203,6 +225,49 @@ class AuthenticateServiceCredential
         }
     }
 
+    /**
+     * Refuse before a credential is even looked at, when this client address has spent its
+     * failure budget.
+     *
+     * Nothing else on `/api/v1` limits anything: `bootstrap/app.php` never calls
+     * `throttleApi()`, so the framework's `api` group carries no `throttle` middleware and
+     * no route file adds one. Without this, an unauthenticated caller can spend a query and
+     * a `Log::warning` line per request for as long as it likes
+     * (docs/security/review-2026-09.md finding A-1).
+     *
+     * Counted on failures only, so a working integration's throughput never depends on it
+     * and the ceiling can be low enough to be worth having. Deliberately not cleared on
+     * success: the window is a minute, a correct client produces no failures at all, and a
+     * reset-on-success rule would let anybody holding one valid credential clear the budget
+     * between guesses.
+     */
+    private function refuseWhenFailing(Request $request): ?JsonResponse
+    {
+        $max = $this->failureCeiling();
+
+        if ($max === 0 || ! $this->limiter->tooManyAttempts($this->failureKey($request), $max)) {
+            return null;
+        }
+
+        $retryAfter = $this->limiter->availableIn($this->failureKey($request));
+
+        return response()->json([
+            'message' => 'Too many failed authentication attempts. Try again shortly.',
+            'error' => 'too_many_requests',
+        ], Response::HTTP_TOO_MANY_REQUESTS, ['Retry-After' => (string) $retryAfter]);
+    }
+
+    /** Hashed, because a cache store is shared infrastructure and an address is personal. */
+    private function failureKey(Request $request): string
+    {
+        return self::FAILURE_LIMITER_PREFIX.hash('sha256', (string) $request->ip());
+    }
+
+    private function failureCeiling(): int
+    {
+        return max(0, (int) config('esign.api.auth_failures_per_minute', 30));
+    }
+
     private function deny(
         Request $request,
         string $message,
@@ -210,6 +275,10 @@ class AuthenticateServiceCredential
         string $reason,
         bool $log = true,
     ): JsonResponse {
+        if ($this->failureCeiling() > 0) {
+            $this->limiter->hit($this->failureKey($request), self::FAILURE_WINDOW_SECONDS);
+        }
+
         if ($log) {
             // Prefix and reason only. The presented secret is not in this array and must
             // never be added to it.

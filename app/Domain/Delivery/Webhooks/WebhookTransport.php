@@ -10,6 +10,7 @@ use App\Domain\Delivery\Outbound\ValidatedDestination;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use RuntimeException;
 
 /**
  * Puts one signed request on the wire, under the destination policy.
@@ -49,6 +50,8 @@ final class WebhookTransport
         int $timeout,
         int $connectTimeout,
     ): Response {
+        self::assertPinningIsAvailable();
+
         return Http::withHeaders($headers)
             ->withBody($body, 'application/json')
             ->timeout($timeout)
@@ -69,6 +72,8 @@ final class WebhookTransport
      */
     public static function transportOptions(ValidatedDestination $destination): array
     {
+        self::assertPinningIsAvailable();
+
         return [
             'allow_redirects' => false,
             'verify' => true,
@@ -79,5 +84,32 @@ final class WebhookTransport
                 CURLOPT_RESOLVE => [$destination->curlResolveEntry()],
             ],
         ];
+    }
+
+    /**
+     * Refuse to send at all unless the pinning above can actually take effect.
+     *
+     * Address pinning exists only as cURL handler options, and Guzzle applies the `curl` key
+     * only when the cURL handler is selected. Without `ext-curl` Guzzle silently falls back
+     * to its stream handler, which ignores that array entirely: `allow_redirects` and
+     * `verify` still hold, but `CURLOPT_RESOLVE` and `CURLOPT_PROTOCOLS_STR` vanish and the
+     * DNS-rebinding window between `validate()` and the connection reopens — with no error
+     * and no test failure (docs/security/review-2026-09.md finding D-3).
+     *
+     * `HttpTimestampAuthority` has always failed closed on the same condition. This is the
+     * same refusal for the same reason, and `composer.json` now requires the extension so a
+     * deployment finds out at install time rather than at delivery time.
+     *
+     * @throws RuntimeException
+     */
+    private static function assertPinningIsAvailable(): void
+    {
+        if (! function_exists('curl_init')) {
+            throw new RuntimeException(
+                'Webhook delivery requires ext-curl: without it the HTTP client cannot pin the '
+                .'connection to the addresses the destination policy validated, and delivery '
+                .'would proceed with an unvalidated DNS answer.',
+            );
+        }
     }
 }

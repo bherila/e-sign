@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Evidence\Retention\Console;
 
+use App\Domain\Evidence\Retention\RestoreDrill;
 use App\Domain\Evidence\Retention\RetentionPlan;
 use App\Domain\Evidence\Retention\RetentionPolicy;
 use App\Domain\Evidence\Retention\RetentionSweeper;
@@ -51,8 +52,16 @@ final class RunRetentionCommand extends Command
 
     protected $description = 'Apply the authentication-log, abandoned-draft, and executed-document retention policies';
 
-    public function handle(RetentionSweeper $sweeper, Repository $config): int
+    public function handle(RetentionSweeper $sweeper, Repository $config, RestoreDrill $drill): int
     {
+        // A restore drill is a full copy of production: the same envelopes, the same
+        // `deleted_at` values, the same held agreements. Running a destructive retention pass
+        // against one destroys whatever bucket the copied `.env` names, and `ConfirmableTrait`
+        // does not prompt because the drill runbook sets `APP_ENV=drill`
+        // (docs/security/review-2026-09.md finding B-8). Outbound paths already refuse on this
+        // flag at both ends; deletion is at least as irreversible as a mailshot.
+        $drill->assertNotDrilling('to run a retention pass');
+
         $policy = RetentionPolicy::fromConfig($config);
         $plan = $sweeper->plan($policy);
 

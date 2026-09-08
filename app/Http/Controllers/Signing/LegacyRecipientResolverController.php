@@ -100,6 +100,19 @@ class LegacyRecipientResolverController extends Controller
     /**
      * Step one: the caller states an address, and a code goes out only if it is the right
      * one.
+     *
+     * ## Why the two limiters are handled differently
+     *
+     * `legacy_resolve_per_ip` is counted on every call, matching address or not, so its 429
+     * says nothing about the address — it is a fact about the caller and is reported.
+     *
+     * The ceilings inside {@see OtpChallenges::issue()} are the opposite: they are only ever
+     * reached on the branch that runs when the address *was* right. Letting one of them
+     * surface as a 429 would turn this endpoint into the address oracle its whole design
+     * exists to prevent — six posts of a guessed address, and a 429 on the sixth means the
+     * guess was correct while a 200 means it was not. So a refusal from that branch is
+     * swallowed and the neutral page is returned. The ceiling is still enforced: no
+     * challenge is written and no mail is enqueued. Only the disclosure is withheld.
      */
     public function request(
         ResolveLegacyRecipientRequest $request,
@@ -111,13 +124,17 @@ class LegacyRecipientResolverController extends Controller
                 ClientFingerprint::of($request, $this->digest)->ipHash,
                 (int) $this->config->get('esign.signing.otp.per_ip_per_hour', 20),
             );
-
-            if ($this->addressMatches($recipient, $request->email()) && $this->isSignable($recipient)) {
-                $envelope = $recipient->envelope()->firstOrFail();
-                $this->otp->issue($recipient, $envelope, OtpPurpose::LegacyResolve, $request);
-            }
         } catch (GuestRateLimited $limited) {
             return $this->tooManyAttempts($limited);
+        }
+
+        if ($this->addressMatches($recipient, $request->email()) && $this->isSignable($recipient)) {
+            try {
+                $envelope = $recipient->envelope()->firstOrFail();
+                $this->otp->issue($recipient, $envelope, OtpPurpose::LegacyResolve, $request);
+            } catch (GuestRateLimited) {
+                // Deliberately silent. See the docblock.
+            }
         }
 
         // The same page, the same wording, and the same status whether a code went out or

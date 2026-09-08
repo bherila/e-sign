@@ -50,6 +50,14 @@ class IdempotencyKey extends Model
     {
         return [
             'response_status' => 'integer',
+            // Ciphertext at rest. A recorded 2xx body is whatever the endpoint returned, and
+            // two of them — creating and rotating a webhook endpoint — return the signing
+            // secret, which `docs/api/native-v1.md` promises is stored only as ciphertext and
+            // never returned again. This row was the copy that broke both promises
+            // (docs/security/review-2026-09.md finding A-2). The endpoint's own
+            // `secret_current`/`secret_previous` are `encrypted` casts for the same reason;
+            // this is parity, not a new mechanism.
+            'response_body' => 'encrypted',
             'created_at' => 'immutable_datetime',
             'completed_at' => 'immutable_datetime',
         ];

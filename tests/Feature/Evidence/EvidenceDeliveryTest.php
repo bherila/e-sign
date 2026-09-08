@@ -218,6 +218,81 @@ class EvidenceDeliveryTest extends TestCase
             ->assertExitCode(2);
     }
 
+    /**
+     * docs/security/review-2026-09.md finding B-2. Rule 3 of the command's own contract — "a
+     * minimum age" — was documentation, not code: `--older-than=0` put the cutoff at now, and
+     * `publish()` does not re-check that its uploaded objects still exist, so an object
+     * deleted between upload and publication produced a `completed` envelope with immutable
+     * artifact rows and no bytes.
+     */
+    public function test_the_pruner_refuses_an_age_short_enough_to_race_a_publication(): void
+    {
+        $this->artisan('esign:artifacts:prune-staging', ['--older-than' => '0'])
+            ->assertExitCode(2);
+
+        $this->artisan('esign:artifacts:prune-staging', ['--older-than' => '30s'])
+            ->assertExitCode(2);
+    }
+
+    /**
+     * docs/security/review-2026-09.md finding B-1, the sharp end of it.
+     *
+     * `artifacts.disk` is frozen at publication, and the pruner scoped "referenced" by the
+     * *current* `ESIGN_DOCUMENTS_DISK`. Rename the disk — the same-bytes-new-name migration
+     * docs/BLOB_STORAGE.md contemplates — and every published artifact looked unreferenced at
+     * once, legal hold included. This is the one evidence-deleting path in the application
+     * with no legal-hold consultation at all, so the set had to be right.
+     */
+    public function test_a_renamed_disk_does_not_make_every_published_artifact_look_unreferenced(): void
+    {
+        $scenario = $this->finalized();
+        $referenced = Artifact::query()->pluck('path')->all();
+        $this->assertNotEmpty($referenced);
+
+        // Age every published object past the threshold, so only the reference check stands
+        // between them and deletion.
+        foreach ($referenced as $path) {
+            touch(Storage::disk('documents')->path($path), time() - (30 * 86_400));
+        }
+
+        // The rows still say the old disk name; the configuration now says another.
+        Artifact::query()->getQuery()->update(['disk' => 'documents-legacy']);
+
+        $this->artisan('esign:artifacts:prune-staging', ['--apply' => true])->assertSuccessful();
+
+        foreach ($referenced as $path) {
+            $this->assertTrue(Storage::disk('documents')->exists($path), $path.' was reclaimed.');
+        }
+    }
+
+    /**
+     * The abort docs/BLOB_STORAGE.md asks for, as a second line behind the fix above: when
+     * the referenced set stops working for any reason, everything it protected looks
+     * unreferenced at once, and the ratio is what says so.
+     */
+    public function test_the_pruner_refuses_when_an_implausible_share_looks_unreferenced(): void
+    {
+        $scenario = $this->finalized();
+        $referenced = Artifact::query()->pluck('path')->all();
+
+        foreach ($referenced as $path) {
+            touch(Storage::disk('documents')->path($path), time() - (30 * 86_400));
+        }
+
+        // Whatever the cause — a truncated table, a migration halfway through — the shape is
+        // the same: nothing is referenced any more. (`artifacts` refuses a normal delete, so
+        // the row set is cleared through the query builder.)
+        Artifact::query()->getQuery()->delete();
+
+        $this->artisan('esign:artifacts:prune-staging', ['--apply' => true])
+            ->expectsOutputToContain('Refusing')
+            ->assertFailed();
+
+        foreach ($referenced as $path) {
+            $this->assertTrue(Storage::disk('documents')->exists($path), $path.' was reclaimed.');
+        }
+    }
+
     // ---------------------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------------------

@@ -147,6 +147,32 @@ class GuestSigningAcceptanceTest extends TestCase
         $this->assertSame(0, RecipientAttestation::query()->count());
     }
 
+    /**
+     * docs/security/review-2026-09.md finding S-3.
+     *
+     * The state machine compares the claimed consent version against the envelope's snapshot,
+     * and both sides of that comparison are the snapshot — so it catches a lying client and
+     * nothing else. When the notice *on disk* is a different version from the one the envelope
+     * records, the signer is shown wording the recorded version does not name, and the
+     * attestation says they read the recorded one. The page warned about that and let them
+     * through. It does not any more, at both ends: the button is disabled, and this is the
+     * server refusing it regardless.
+     */
+    public function test_an_acceptance_is_refused_when_the_notice_on_disk_is_a_different_version(): void
+    {
+        $scenario = GuestSigningScenario::sent();
+        $cookie = $this->startSigningSession($scenario);
+        $reviewed = $this->fillRequiredFields($scenario, $cookie);
+
+        // The deployment has moved its notice on; the envelope still records the old version.
+        config()->set('esign.signing.consent_policy_version', '2027-01-01');
+
+        $response = $this->accept($scenario, $cookie, $reviewed);
+
+        $response->assertSessionHasErrors('consent_version');
+        $this->assertSame(0, RecipientAttestation::query()->count());
+    }
+
     public function test_signing_is_refused_while_a_required_signature_box_is_empty(): void
     {
         $scenario = GuestSigningScenario::sent();

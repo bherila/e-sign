@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Documents;
 
 use App\Domain\Preparation\Documents\DocumentBlobStore;
+use App\Domain\Preparation\Documents\DocumentStatus;
 use App\Domain\Preparation\Documents\DocumentStorageException;
 use App\Domain\Preparation\Documents\Models\DocumentRevision;
 use App\Http\Controllers\Controller;
@@ -38,8 +39,27 @@ class DocumentRevisionDownloadController extends Controller
         return $this->stream($request, $blobs, HeaderUtils::DISPOSITION_ATTACHMENT);
     }
 
+    /**
+     * Inline, for the locally served PDF.js viewer — but never for a document preflight
+     * rejected.
+     *
+     * `DocumentIntake` stores the original *before* the accept/reject decision, deliberately,
+     * so a rejected upload can be examined afterwards. The 422 that refuses it hands the
+     * uploader the document and revision ids, so they get the exact inline URL for the bytes
+     * policy has just called unsafe — JavaScript, XFA, a launch action, an embedded file —
+     * and any workspace member with `View` renders them inline from this application's own
+     * origin (docs/security/review-2026-09.md finding U-5).
+     *
+     * Forensics does not need an inline render. The attachment route still serves the bytes,
+     * which is what an investigator wants anyway: a file to open deliberately, in a tool they
+     * chose.
+     */
     public function view(DownloadRevisionRequest $request, DocumentBlobStore $blobs): StreamedResponse
     {
+        if ($request->document()->status === DocumentStatus::PreflightFailed) {
+            abort(404);
+        }
+
         return $this->stream($request, $blobs, HeaderUtils::DISPOSITION_INLINE);
     }
 
