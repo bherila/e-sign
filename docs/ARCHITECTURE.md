@@ -16,6 +16,11 @@ controllers translate shapes, they never hold state or rules.
 | `Delivery` | mail outbox, webhook outbox, retries, attempt logs, operational health |
 | `Integration` | native API, Firma facade and capability matrix, import and migration adapters |
 
+`Identity` also holds the append-only `esign_audit_events` store, because provisioning is
+the first thing that happens on a new instance and it happens before there is anything to
+sign. `Evidence` still owns the envelope and artifact audit trail and writes into the same
+table. Authentication events stay in auth-laravel's `auth_audit_log`.
+
 Suggested ports (interfaces) with swappable implementations: `PdfPreflight`, `PdfTextLocator`,
 `PdfAssembler`, `PdfSealer`, `ArtifactValidator`, `TimestampAuthority`. Cryptography stays in
 established libraries. No bespoke CMS/ASN.1 or PDF signature byte-range code.
