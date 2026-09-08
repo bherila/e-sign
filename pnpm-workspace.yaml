@@ -2,6 +2,8 @@ overrides:
   glob: ">=10.5.0"
 
 # Dependencies whose install scripts may run. Everything else is blocked (pnpm default).
+# esbuild ships prebuilt binaries for vite 8; unrs-resolver falls back to its JS build.
 allowBuilds:
-  esbuild: true
-  unrs-resolver: true
+  spotlight-noindex: true
+  esbuild: false
+  unrs-resolver: false
