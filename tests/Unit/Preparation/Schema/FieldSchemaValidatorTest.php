@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Preparation\Schema;
 
+use App\Domain\Preparation\Schema\AnchorPlacement;
 use App\Domain\Preparation\Schema\CoordinateSpaceDeclaration;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\FieldSchemaValidator;
@@ -245,6 +246,69 @@ class FieldSchemaValidatorTest extends TestCase
         ]);
 
         $this->assertTrue((new FieldSchemaValidator)->validate($document)->isValid());
+    }
+
+    /**
+     * The extents are exact; only the corner has slack. The asymmetry is the point.
+     *
+     * A cross-check measures one thing: how far the anchor resolved from where the document says
+     * the field is. That disagreement is *allowed*, up to the stated tolerance, which is why the
+     * corner is compared with slack. An extent is not part of the disagreement — the resolver
+     * sizes its result from the field, so the only correct width is the field's own — and
+     * comparing it with the same epsilon let a whole canonical unit through: a 36 pt field
+     * accepted a 36.001 pt receipt, because `abs(36 - 36.001)` lands a hair *below* 0.001 in a
+     * double while `abs(170 - 170.001)` lands a hair above. Which errors a predicate admits
+     * should not depend on where the value sits in a float.
+     */
+    public function test_a_cross_check_receipt_one_canonical_unit_wider_is_refused(): void
+    {
+        $document = FieldSchemaFixture::asArray();
+        $document['fields'][5]['rect']['width'] = 36;
+        $document['fields'][5]['anchor']['placement'] = 'cross_check';
+        $document['fields'][5]['anchor']['tolerance'] = 1;
+        $document['fields'][5]['anchor']['resolved'] = self::receipt([
+            'rect' => ['x' => 330, 'y' => 650, 'width' => 36.001, 'height' => 36],
+        ]);
+
+        $result = (new FieldSchemaValidator)->validate($document);
+
+        $this->assertTrue($result->hasCode(ValidationCode::AnchorCrossCheckFailed));
+        $this->assertNotEmpty($result->at('/fields/5/anchor/resolved/rect/width'));
+    }
+
+    /**
+     * A tolerance is a distance on one page, and the bound keeps the canonical form total.
+     *
+     * Not because 200 inches of slack would be an unreasonable cross-check — it would, but that
+     * is not the reason. Above roughly 1e20 PHP and JavaScript spell the same number differently,
+     * so a document holding one canonicalises to two different digests, and `field_schema_sha256`
+     * is what every attestation binds. `anchor.tolerance` is the first number in this schema with
+     * no page behind it, which is what made that range reachable at all.
+     */
+    public function test_a_tolerance_beyond_the_largest_pdf_page_is_refused(): void
+    {
+        $document = FieldSchemaFixture::asArray();
+        $document['fields'][5]['anchor']['placement'] = 'cross_check';
+        $document['fields'][5]['anchor']['tolerance'] = AnchorPlacement::MAX_TOLERANCE + 1;
+
+        $errors = (new FieldSchemaValidator)->validate($document)->at('/fields/5/anchor/tolerance');
+
+        $this->assertCount(1, $errors);
+        $this->assertSame(ValidationCode::InvalidFormat, $errors[0]->code);
+    }
+
+    /** And the bound itself is accepted, and canonicalises without an exponent in either language. */
+    public function test_the_largest_allowed_tolerance_canonicalises_as_a_plain_integer(): void
+    {
+        $document = FieldSchemaFixture::asArray();
+        $document['fields'][5]['anchor']['placement'] = 'cross_check';
+        $document['fields'][5]['anchor']['tolerance'] = AnchorPlacement::MAX_TOLERANCE;
+
+        $this->assertTrue((new FieldSchemaValidator)->validate($document)->isValid());
+        $this->assertStringContainsString(
+            '"tolerance":14400',
+            FieldSchemaDocument::fromArray($document)->canonicalJson(),
+        );
     }
 
     public function test_a_cross_check_receipt_without_a_tolerance_has_nothing_to_prove(): void

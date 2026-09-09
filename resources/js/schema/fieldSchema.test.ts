@@ -1,5 +1,6 @@
 import fixtureJson from "../../../tests/Fixtures/schema/nda-two-signers.json";
 import {
+  ANCHOR_TOLERANCE_MAX,
   CANONICAL_DECIMALS,
   FIELD_SCHEMA_VERSION,
   FIELD_TYPES,
@@ -152,23 +153,23 @@ describe("serializeFieldSchema", () => {
   });
 
   /**
-   * A finite number stays finite through canonicalisation, however it was written.
+   * The largest tolerance the schema allows still canonicalises to bytes PHP would write.
    *
-   * `tolerance` is the first schema number with no page to bound it, so exponential notation is
-   * reachable for the first time. Scaling by 1000 to round it overflows `1e308` to `Infinity`,
-   * which `JSON.stringify` writes as `null` — so a document the validator accepted would be
-   * exported as one its own importer refuses, and the two projections would disagree about the
-   * same input: PHP's `round()` returns `1e308` unchanged.
+   * `tolerance` is the first number in this schema with no page behind it, which is what made the
+   * exponential range reachable at all — and in that range the canonical form is undefined,
+   * because PHP writes `1.0e+20` where this runtime writes `100000000000000000000`. The schema
+   * bounds the property rather than trying to agree on a spelling, so the top of the range is a
+   * plain integer here and a plain integer there.
    */
-  it("keeps a finite tolerance finite, however large", () => {
+  it("canonicalises the largest allowed tolerance as a plain integer", () => {
     const raw = JSON.parse(JSON.stringify(fixtureJson)) as Record<string, any>;
     raw.fields[5].anchor.placement = "cross_check";
-    raw.fields[5].anchor.tolerance = 1e308;
+    raw.fields[5].anchor.tolerance = ANCHOR_TOLERANCE_MAX;
 
     const json = serializeFieldSchema(parseFieldSchema(raw));
 
-    expect(json).toContain('"tolerance":1e+308');
-    expect(json).not.toContain('"tolerance":null');
+    expect(json).toContain(`"tolerance":${ANCHOR_TOLERANCE_MAX}`);
+    expect(json).not.toContain("e+");
     expect(validateFieldSchema(JSON.parse(json))).toEqual([]);
   });
 
@@ -734,6 +735,32 @@ describe("validateFieldSchema", () => {
       },
       "anchor_cross_check_failed",
       "/fields/5/anchor/resolved/rect/x",
+    ],
+    [
+      "a tolerance beyond the largest page a PDF can have",
+      (raw) => {
+        raw.fields[5].anchor.placement = "cross_check";
+        raw.fields[5].anchor.tolerance = ANCHOR_TOLERANCE_MAX + 1;
+      },
+      "invalid_format",
+      "/fields/5/anchor/tolerance",
+    ],
+    [
+      "a cross-check receipt one canonical unit wider than its field",
+      (raw) => {
+        raw.fields[5].rect.width = 36;
+        raw.fields[5].anchor.placement = "cross_check";
+        raw.fields[5].anchor.tolerance = 1;
+        raw.fields[5].anchor.resolved = {
+          document_sha256: "d".repeat(64),
+          page: 2,
+          occurrence_index: 1,
+          anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
+          rect: { x: 330, y: 650, width: 36.001, height: 36 },
+        };
+      },
+      "anchor_cross_check_failed",
+      "/fields/5/anchor/resolved/rect/width",
     ],
     [
       "a recipient email that is not an address",

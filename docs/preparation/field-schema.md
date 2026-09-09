@@ -139,7 +139,7 @@ optional anchor is genuinely absent — arrives with the resolver and is documen
 | `origin` | no, default `top_left` | corner of the matched text the offset is measured from; one of `top_left`, `top_right`, `bottom_left`, `bottom_right` |
 | `offset` | no | `dx`, `dy` in the declared unit, `dy` downwards, either may be negative |
 | `required` | no, default `true` | false says the text may legitimately be absent; only accepted on a field that is itself optional and whose placement is `replace` |
-| `tolerance` | no | how far, in points, a `cross_check` anchor may resolve from the declared rect; meaningless with `replace` |
+| `tolerance` | no | how far, in points, a `cross_check` anchor may resolve from the declared rect; at most 14400 (see [why every number is bounded](#why-every-number-in-this-schema-is-bounded)); meaningless with `replace` |
 | `resolved` | written by the service | the receipt: the digest of the bytes the text was found in, the page, the occurrence taken, and both rectangles. `anchor_rect` is a `measured_rect` — an observation of where the text was, which may overhang the page — while `rect` is a placement and, in `replace` mode, must be the field's own |
 
 `occurrence` is **required and has no default**: the resolver refuses a "first match wins"
@@ -220,6 +220,34 @@ validates (defaults omitted, `60.0` for `60`, coordinates finer than a thousandt
 canonicalised on first import, and every round trip after that is byte-identical. The property
 tests generate a thousand documents on each side and assert exactly that, with strict identity
 rather than a float tolerance.
+
+### Why every number in this schema is bounded
+
+Identical bytes on both sides is a claim about *every* value the importer accepts, and it stops
+being true at the top of the double range. Above roughly 1e20, PHP's `json_encode()` and
+JavaScript's `JSON.stringify()` spell the same number differently — `1.0e+20` against
+`100000000000000000000` — so a document containing one would canonicalise to two different byte
+strings and therefore two different `field_schema_sha256`, which is the digest every attestation
+binds. That is not a rounding disagreement to be tightened away; in that range **the canonical
+form is undefined**, and no amount of care in the rounding helper changes it.
+
+Every number this schema had until 1.1 was a coordinate, and a coordinate describes a position on
+a page, so the values that break canonicalisation never arose in a document anyone would write.
+`anchor.tolerance` was the first number with no page behind it — a distance, not a position — and
+it made the range reachable for the first time.
+
+The schema's answer is to **bound the property rather than to canonicalise across encoders**. A
+tolerance is a distance between two positions on one page, so the bound is PDF's own maximum page
+side, 14400 pt (200 inches): the largest distance that can mean anything here, and five orders of
+magnitude below where the encoders start to disagree. The alternative — defining a shared
+number-to-string encoding — would mean owning a float formatter in two languages forever, for
+values no document will ever hold.
+
+**The rule for the next unbounded property.** A canonicaliser that reaches its result by scaling
+has a range where it stops being total, and a schema whose numbers were all bounded never
+exercised it. When adding a number that is not a coordinate, give it a bound with a stated reason,
+and check the canonical form at the extremes of the *type* rather than the extremes of the
+documents you happen to have.
 
 ## Rejection rules
 

@@ -1087,6 +1087,24 @@ final class FieldSchemaValidator
             return;
         }
 
+        // Bounded so the canonical form stays total, not because a larger number is unreasonable:
+        // above roughly 1e20 PHP and JavaScript spell the same value differently
+        // (`1.0e+20` against `100000000000000000000`), so the two projections would canonicalise
+        // one document to two different digests. See AnchorPlacement::MAX_TOLERANCE.
+        if ((float) $tolerance > AnchorPlacement::MAX_TOLERANCE) {
+            $errors[] = new ValidationError(
+                $path,
+                ValidationCode::InvalidFormat,
+                'anchor.tolerance is a distance on one page and must be at most '
+                    .$this->describeNumber(AnchorPlacement::MAX_TOLERANCE).' pt, PDF\'s largest page side; got '
+                    .$this->describeNumber((float) $tolerance).'. The bound keeps the canonical form total: past '
+                    .'about 1e20 this schema\'s two implementations spell the same number differently, and a '
+                    .'document with two spellings has two digests.',
+            );
+
+            return;
+        }
+
         if ($mode === AnchorPlacementMode::Replace) {
             $errors[] = new ValidationError(
                 $path,
@@ -1287,6 +1305,8 @@ final class FieldSchemaValidator
     ): void {
         // Canonical values, because canonical values are what will be stored: comparing what the
         // caller wrote would accept a document that stops importing the moment it is written down.
+        // And exact, because in `replace` mode the receipt's rectangle *is* the field's — there is
+        // no disagreement a tolerance could be measuring, in any of the four numbers.
         foreach (self::RECT_REQUIRED as $name) {
             $pair = $this->canonicalPair($declared[$name] ?? null, $recorded[$name] ?? null);
 
@@ -1294,7 +1314,7 @@ final class FieldSchemaValidator
                 return;
             }
 
-            if (abs($pair[0] - $pair[1]) > CanonicalNumber::TOLERANCE) {
+            if ($pair[0] !== $pair[1]) {
                 $errors[] = new ValidationError(
                     $path.'/rect/'.$name,
                     ValidationCode::InvalidFormat,
@@ -1366,7 +1386,13 @@ final class FieldSchemaValidator
                 return;
             }
 
-            if (abs($pair[0] - $pair[1]) > CanonicalNumber::TOLERANCE) {
+            // Exact, not within a tolerance. The corner is compared with slack because the anchor
+            // is *allowed* to disagree with the declared position by up to the stated amount —
+            // that disagreement is the thing being measured. An extent has no such freedom: the
+            // resolver sizes its result from the field, so the only correct answer is the field's
+            // own number, and a predicate sitting on the boundary it tests would let a whole
+            // canonical unit through or not depending on where the value lands in a float.
+            if ($pair[0] !== $pair[1]) {
                 $errors[] = new ValidationError(
                     $path.'/rect/'.$name,
                     ValidationCode::AnchorCrossCheckFailed,

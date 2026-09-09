@@ -43,6 +43,25 @@ final readonly class AnchorPlacement
     /** `occurrence` value meaning "the text must occur exactly once in scope". */
     public const OCCURRENCE_SOLE = 'sole';
 
+    /**
+     * Largest `tolerance` a document may state, in points: PDF's own maximum page side.
+     *
+     * The bound is not there because a larger number would be unreasonable — though 200 inches of
+     * slack on a cross-check is not a check. It is there because **the canonical form has to be
+     * total**, and above roughly 1e20 it is not: PHP's `json_encode()` writes such a value as
+     * `1.0e+20` and JavaScript's `JSON.stringify()` writes it as `100000000000000000000`, so the
+     * two projections would produce different canonical bytes for the same document, and
+     * therefore different `field_schema_sha256` — the digest every attestation binds.
+     *
+     * A tolerance is a distance between two positions on one page, so PDF's 14400 pt (200 inch)
+     * maximum page side is the largest distance that can mean anything here, and it is five
+     * orders of magnitude below where the encoders start to disagree. Bounding the property was
+     * chosen over trying to canonicalise across encoders because the second has no bottom: it
+     * would mean owning a number-to-string routine in two languages forever
+     * (docs/preparation/field-schema.md).
+     */
+    public const MAX_TOLERANCE = 14400.0;
+
     /** Origin corner assumed when a document does not declare one. */
     public const DEFAULT_ORIGIN = AnchorOrigin::TopLeft;
 
@@ -99,6 +118,12 @@ final readonly class AnchorPlacement
         if ($tolerance !== null) {
             if (! is_finite($tolerance) || $tolerance < 0.0) {
                 throw new InvalidArgumentException('anchor.tolerance must be a finite, non-negative number of points.');
+            }
+
+            if ($tolerance > self::MAX_TOLERANCE) {
+                throw new InvalidArgumentException(
+                    'anchor.tolerance must be at most '.self::MAX_TOLERANCE.' pt, PDF\'s largest page side.',
+                );
             }
 
             if ($this->mode() !== AnchorPlacementMode::CrossCheck) {

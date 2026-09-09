@@ -67,6 +67,19 @@ export type CoordinateSpace = typeof NATIVE_COORDINATE_SPACE;
 /** Decimal places retained on a coordinate; 0.001 pt is far below what a drag can express. */
 export const CANONICAL_DECIMALS = 3;
 
+/**
+ * Largest `anchor.tolerance` a document may state, in points: PDF's own maximum page side.
+ *
+ * Mirrors `AnchorPlacement::MAX_TOLERANCE`. The bound exists to keep the canonical form **total**,
+ * not because 200 inches of slack would be an unreasonable cross-check. Above roughly 1e20 this
+ * runtime writes `100000000000000000000` where PHP writes `1.0e+20`, so the same document would
+ * canonicalise to two different digests — and `field_schema_sha256` is what every attestation
+ * binds. A tolerance is a distance between two positions on one page, so PDF's 14400 pt limit is
+ * the largest value that can mean anything, and it sits five orders of magnitude below the
+ * disagreement.
+ */
+export const ANCHOR_TOLERANCE_MAX = 14400;
+
 /** Slack when comparing a rounded coordinate against a page edge: one unit in the last place. */
 export const CANONICAL_TOLERANCE = 0.001;
 
@@ -1378,6 +1391,24 @@ function checkAnchorTolerance(
     return;
   }
 
+  // Bounded so the canonical form stays total, not because a larger number is unreasonable: past
+  // roughly 1e20 this runtime and PHP spell the same value differently (100000000000000000000
+  // against 1.0e+20), so one document would canonicalise to two different digests.
+  if (tolerance > ANCHOR_TOLERANCE_MAX) {
+    issues.push(
+      issue(
+        path,
+        "invalid_format",
+        `anchor.tolerance is a distance on one page and must be at most ${ANCHOR_TOLERANCE_MAX} pt, PDF's ` +
+          `largest page side; got ${tolerance}. The bound keeps the canonical form total: past about 1e20 this ` +
+          "schema's two implementations spell the same number differently, and a document with two spellings " +
+          "has two digests.",
+      ),
+    );
+
+    return;
+  }
+
   if (placement === "replace") {
     issues.push(
       issue(
@@ -1533,14 +1564,16 @@ function checkResolvedAnchor(
     // Compared canonically, because canonical values are what will be stored: comparing what the
     // caller wrote would accept a document that stops importing the moment it is written down.
     for (const name of RECT_REQUIRED) {
-      const declared = roundCoordinate(fieldRect[name] as number);
-      const actual = roundCoordinate(recordedRect[name] as number);
-
       if (typeof fieldRect[name] !== "number" || typeof recordedRect[name] !== "number") {
         return;
       }
 
-      if (Math.abs(declared - actual) > CANONICAL_TOLERANCE) {
+      const declared = roundCoordinate(fieldRect[name] as number);
+      const actual = roundCoordinate(recordedRect[name] as number);
+
+      // Exact: in `replace` mode the receipt's rectangle *is* the field's, so there is no
+      // disagreement a tolerance could be measuring in any of the four numbers.
+      if (declared !== actual) {
         issues.push(
           issue(
             `${path}/rect/${name}`,
@@ -1584,7 +1617,11 @@ function checkResolvedAnchor(
     const declared = roundCoordinate(fieldRect[name] as number);
     const actual = roundCoordinate(recordedRect[name] as number);
 
-    if (Math.abs(declared - actual) > CANONICAL_TOLERANCE) {
+    // Exact, not within a tolerance. The corner gets slack because the anchor is *allowed* to
+    // disagree with the declared position by up to the stated amount — that disagreement is what
+    // is being measured. An extent has no such freedom: the resolver sizes its result from the
+    // field, so the only correct answer is the field's own number.
+    if (declared !== actual) {
       issues.push(
         issue(
           `${path}/rect/${name}`,

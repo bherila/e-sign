@@ -348,9 +348,10 @@
           "default": true
         },
         "tolerance": {
-          "description": "How far, in points, a \"cross_check\" anchor may resolve from the declared rect before the disagreement is an error. Omitted takes the deployment default (esign.preparation.anchor_cross_check_tolerance). Meaningless, and rejected, with placement \"replace\".",
+          "description": "How far, in points, a \"cross_check\" anchor may resolve from the declared rect before the disagreement is an error. Omitted takes the deployment default (esign.preparation.anchor_cross_check_tolerance). Meaningless, and rejected, with placement \"replace\". Bounded by PDF's largest page side, 14400 pt: a tolerance is a distance between two positions on one page, so nothing beyond that can mean anything here. The bound is there to keep the canonical form total rather than because a larger number would be unreasonable \u2014 above roughly 1e20 this schema's two implementations spell the same value differently (PHP writes 1.0e+20 where JavaScript writes 100000000000000000000), so such a document would canonicalise to two different digests, and field_schema_sha256 is what every attestation binds.",
           "type": "number",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 14400
         },
         "resolved": {
           "$ref": "#/$defs/resolved_anchor"
