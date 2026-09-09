@@ -28,7 +28,7 @@ use InvalidArgumentException;
  *
  * Every component is bounded in magnitude by {@see self::MAX_MAGNITUDE}, and for the reason
  * `AnchorPlacement::MAX_TOLERANCE` is bounded rather than any reason about measurement: above
- * roughly 1e20, PHP and JavaScript spell the same number differently, so a document holding one
+ * roughly 1e17, PHP and JavaScript spell the same number differently, so a document holding one
  * canonicalises to two different digests. A measurement of text on a page cannot exceed the
  * largest page by more than a page, so the bound costs nothing real
  * (docs/preparation/field-schema.md, "Why every number in this schema is bounded").

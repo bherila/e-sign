@@ -11,9 +11,17 @@
         "code": "invalid_format",
         "message": "anchor.occurrence must be \"sole\" or a 1-based index; got \"not-a-number\". \"all\" places one box per match, which a single field cannot represent: use one field per box."
     },
+    "fields[].anchor.offset.dx / precision": {
+        "code": "coordinate_too_precise",
+        "message": "anchor.offset.dx has more than 3 decimal places. Documents carry canonical numbers, and this one is refused rather than rounded: rounding is a transformation, and two implementations that both transform can disagree about the result — which would be a disagreement about the document's digest. Round it yourself and send the result."
+    },
     "fields[].anchor.offset.dx / type": {
         "code": "invalid_type",
         "message": "anchor.offset.dx must be a number."
+    },
+    "fields[].anchor.offset.dy / precision": {
+        "code": "coordinate_too_precise",
+        "message": "anchor.offset.dy has more than 3 decimal places. Documents carry canonical numbers, and this one is refused rather than rounded: rounding is a transformation, and two implementations that both transform can disagree about the result — which would be a disagreement about the document's digest. Round it yourself and send the result."
     },
     "fields[].anchor.offset.dy / type": {
         "code": "invalid_type",
@@ -21,11 +29,15 @@
     },
     "fields[].anchor.resolved.anchor_rect.height / maximum": {
         "code": "invalid_format",
-        "message": "rect.height must be within 14400 pt of the origin, PDF's largest page side; got 14400.001. The bound keeps the canonical form total: past about 1e20 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
+        "message": "rect.height must be within 14400 pt of the origin, PDF's largest page side; got 14400.001. The bound keeps the canonical form total: past about 1e17 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
     },
     "fields[].anchor.resolved.anchor_rect.height / minimum": {
         "code": "dimension_not_positive",
         "message": "rect.height must not be negative; got -0.001."
+    },
+    "fields[].anchor.resolved.anchor_rect.height / precision": {
+        "code": "coordinate_too_precise",
+        "message": "rect.height has more than 3 decimal places. Documents carry canonical numbers, and this one is refused rather than rounded: rounding is a transformation, and two implementations that both transform can disagree about the result — which would be a disagreement about the document's digest. Round it yourself and send the result."
     },
     "fields[].anchor.resolved.anchor_rect.height / type": {
         "code": "invalid_type",
@@ -33,11 +45,15 @@
     },
     "fields[].anchor.resolved.anchor_rect.width / maximum": {
         "code": "invalid_format",
-        "message": "rect.width must be within 14400 pt of the origin, PDF's largest page side; got 14400.001. The bound keeps the canonical form total: past about 1e20 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
+        "message": "rect.width must be within 14400 pt of the origin, PDF's largest page side; got 14400.001. The bound keeps the canonical form total: past about 1e17 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
     },
     "fields[].anchor.resolved.anchor_rect.width / minimum": {
         "code": "dimension_not_positive",
         "message": "rect.width must not be negative; got -0.001."
+    },
+    "fields[].anchor.resolved.anchor_rect.width / precision": {
+        "code": "coordinate_too_precise",
+        "message": "rect.width has more than 3 decimal places. Documents carry canonical numbers, and this one is refused rather than rounded: rounding is a transformation, and two implementations that both transform can disagree about the result — which would be a disagreement about the document's digest. Round it yourself and send the result."
     },
     "fields[].anchor.resolved.anchor_rect.width / type": {
         "code": "invalid_type",
@@ -45,11 +61,15 @@
     },
     "fields[].anchor.resolved.anchor_rect.x / maximum": {
         "code": "invalid_format",
-        "message": "rect.x must be within 14400 pt of the origin, PDF's largest page side; got 14400.001. The bound keeps the canonical form total: past about 1e20 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
+        "message": "rect.x must be within 14400 pt of the origin, PDF's largest page side; got 14400.001. The bound keeps the canonical form total: past about 1e17 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
     },
     "fields[].anchor.resolved.anchor_rect.x / minimum": {
         "code": "invalid_format",
-        "message": "rect.x must be within 14400 pt of the origin, PDF's largest page side; got -14400.001. The bound keeps the canonical form total: past about 1e20 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
+        "message": "rect.x must be within 14400 pt of the origin, PDF's largest page side; got -14400.001. The bound keeps the canonical form total: past about 1e17 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
+    },
+    "fields[].anchor.resolved.anchor_rect.x / precision": {
+        "code": "coordinate_too_precise",
+        "message": "rect.x has more than 3 decimal places. Documents carry canonical numbers, and this one is refused rather than rounded: rounding is a transformation, and two implementations that both transform can disagree about the result — which would be a disagreement about the document's digest. Round it yourself and send the result."
     },
     "fields[].anchor.resolved.anchor_rect.x / type": {
         "code": "invalid_type",
@@ -57,11 +77,15 @@
     },
     "fields[].anchor.resolved.anchor_rect.y / maximum": {
         "code": "invalid_format",
-        "message": "rect.y must be within 14400 pt of the origin, PDF's largest page side; got 14400.001. The bound keeps the canonical form total: past about 1e20 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
+        "message": "rect.y must be within 14400 pt of the origin, PDF's largest page side; got 14400.001. The bound keeps the canonical form total: past about 1e17 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
     },
     "fields[].anchor.resolved.anchor_rect.y / minimum": {
         "code": "invalid_format",
-        "message": "rect.y must be within 14400 pt of the origin, PDF's largest page side; got -14400.001. The bound keeps the canonical form total: past about 1e20 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
+        "message": "rect.y must be within 14400 pt of the origin, PDF's largest page side; got -14400.001. The bound keeps the canonical form total: past about 1e17 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
+    },
+    "fields[].anchor.resolved.anchor_rect.y / precision": {
+        "code": "coordinate_too_precise",
+        "message": "rect.y has more than 3 decimal places. Documents carry canonical numbers, and this one is refused rather than rounded: rounding is a transformation, and two implementations that both transform can disagree about the result — which would be a disagreement about the document's digest. Round it yourself and send the result."
     },
     "fields[].anchor.resolved.anchor_rect.y / type": {
         "code": "invalid_type",
@@ -97,7 +121,11 @@
     },
     "fields[].anchor.resolved.rect.height / maximum": {
         "code": "invalid_format",
-        "message": "rect.height must be within 14400 pt of the origin, PDF's largest page side; got 14400.001. The bound keeps the canonical form total: past about 1e20 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
+        "message": "rect.height must be within 14400 pt of the origin, PDF's largest page side; got 14400.001. The bound keeps the canonical form total: past about 1e17 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
+    },
+    "fields[].anchor.resolved.rect.height / precision": {
+        "code": "coordinate_too_precise",
+        "message": "rect.height has more than 3 decimal places. Documents carry canonical numbers, and this one is refused rather than rounded: rounding is a transformation, and two implementations that both transform can disagree about the result — which would be a disagreement about the document's digest. Round it yourself and send the result."
     },
     "fields[].anchor.resolved.rect.height / type": {
         "code": "invalid_type",
@@ -109,7 +137,11 @@
     },
     "fields[].anchor.resolved.rect.width / maximum": {
         "code": "invalid_format",
-        "message": "rect.width must be within 14400 pt of the origin, PDF's largest page side; got 14400.001. The bound keeps the canonical form total: past about 1e20 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
+        "message": "rect.width must be within 14400 pt of the origin, PDF's largest page side; got 14400.001. The bound keeps the canonical form total: past about 1e17 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
+    },
+    "fields[].anchor.resolved.rect.width / precision": {
+        "code": "coordinate_too_precise",
+        "message": "rect.width has more than 3 decimal places. Documents carry canonical numbers, and this one is refused rather than rounded: rounding is a transformation, and two implementations that both transform can disagree about the result — which would be a disagreement about the document's digest. Round it yourself and send the result."
     },
     "fields[].anchor.resolved.rect.width / type": {
         "code": "invalid_type",
@@ -117,11 +149,15 @@
     },
     "fields[].anchor.resolved.rect.x / maximum": {
         "code": "invalid_format",
-        "message": "rect.x must be within 14400 pt of the origin, PDF's largest page side; got 14400.001. The bound keeps the canonical form total: past about 1e20 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
+        "message": "rect.x must be within 14400 pt of the origin, PDF's largest page side; got 14400.001. The bound keeps the canonical form total: past about 1e17 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
     },
     "fields[].anchor.resolved.rect.x / minimum": {
         "code": "coordinate_negative",
         "message": "rect.x must not be negative: the native origin is the top-left corner of the displayed page, so a negative value is off the page."
+    },
+    "fields[].anchor.resolved.rect.x / precision": {
+        "code": "coordinate_too_precise",
+        "message": "rect.x has more than 3 decimal places. Documents carry canonical numbers, and this one is refused rather than rounded: rounding is a transformation, and two implementations that both transform can disagree about the result — which would be a disagreement about the document's digest. Round it yourself and send the result."
     },
     "fields[].anchor.resolved.rect.x / type": {
         "code": "invalid_type",
@@ -129,11 +165,15 @@
     },
     "fields[].anchor.resolved.rect.y / maximum": {
         "code": "invalid_format",
-        "message": "rect.y must be within 14400 pt of the origin, PDF's largest page side; got 14400.001. The bound keeps the canonical form total: past about 1e20 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
+        "message": "rect.y must be within 14400 pt of the origin, PDF's largest page side; got 14400.001. The bound keeps the canonical form total: past about 1e17 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
     },
     "fields[].anchor.resolved.rect.y / minimum": {
         "code": "coordinate_negative",
         "message": "rect.y must not be negative: the native origin is the top-left corner of the displayed page, so a negative value is off the page."
+    },
+    "fields[].anchor.resolved.rect.y / precision": {
+        "code": "coordinate_too_precise",
+        "message": "rect.y has more than 3 decimal places. Documents carry canonical numbers, and this one is refused rather than rounded: rounding is a transformation, and two implementations that both transform can disagree about the result — which would be a disagreement about the document's digest. Round it yourself and send the result."
     },
     "fields[].anchor.resolved.rect.y / type": {
         "code": "invalid_type",
@@ -141,11 +181,15 @@
     },
     "fields[].anchor.tolerance / maximum": {
         "code": "invalid_format",
-        "message": "anchor.tolerance is a distance on one page and must be at most 14400 pt, PDF's largest page side; got 14400.001. The bound keeps the canonical form total: past about 1e20 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
+        "message": "anchor.tolerance is a distance on one page and must be at most 14400 pt, PDF's largest page side; got 14400.001. The bound keeps the canonical form total: past about 1e17 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
     },
     "fields[].anchor.tolerance / minimum": {
         "code": "invalid_format",
         "message": "anchor.tolerance is a distance in points and must not be negative; got -0.001."
+    },
+    "fields[].anchor.tolerance / precision": {
+        "code": "coordinate_too_precise",
+        "message": "anchor.tolerance has more than 3 decimal places. Documents carry canonical numbers, and this one is refused rather than rounded: rounding is a transformation, and two implementations that both transform can disagree about the result — which would be a disagreement about the document's digest. Round it yourself and send the result."
     },
     "fields[].anchor.tolerance / type": {
         "code": "invalid_type",
@@ -167,6 +211,10 @@
         "code": "dimension_not_positive",
         "message": "rect.height must be greater than zero; got 0."
     },
+    "fields[].rect.height / precision": {
+        "code": "coordinate_too_precise",
+        "message": "rect.height has more than 3 decimal places. Documents carry canonical numbers, and this one is refused rather than rounded: rounding is a transformation, and two implementations that both transform can disagree about the result — which would be a disagreement about the document's digest. Round it yourself and send the result."
+    },
     "fields[].rect.height / type": {
         "code": "invalid_type",
         "message": "rect.height must be a number."
@@ -174,6 +222,10 @@
     "fields[].rect.width / exclusiveMinimum": {
         "code": "dimension_not_positive",
         "message": "rect.width must be greater than zero; got 0."
+    },
+    "fields[].rect.width / precision": {
+        "code": "coordinate_too_precise",
+        "message": "rect.width has more than 3 decimal places. Documents carry canonical numbers, and this one is refused rather than rounded: rounding is a transformation, and two implementations that both transform can disagree about the result — which would be a disagreement about the document's digest. Round it yourself and send the result."
     },
     "fields[].rect.width / type": {
         "code": "invalid_type",
@@ -183,6 +235,10 @@
         "code": "coordinate_negative",
         "message": "rect.x must not be negative: the native origin is the top-left corner of the displayed page, so a negative value is off the page."
     },
+    "fields[].rect.x / precision": {
+        "code": "coordinate_too_precise",
+        "message": "rect.x has more than 3 decimal places. Documents carry canonical numbers, and this one is refused rather than rounded: rounding is a transformation, and two implementations that both transform can disagree about the result — which would be a disagreement about the document's digest. Round it yourself and send the result."
+    },
     "fields[].rect.x / type": {
         "code": "invalid_type",
         "message": "rect.x must be a number."
@@ -190,6 +246,10 @@
     "fields[].rect.y / minimum": {
         "code": "coordinate_negative",
         "message": "rect.y must not be negative: the native origin is the top-left corner of the displayed page, so a negative value is off the page."
+    },
+    "fields[].rect.y / precision": {
+        "code": "coordinate_too_precise",
+        "message": "rect.y has more than 3 decimal places. Documents carry canonical numbers, and this one is refused rather than rounded: rounding is a transformation, and two implementations that both transform can disagree about the result — which would be a disagreement about the document's digest. Round it yourself and send the result."
     },
     "fields[].rect.y / type": {
         "code": "invalid_type",

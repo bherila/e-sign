@@ -138,23 +138,49 @@ class FieldSchemaDocumentTest extends TestCase
         $this->assertFalse($field->readOnly);
     }
 
-    public function test_a_non_canonical_document_canonicalises_on_first_import_then_is_stable(): void
+    /**
+     * Spelling is canonicalised; precision is refused.
+     *
+     * A document may spell `650.0` for `650` or omit a defaulted property, and import tidies both
+     * — those are two spellings of one value. A coordinate finer than a thousandth of a point is a
+     * different matter: rounding it would be a *transformation*, and the two implementations of
+     * this schema do not agree about every transformation, so the same submitted document could
+     * canonicalise to two byte strings and two `field_schema_sha256`. It is refused instead, and
+     * the caller rounds it themselves — a producer's rounding is its own business, and what it
+     * sends is then taken literally.
+     */
+    public function test_a_document_with_loose_spelling_canonicalises_and_is_then_stable(): void
     {
         $raw = self::minimalDocument();
         unset($raw['fields'][0]['read_only']);
-        // Coordinates finer than the canonical precision, and an integral value spelled as a float.
-        $raw['fields'][0]['rect'] = ['x' => 60.00049, 'y' => 650.0, 'width' => 170.4567, 'height' => 36];
+        // An integral value spelled as a float, and a canonical fractional one.
+        $raw['fields'][0]['rect'] = ['x' => 60.0, 'y' => 650.0, 'width' => 170.457, 'height' => 36];
 
         $document = FieldSchemaDocument::fromArray($raw);
         $canonical = $document->canonicalJson();
 
-        $this->assertNotSame(json_encode($raw, FieldSchemaDocument::JSON_FLAGS), $canonical);
         $this->assertStringContainsString('"x":60,"y":650,"width":170.457,"height":36', $canonical);
         $this->assertSame($canonical, FieldSchemaDocument::fromJson($canonical)->canonicalJson());
         $this->assertSame(
             json_decode($canonical, true),
             FieldSchemaDocument::fromJson($canonical)->toArray(),
         );
+    }
+
+    public function test_a_coordinate_finer_than_the_canonical_precision_is_refused(): void
+    {
+        $raw = self::minimalDocument();
+        $raw['fields'][0]['rect'] = ['x' => 60.00049, 'y' => 650, 'width' => 170.4567, 'height' => 36];
+
+        try {
+            FieldSchemaDocument::fromArray($raw);
+            $this->fail('Expected the document to be refused rather than rounded.');
+        } catch (InvalidFieldSchemaException $refused) {
+            $this->assertSame(
+                ['coordinate_too_precise', 'coordinate_too_precise'],
+                array_map(static fn ($error) => $error->code->value, $refused->result->errors),
+            );
+        }
     }
 
     public function test_a_document_built_in_code_exports_canonically(): void

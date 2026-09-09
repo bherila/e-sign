@@ -124,6 +124,13 @@ export function violations(bounds: MemberBounds): Record<string, number | string
   const step = bounds.type === "integer" ? 1 : 0.001;
   const cases: Record<string, number | string> = { type: "not-a-number" };
 
+  // Precision is a rule JSON Schema cannot state here — `multipleOf: 0.001` is a floating-point
+  // division and ajv rejects thousands of legal three-decimal values — so it is enforced by the
+  // importers and swept explicitly. An integer member cannot be too precise.
+  if (bounds.type === "number") {
+    cases["precision"] = 0.00049;
+  }
+
   if (bounds.minimum !== null) {
     cases["minimum"] = bounds.minimum - step;
   }

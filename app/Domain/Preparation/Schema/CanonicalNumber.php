@@ -54,6 +54,27 @@ final class CanonicalNumber
     public const TOLERANCE = 0.001;
 
     /**
+     * Whether a value is already canonical: at most {@see DECIMALS} decimal places.
+     *
+     * The importer refuses a finer value rather than rounding it, and the difference matters more
+     * than it looks. Rounding is a *transformation*, and two implementations that both transform
+     * can disagree about the result: `round(1.6484999999999999, 3)` is 1.648 in PHP and 1.649 in
+     * the TypeScript editor, so the same submitted document would canonicalise to two different
+     * byte strings and two different `field_schema_sha256` — the digest every attestation binds.
+     * Refusing instead means no accepted value is ever transformed, so there is nothing for the
+     * two to disagree about.
+     *
+     * Producers still round: the editor rounds what a drag produced, and resolution rounds what it
+     * measured. That is safe precisely because it happens once, on one side, before the value
+     * becomes part of a document — a producer's rounding is its own business, and what it sends is
+     * then taken literally.
+     */
+    public static function isCanonical(float $value): bool
+    {
+        return is_finite($value) && round($value, self::DECIMALS) === $value;
+    }
+
+    /**
      * Round to the canonical precision, half away from zero.
      *
      * @throws InvalidArgumentException When the value is not finite. Callers that report rather

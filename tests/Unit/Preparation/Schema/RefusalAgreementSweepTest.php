@@ -99,6 +99,14 @@ final class RefusalAgreementSweepTest extends TestCase
         $step = $bounds['type'] === 'integer' ? 1 : 0.001;
         $violations = ['type' => 'not-a-number'];
 
+        // Precision is a rule of this schema that JSON Schema cannot state — `multipleOf: 0.001`
+        // is a floating-point division and ajv rejects thousands of legal three-decimal values —
+        // so it is enforced by the importers and swept here rather than derived from the file.
+        // A number member can be too precise; an integer one cannot.
+        if ($bounds['type'] === 'number') {
+            $violations['precision'] = 0.00049;
+        }
+
         if ($bounds['minimum'] !== null) {
             $violations['minimum'] = $bounds['minimum'] - $step;
         }

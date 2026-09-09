@@ -209,8 +209,9 @@ bytes on both the server and the client:
    and `required` are written only when they differ from their defaults, which is what keeps an
    anchor written before those properties existed byte-identical. (`anchor.occurrence` is required
    by the schema itself, so it is always present.)
-3. Coordinates rounded once to **three decimals**, half away from zero (0.001 pt is roughly a
-   third of a micron; no drag can express less). Integral values are written `60`, never `60.0`.
+3. Coordinates carry at most **three decimals** (0.001 pt is roughly a third of a micron; no drag
+   can express less). A finer value is **refused, not rounded** — see below. Integral values are
+   written `60`, never `60.0`.
 4. No insignificant whitespace; slashes and non-ASCII characters unescaped.
 
 `FieldSchemaDocument::canonicalJson()` and `serializeFieldSchema()` produce identical bytes for
@@ -224,7 +225,7 @@ rather than a float tolerance.
 ### Why every number in this schema is bounded
 
 Identical bytes on both sides is a claim about *every* value the importer accepts, and it stops
-being true at the top of the double range. Above roughly 1e20, PHP's `json_encode()` and
+being true at the top of the double range. Above roughly 1e17, PHP's `json_encode()` and
 JavaScript's `JSON.stringify()` spell the same number differently — `1.0e+20` against
 `100000000000000000000` — so a document containing one would canonicalise to two different byte
 strings and therefore two different `field_schema_sha256`, which is the digest every attestation
@@ -280,17 +281,38 @@ artifact, `tests/Fixtures/schema/numeric-refusals.json`: each side computes its 
 asserts they match the file, so neither can drift silently and the file is regenerated deliberately
 rather than edited.
 
-**Validate what will be stored, not what was typed.** Import canonicalises to three decimals, so
-a constraint checked against the submitted value is checking a number the document will not hold:
-a `width` of `0.0004` is positive as written and zero as stored, and a document accepted on those
-terms failed its own next import with `dimension_not_positive` — accepted into a state that cannot
-be read back, which is a latent corruption wearing the shape of a success. Every rectangle
-constraint is now applied to the canonical value. This is the same rule as the receipt comparisons
-(`checkCrossCheckReceiptAgrees`, `checkReplaceReceiptMatchesRect`) one level down: there it is two
-values compared with each other, here it is one value against its own constraint. A **round-trip
-sweep** beside the bounds one asserts it for every numeric member the contract declares, probing
-one canonical step below the smallest legal value — the lower edge, where the bounds sweep
-structurally cannot look.
+### Precision is refused, never rounded
+
+The importer used to round a coordinate to three decimals. It now **refuses** one that is finer,
+with `coordinate_too_precise`, and the difference is the reason the canonical form can be trusted
+at all.
+
+Rounding is a *transformation*, and two implementations that both transform can disagree about the
+result. They did: `1.6484999999999999` rounds to `1.648` in PHP and `1.649` in the TypeScript
+editor, because one rounds the parsed double and the other shifts a decimal string. The same
+submitted document therefore had **two canonical forms and two `field_schema_sha256`** — the digest
+every attestation binds. No amount of care in either rounder fixes that; only not rounding does.
+
+Refusing collapses three defects at once. There is no rounding to differ on. There is no `0.0004`
+that is positive as written and zero as stored, so nothing is accepted into a state that fails its
+own next import. And there is no `-0.0004` that rounds to `-0.0`, slips past a sign check, and then
+throws from `Rect`'s constructor as a 500 where a 422 belongs.
+
+**Producers still round; consumers never do.** The editor rounds what a drag produced, and anchor
+resolution rounds what it measured. That is safe precisely because it happens once, on one side,
+before the value is part of a document — a producer's rounding is its own business, and what it
+sends is then taken literally. Two producers rounding differently is harmless; two *readers*
+rounding differently is a document with two digests.
+
+No document that worked stops working: a value with four decimals never had a single canonical
+form, so refusing it removes an ambiguity rather than a capability.
+
+**The rule is not expressible in the published contract.** `multipleOf: 0.001` is the obvious
+spelling and it is unusable: ajv rejects 5,425 of the 40,001 three-decimal values in ±20, because
+the check is a floating-point division. So the contract states the rule in prose and the importers
+enforce it, which is the same arrangement as every other rule JSON Schema cannot express here (see
+[below](#why-no-json-schema-library-on-the-server)). The consequence is stated plainly: a document
+with a four-decimal coordinate satisfies the published file and is refused by the service.
 
 **Probe at the boundary, not at a large number.** The sweep originally tested `1e20` alone, which
 looks like the stronger case and is strictly weaker. `1e20` is a float; the bound it was meant to
@@ -335,6 +357,7 @@ breaking change.
 | `dimension_not_positive` | a zero or negative `width` or `height` |
 | `rect_out_of_page` | a rectangle extending past the edge of its page |
 | `unresolved_prefill_variable` | a prefill variable the sending context cannot resolve |
+| `coordinate_too_precise` | a coordinate with more than three decimals, which is refused rather than rounded |
 | `anchor_optional_on_required_field` | `anchor.required: false` on a field whose own `required` is true |
 | `anchor_cross_check_failed` | a `cross_check` receipt records a rectangle further than its stated tolerance from the declared one |
 

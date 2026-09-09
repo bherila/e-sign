@@ -48,7 +48,7 @@ final readonly class AnchorPlacement
      *
      * The bound is not there because a larger number would be unreasonable — though 200 inches of
      * slack on a cross-check is not a check. It is there because **the canonical form has to be
-     * total**, and above roughly 1e20 it is not: PHP's `json_encode()` writes such a value as
+     * total**, and above roughly 1e17 it is not: PHP's `json_encode()` writes such a value as
      * `1.0e+20` and JavaScript's `JSON.stringify()` writes it as `100000000000000000000`, so the
      * two projections would produce different canonical bytes for the same document, and
      * therefore different `field_schema_sha256` — the digest every attestation binds.

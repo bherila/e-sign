@@ -75,6 +75,17 @@ enum ValidationCode: string
     case UnresolvedPrefillVariable = 'unresolved_prefill_variable';
 
     /**
+     * A coordinate with more precision than the canonical form keeps.
+     *
+     * Documents carry canonical numbers, so a value finer than a thousandth of a point is refused
+     * rather than rounded. Rounding it would be a *transformation*, and two implementations that
+     * transform can disagree about the result — which is a disagreement about the document's
+     * digest, and that digest is what every attestation binds
+     * (docs/preparation/field-schema.md).
+     */
+    case CoordinateTooPrecise = 'coordinate_too_precise';
+
+    /**
      * `anchor.required: false` on a field that is itself required.
      *
      * The compatibility option for an absent anchor is narrow on purpose: it says "this box may

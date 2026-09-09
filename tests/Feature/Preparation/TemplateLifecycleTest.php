@@ -349,11 +349,14 @@ class TemplateLifecycleTest extends TestCase
     {
         $document = $this->readyDocument();
 
-        // A document that merely validates: defaults omitted and an integral coordinate
-        // spelled as a float. Storage canonicalises it once, and the digest is of that.
+        // A document that merely validates: defaults omitted and an integral coordinate spelled
+        // as a float. Storage canonicalises the *spelling* once, and the digest is of that. It
+        // does not canonicalise precision — a coordinate finer than a thousandth is refused
+        // rather than rounded, because rounding is a transformation the two implementations of
+        // this schema do not agree about.
         $schema = FieldSchemaFixture::asArray();
         unset($schema['fields'][0]['required'], $schema['fields'][0]['read_only']);
-        $schema['fields'][0]['rect']['x'] = 60.0004;
+        $schema['fields'][0]['rect']['x'] = 60.0;
 
         $version = $this->templates->createDraftVersion(
             $this->newTemplate(),

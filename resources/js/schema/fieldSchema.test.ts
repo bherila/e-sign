@@ -139,9 +139,9 @@ describe("serializeFieldSchema", () => {
             occurrence_index: 1,
             anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
             // In `replace` mode the receipt records where the field went, so it has to be the
-            // field's own rectangle — within the canonical tolerance, which is what makes the
-            // fractional tail here legal and the round trip exact.
-            rect: { x: 330, y: 650.0004, width: 170, height: 36 },
+            // field's own rectangle, exactly: the importer no longer rounds a fractional tail
+            // away, it refuses one.
+            rect: { x: 330, y: 650, width: 170, height: 36 },
           };
         }),
       ),
@@ -216,17 +216,35 @@ describe("serializeFieldSchema", () => {
     );
   });
 
-  it("writes integral coordinates without a fractional part and rounds to three decimals", () => {
+  it("writes integral coordinates without a fractional part", () => {
     const json = serializeFieldSchema(
       parseFieldSchema(
         brokenFixture((raw) => {
-          raw.fields[0].rect = { x: 60.00049, y: 650.0, width: 170.4567, height: 36 };
+          raw.fields[0].rect = { x: 60.0, y: 650.0, width: 170.457, height: 36 };
         }),
       ),
     );
 
     expect(json).toContain('"x":60,"y":650,"width":170.457,"height":36');
     expect(serializeFieldSchema(parseFieldSchema(json))).toBe(json);
+  });
+
+  /**
+   * Spelling is canonicalised; precision is refused.
+   *
+   * `650.0` and `650` are two spellings of one value and import tidies them. A coordinate finer
+   * than a thousandth of a point is not a spelling — rounding it is a transformation, and this
+   * runtime and PHP do not agree about every transformation (`1.6484999999999999` rounds to 1.649
+   * here and 1.648 there). Refusing it is what keeps one document to one digest.
+   */
+  it("refuses a coordinate finer than the canonical precision rather than rounding it", () => {
+    const issues = validateFieldSchema(
+      brokenFixture((raw) => {
+        raw.fields[0].rect = { x: 60.00049, y: 650, width: 170.4567, height: 36 };
+      }),
+    );
+
+    expect(issues.map((problem) => problem.code)).toEqual(["coordinate_too_precise", "coordinate_too_precise"]);
   });
 
   it("survives a thousand round trips of generated documents without coordinate drift", () => {

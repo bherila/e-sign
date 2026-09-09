@@ -708,20 +708,17 @@ final class FieldSchemaValidator
                 continue;
             }
 
-            // Every check below is made on the *canonical* value, because that is the value this
-            // document will hold: import rounds to three decimals, so a width of 0.0004 is
-            // positive as written and zero as stored, and a document accepted on those terms
-            // fails its own next import with `dimension_not_positive`. Accepting a value into a
-            // state that cannot be read back is a latent corruption wearing the shape of a
-            // success, and it is worse here than elsewhere because the digest of this document is
-            // what an attestation binds.
-            //
-            // This is the same rule as the receipt comparisons in `checkCrossCheckReceiptAgrees()`
-            // and `checkReplaceReceiptMatchesRect()`, applied one level down: there it is two
-            // values compared with each other, here it is one value against its own constraint.
-            // If you meet it a third time, it is the same rule again — validate what will be
-            // stored, never what was typed.
-            $value = CanonicalNumber::round($value);
+            // A document carries canonical numbers, so a finer value is refused rather than
+            // rounded. Rounding here would make the validator's answer depend on a
+            // *transformation*, and the two implementations of this schema do not agree about
+            // every transformation: `round(1.6484999999999999, 3)` is 1.648 in PHP and 1.649 in
+            // the editor. Refusing means every accepted value is already the value that will be
+            // stored, so validation and canonicalisation cannot come apart — no rounding to zero
+            // behind a positivity check, no `-0.0` slipping past a sign check and detonating in
+            // Rect's constructor, and no two spellings of one document.
+            if (! $this->checkPrecision($path.'/'.$name, 'rect.'.$name, $value, $errors)) {
+                continue;
+            }
 
             if (($name === 'x' || $name === 'y') && $value < 0.0) {
                 $errors[] = new ValidationError(
@@ -913,7 +910,11 @@ final class FieldSchemaValidator
                     ValidationCode::CoordinateNotFinite,
                     'anchor.offset.'.$name.' must be a finite number; got '.var_export($value, true).'.',
                 );
+
+                continue;
             }
+
+            $this->checkPrecision($path.'/offset/'.$name, 'anchor.offset.'.$name, (float) $value, $errors);
         }
     }
 
@@ -1106,6 +1107,10 @@ final class FieldSchemaValidator
             return;
         }
 
+        if (! $this->checkPrecision($path, 'anchor.tolerance', (float) $tolerance, $errors)) {
+            return;
+        }
+
         if ((float) $tolerance < 0.0) {
             $errors[] = new ValidationError(
                 $path,
@@ -1117,7 +1122,7 @@ final class FieldSchemaValidator
         }
 
         // Bounded so the canonical form stays total, not because a larger number is unreasonable:
-        // above roughly 1e20 PHP and JavaScript spell the same value differently
+        // above roughly 1e17 PHP and JavaScript spell the same value differently
         // (`1.0e+20` against `100000000000000000000`), so the two projections would canonicalise
         // one document to two different digests. See AnchorPlacement::MAX_TOLERANCE.
         if ((float) $tolerance > AnchorPlacement::MAX_TOLERANCE) {
@@ -1127,7 +1132,7 @@ final class FieldSchemaValidator
                 'anchor.tolerance is a distance on one page and must be at most '
                     .$this->describeNumber(AnchorPlacement::MAX_TOLERANCE).' pt, PDF\'s largest page side; got '
                     .$this->describeNumber((float) $tolerance).'. The bound keeps the canonical form total: past '
-                    .'about 1e20 this schema\'s two implementations spell the same number differently, and a '
+                    .'about 1e17 this schema\'s two implementations spell the same number differently, and a '
                     .'document with two spellings has two digests.',
             );
 
@@ -1456,9 +1461,12 @@ final class FieldSchemaValidator
                 continue;
             }
 
-            // Canonical, for the reason given in checkRect(): what is validated has to be what
-            // will be stored, or the document stops importing the moment it is written down.
-            $value = CanonicalNumber::round((float) $value);
+            $value = (float) $value;
+
+            // Refused rather than rounded, for the reason given in checkRect().
+            if (! $this->checkPrecision($path.'/'.$name, 'rect.'.$name, $value, $errors)) {
+                continue;
+            }
 
             if (($name === 'width' || $name === 'height') && $value < 0.0) {
                 $errors[] = new ValidationError(
@@ -1693,7 +1701,7 @@ final class FieldSchemaValidator
      * Every component of a rectangle within the magnitude both implementations agree on.
      *
      * Shared by the measured rectangle and the resolved one, because the reason is shared and has
-     * nothing to do with either being a measurement or a placement: past roughly 1e20 PHP and
+     * nothing to do with either being a measurement or a placement: past roughly 1e17 PHP and
      * JavaScript spell the same number differently, so a document holding one canonicalises to two
      * digests. Nothing on a page is a page-side away from it, so the bound refuses nothing real.
      *
@@ -1719,12 +1727,35 @@ final class FieldSchemaValidator
                     ValidationCode::InvalidFormat,
                     'rect.'.$name.' must be within '.$this->describeNumber(MeasuredRect::MAX_MAGNITUDE)
                         .' pt of the origin, PDF\'s largest page side; got '.$this->describeNumber((float) $value)
-                        .'. The bound keeps the canonical form total: past about 1e20 this schema\'s two '
+                        .'. The bound keeps the canonical form total: past about 1e17 this schema\'s two '
                         .'implementations spell the same number differently, and a document with two spellings '
                         .'has two digests.',
                 );
             }
         }
+    }
+
+    /**
+     * A coordinate must arrive already canonical. Returns false when it did not.
+     *
+     * @param  list<ValidationError>  $errors
+     */
+    private function checkPrecision(string $path, string $label, float $value, array &$errors): bool
+    {
+        if (! is_finite($value) || CanonicalNumber::isCanonical($value)) {
+            return true;
+        }
+
+        $errors[] = new ValidationError(
+            $path,
+            ValidationCode::CoordinateTooPrecise,
+            $label.' has more than '.CanonicalNumber::DECIMALS.' decimal places. Documents carry canonical '
+                .'numbers, and this one is refused rather than rounded: rounding is a transformation, and two '
+                .'implementations that both transform can disagree about the result — which would be a '
+                .'disagreement about the document\'s digest. Round it yourself and send the result.',
+        );
+
+        return false;
     }
 
     private function isWholeNumberBeyondRange(mixed $value): bool

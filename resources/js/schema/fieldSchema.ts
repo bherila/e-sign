@@ -71,7 +71,7 @@ export const CANONICAL_DECIMALS = 3;
  * Largest `anchor.tolerance` a document may state, in points: PDF's own maximum page side.
  *
  * Mirrors `AnchorPlacement::MAX_TOLERANCE`. The bound exists to keep the canonical form **total**,
- * not because 200 inches of slack would be an unreasonable cross-check. Above roughly 1e20 this
+ * not because 200 inches of slack would be an unreasonable cross-check. Above roughly 1e17 this
  * runtime writes `100000000000000000000` where PHP writes `1.0e+20`, so the same document would
  * canonicalise to two different digests — and `field_schema_sha256` is what every attestation
  * binds. A tolerance is a distance between two positions on one page, so PDF's 14400 pt limit is
@@ -258,6 +258,7 @@ export const VALIDATION_CODES = [
   "dimension_not_positive",
   "rect_out_of_page",
   "unresolved_prefill_variable",
+  "coordinate_too_precise",
   "anchor_optional_on_required_field",
   "anchor_cross_check_failed",
 ] as const;
@@ -351,8 +352,32 @@ const DOCUMENT_SHA256_PATTERN = /^[0-9a-f]{64}$/;
  * with PHP's `round($value, 3)`: `60.1235 * 1000` is 60123.499999999993 in binary floating point
  * and would round down, while the string exponent form parses to exactly 60123.5 and rounds up.
  */
+/**
+ * Whether a value is already canonical: at most {@link CANONICAL_DECIMALS} decimal places.
+ *
+ * The importer refuses a finer value rather than rounding it, and the difference matters more than
+ * it looks. Rounding is a *transformation*, and the two implementations of this schema do not
+ * agree about every transformation: `1.6484999999999999` rounds to 1.649 here and to 1.648 in PHP,
+ * so the same submitted document would canonicalise to two byte strings and two
+ * `field_schema_sha256` — the digest every attestation binds. Refusing means no accepted value is
+ * ever transformed, so there is nothing to disagree about.
+ *
+ * Producers still round, and that is safe because it happens once, on one side, before the value
+ * is part of a document: {@link roundCoordinate} is what the editor applies to what a drag
+ * produced. What it then sends is taken literally.
+ */
+export function isCanonical(value: number): boolean {
+  return Number.isFinite(value) && roundCoordinate(value) === value;
+}
+
 export function roundCoordinate(value: number): number {
   if (!Number.isFinite(value)) {
+    return value;
+  }
+
+  // An integral value has no fractional part to round, whatever its magnitude, and shifting it
+  // through a decimal string is where this function used to lose precision or produce NaN.
+  if (Number.isInteger(value)) {
     return value;
   }
 
@@ -382,8 +407,14 @@ export function roundCoordinate(value: number): number {
   }
 
   const rounded = shifted < 0 ? -Math.round(-shifted) : Math.round(shifted);
+  const shiftedBack = Number(`${rounded}e-${CANONICAL_DECIMALS}`);
 
-  return Number(`${rounded}e-${CANONICAL_DECIMALS}`);
+  // `rounded` can be large enough that *its* own `toString()` is exponential — 1e20 shifts to
+  // 1e23 — and appending another exponent gives "1e+23e-3", which parses as NaN. That NaN then
+  // serialises as `null`, so a value the validator accepted would be exported as a document its
+  // own importer refuses. A value that big has no fractional part to round anyway, so falling
+  // back to plain arithmetic is exact for it.
+  return Number.isFinite(shiftedBack) ? shiftedBack : Math.round(value * 10 ** CANONICAL_DECIMALS) / 10 ** CANONICAL_DECIMALS;
 }
 
 /**
@@ -1004,6 +1035,26 @@ function checkIntegerRange(path: string, label: string, value: number, issues: V
   return false;
 }
 
+/** A coordinate must arrive already canonical. Returns false when it did not. */
+function checkPrecision(path: string, label: string, value: number, issues: ValidationIssue[]): boolean {
+  if (!Number.isFinite(value) || isCanonical(value)) {
+    return true;
+  }
+
+  issues.push(
+    issue(
+      path,
+      "coordinate_too_precise",
+      `${label} has more than ${CANONICAL_DECIMALS} decimal places. Documents carry canonical numbers, and ` +
+        "this one is refused rather than rounded: rounding is a transformation, and two implementations that " +
+        "both transform can disagree about the result — which would be a disagreement about the document's " +
+        "digest. Round it yourself and send the result.",
+    ),
+  );
+
+  return false;
+}
+
 function checkPage(path: string, page: unknown, pageSizes: PageSize[] | undefined, issues: ValidationIssue[]): number | null {
   if (typeof page !== "number" || !Number.isInteger(page)) {
     issues.push(issue(path, "invalid_type", "page must be an integer."));
@@ -1068,19 +1119,15 @@ function checkRect(
       continue;
     }
 
-    // Every check below is made on the *canonical* value, because that is the value this document
-    // will hold: import rounds to three decimals, so a width of 0.0004 is positive as written and
-    // zero as stored, and a document accepted on those terms fails its own next import with
-    // `dimension_not_positive`. Accepting a value into a state that cannot be read back is a
-    // latent corruption wearing the shape of a success.
-    //
-    // The same rule as the receipt comparisons above, applied one level down: there it is two
-    // values compared with each other, here it is one value against its own constraint. Meeting
-    // it a third time means the same rule again — validate what will be stored, never what was
-    // typed.
-    const canonical = roundCoordinate(value);
+    // A document carries canonical numbers, so a finer value is refused rather than rounded:
+    // rounding would make the validator's answer depend on a transformation the two
+    // implementations do not agree about. Refusing means every accepted value is already the value
+    // that will be stored, so validation and canonicalisation cannot come apart.
+    if (!checkPrecision(`${path}/${name}`, `rect.${name}`, value, issues)) {
+      continue;
+    }
 
-    if ((name === "x" || name === "y") && canonical < 0) {
+    if ((name === "x" || name === "y") && value < 0) {
       issues.push(
         issue(
           `${path}/${name}`,
@@ -1092,7 +1139,7 @@ function checkRect(
       continue;
     }
 
-    if ((name === "width" || name === "height") && canonical <= 0) {
+    if ((name === "width" || name === "height") && value <= 0) {
       issues.push(
         issue(`${path}/${name}`, "dimension_not_positive", `rect.${name} must be greater than zero; got ${value}.`),
       );
@@ -1100,7 +1147,7 @@ function checkRect(
       continue;
     }
 
-    values[name] = canonical;
+    values[name] = value;
   }
 
   const x = values.x;
@@ -1307,7 +1354,11 @@ function checkAnchor(
           `anchor.offset.${name} must be a finite number; got ${value}.`,
         ),
       );
+
+      continue;
     }
+
+    checkPrecision(`${path}/offset/${name}`, `anchor.offset.${name}`, value, issues);
   }
 }
 
@@ -1424,6 +1475,10 @@ function checkAnchorTolerance(
     return;
   }
 
+  if (!checkPrecision(path, "anchor.tolerance", tolerance, issues)) {
+    return;
+  }
+
   if (tolerance < 0) {
     issues.push(
       issue(path, "invalid_format", `anchor.tolerance is a distance in points and must not be negative; got ${tolerance}.`),
@@ -1441,7 +1496,7 @@ function checkAnchorTolerance(
         path,
         "invalid_format",
         `anchor.tolerance is a distance on one page and must be at most ${ANCHOR_TOLERANCE_MAX} pt, PDF's ` +
-          `largest page side; got ${tolerance}. The bound keeps the canonical form total: past about 1e20 this ` +
+          `largest page side; got ${tolerance}. The bound keeps the canonical form total: past about 1e17 this ` +
           "schema's two implementations spell the same number differently, and a document with two spellings " +
           "has two digests.",
       ),
@@ -1666,9 +1721,12 @@ function checkMeasuredRect(path: string, rect: unknown, issues: ValidationIssue[
       continue;
     }
 
-    // Canonical, for the reason given in checkRect(): what is validated has to be what will be
-    // stored, or the document stops importing the moment it is written down.
-    if ((name === "width" || name === "height") && roundCoordinate(value) < 0) {
+    // Refused rather than rounded, for the reason given in checkRect().
+    if (!checkPrecision(`${path}/${name}`, `rect.${name}`, value, issues)) {
+      continue;
+    }
+
+    if ((name === "width" || name === "height") && value < 0) {
       issues.push(
         issue(`${path}/${name}`, "dimension_not_positive", `rect.${name} must not be negative; got ${value}.`),
       );
@@ -1685,7 +1743,7 @@ function checkMeasuredRect(path: string, rect: unknown, issues: ValidationIssue[
  * Every component of a rectangle within the magnitude both implementations agree on.
  *
  * Shared by the measured rectangle and the resolved one, because the reason is shared and has
- * nothing to do with either being a measurement or a placement: past roughly 1e20 this runtime and
+ * nothing to do with either being a measurement or a placement: past roughly 1e17 this runtime and
  * PHP spell the same number differently, so a document holding one canonicalises to two digests.
  * Nothing on a page is a page-side away from it, so the bound refuses nothing real.
  */
@@ -1707,7 +1765,7 @@ function checkCoordinateMagnitude(path: string, rect: unknown, issues: Validatio
           `${path}/${name}`,
           "invalid_format",
           `rect.${name} must be within ${MEASURED_RECT_MAX_MAGNITUDE} pt of the origin, PDF's largest page ` +
-            `side; got ${value}. The bound keeps the canonical form total: past about 1e20 this schema's two ` +
+            `side; got ${value}. The bound keeps the canonical form total: past about 1e17 this schema's two ` +
             "implementations spell the same number differently, and a document with two spellings has two digests.",
         ),
       );
