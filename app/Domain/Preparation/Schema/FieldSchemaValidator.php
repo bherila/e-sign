@@ -1230,6 +1230,11 @@ final class FieldSchemaValidator
         // mode is required to be this same rectangle.
         $this->checkRect($path.'/rect', $resolved['rect'], null, null, $errors);
 
+        // And bounded, which the field's own rect is not. `$defs/resolved_rect` exists to carry
+        // that bound: it arrived in 1.1, so it can have one, while `rect` is 1.0's and tightening
+        // it would change what this build accepts for documents already valid (#105).
+        $this->checkCoordinateMagnitude($path.'/rect', $resolved['rect'], $errors);
+
         if (! $this->isObject($fieldRect) || ! $this->isObject($resolved['rect'])) {
             return;
         }
@@ -1446,22 +1451,9 @@ final class FieldSchemaValidator
                 continue;
             }
 
-            // Bounded so the canonical form stays total, exactly as anchor.tolerance is: above
-            // roughly 1e20 this schema's two implementations spell the same number differently,
-            // and a document with two spellings has two digests. A measurement of text on a page
-            // cannot exceed the largest page by more than a page, so nothing real is refused.
-            if (abs((float) $value) > MeasuredRect::MAX_MAGNITUDE) {
-                $errors[] = new ValidationError(
-                    $path.'/'.$name,
-                    ValidationCode::InvalidFormat,
-                    'rect.'.$name.' must be within '.$this->describeNumber(MeasuredRect::MAX_MAGNITUDE)
-                        .' pt of the origin, PDF\'s largest page side; got '.$this->describeNumber((float) $value)
-                        .'. The bound keeps the canonical form total: past about 1e20 this schema\'s two '
-                        .'implementations spell the same number differently, and a document with two spellings '
-                        .'has two digests.',
-                );
-            }
         }
+
+        $this->checkCoordinateMagnitude($path, $rect, $errors);
     }
 
     /**
@@ -1666,17 +1658,62 @@ final class FieldSchemaValidator
     }
 
     /**
-     * A whole number too large for {@see asInteger()} to hand back.
+     * A whole number past the range both implementations agree on, however JSON spelled it.
      *
-     * Without this the two projections refuse the same document for different reasons: PHP's
-     * integers stop at 2^63, so 1e20 arrives as a float `asInteger()` cannot narrow and would be
-     * reported as "not an integer", while the TypeScript importer sees a perfectly good integer
-     * and reports the bound. Same verdict, different code and different message, for a value
-     * whose only problem is its size. Reporting the bound in both is what makes the contract one
-     * contract.
+     * **Both representations, deliberately.** `9007199254740992` decodes as a PHP `int` and `1e20`
+     * as a `float`, and checking floats only left a seam exactly where the bound lives: PHP
+     * accepted 2^53 for an occurrence index while TypeScript, which has no such seam, refused it.
+     * A probe far past the bound never finds that — `1e20` is a float and takes the other path —
+     * which is why the sweep now probes at `maximum + 1` (`NumericBoundsSweepTest`).
+     *
+     * It also reports the bound *as* a bound rather than as "not an integer": a caller sending
+     * 1e20 has sent a whole number, and the reason to refuse it is that this schema does not admit
+     * one that large. Same verdict, same code, same message, in both projections.
      */
+    /**
+     * Every component of a rectangle within the magnitude both implementations agree on.
+     *
+     * Shared by the measured rectangle and the resolved one, because the reason is shared and has
+     * nothing to do with either being a measurement or a placement: past roughly 1e20 PHP and
+     * JavaScript spell the same number differently, so a document holding one canonicalises to two
+     * digests. Nothing on a page is a page-side away from it, so the bound refuses nothing real.
+     *
+     * @param  array<string, mixed>  $rect
+     * @param  list<ValidationError>  $errors
+     */
+    private function checkCoordinateMagnitude(string $path, mixed $rect, array &$errors): void
+    {
+        if (! $this->isObject($rect)) {
+            return;
+        }
+
+        foreach (self::RECT_REQUIRED as $name) {
+            $value = $rect[$name] ?? null;
+
+            if ((! is_int($value) && ! is_float($value)) || ! is_finite((float) $value)) {
+                continue;
+            }
+
+            if (abs((float) $value) > MeasuredRect::MAX_MAGNITUDE) {
+                $errors[] = new ValidationError(
+                    $path.'/'.$name,
+                    ValidationCode::InvalidFormat,
+                    'rect.'.$name.' must be within '.$this->describeNumber(MeasuredRect::MAX_MAGNITUDE)
+                        .' pt of the origin, PDF\'s largest page side; got '.$this->describeNumber((float) $value)
+                        .'. The bound keeps the canonical form total: past about 1e20 this schema\'s two '
+                        .'implementations spell the same number differently, and a document with two spellings '
+                        .'has two digests.',
+                );
+            }
+        }
+    }
+
     private function isWholeNumberBeyondRange(mixed $value): bool
     {
+        if (is_int($value)) {
+            return abs($value) > CanonicalNumber::MAX_INTEGER;
+        }
+
         return is_float($value) && is_finite($value) && $value === floor($value)
             && abs($value) > CanonicalNumber::MAX_INTEGER;
     }

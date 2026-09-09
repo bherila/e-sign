@@ -243,52 +243,38 @@ magnitude below where the encoders start to disagree. The alternative — defini
 number-to-string encoding — would mean owning a float formatter in two languages forever, for
 values no document will ever hold.
 
-Every numeric property 1.1 admits, and what bounds it:
+Which numbers are bounded, and by what, is **not written down here** — it is derived from the
+contract file and asserted on both sides by
+`tests/Unit/Preparation/Schema/NumericBoundsSweepTest.php` and
+`resources/js/schema/numericBounds.test.ts`. Read those for the current answer.
 
-| Property | Bound | How |
-|---|---|---|
-| `fields[].page` | yes | `1 … 2^53 - 1` |
-| `fields[].rect.x` / `.y` | **no upper bound** | `minimum: 0`; the page-fit check needs page sizes the importer is not always given |
-| `fields[].rect.width` / `.height` | **no upper bound** | `exclusiveMinimum: 0`, same reason |
-| `anchor.occurrence` | yes | `1 … 2^53 - 1`, or `"sole"` |
-| `anchor.offset.dx` / `.dy` | **no bound** | a displacement, in either direction, with nothing constraining it |
-| `anchor.tolerance` | yes | `0 … 14400` |
-| `anchor.resolved.page` | yes | `1 … 2^53 - 1` |
-| `anchor.resolved.occurrence_index` | yes | `1 … 2^53 - 1` |
-| `anchor.resolved.anchor_rect.*` | yes | `-14400 … 14400`, extents non-negative |
-| `anchor.resolved.rect.*` | **no upper bound** | it is a `rect` |
+That is deliberate, and it is the second thing this section is about. A table here was a second
+source of the same truth, maintained by hand, and it drifted in exactly the way a hand-kept list
+drifts: it filed `anchor.resolved.rect` under "legacy, see #105" because the property *is* a
+`rect` by type, when `resolved` arrived in 1.1 and the property is this schema's own. The contract
+file already knows where every number lives and what bounds it, so nobody should have to remember.
 
-**How this table was checked, which matters as much as what it says.** Every row was probed at
-1e20 — the magnitude where the two implementations part company — in *both* PHP and TypeScript,
-and both were required to give the same verdict. That method is the point: an earlier version of
-this table said the integer properties were bounded because PHP refused them, which was a claim
-about the contract inferred from one implementation's behaviour. TypeScript accepted the same
-documents, so the editor validated what the API then refused with a 422. A reader cannot tell a
-verified row from an inferred one unless the table says which it is, so: **these rows are
-verified, on both sides.** The probes are `FieldSchemaValidatorTest::numericSweep` and the
-matching "the numeric sweep" cases in `fieldSchema.test.ts` — the same list, the same
-expectations, so a bound added on one side and not the other fails there rather than in review.
+The sweep walks `field-schema-1.1.json` for every numeric member, fails if one has no probe, and
+for each bounded member checks that its `maximum` is accepted and `maximum + 1` refused — in both
+implementations, with the same verdict. The members deliberately left unbounded are swept too,
+with that expectation written down, so the set cannot quietly change. Those are `rect.*` and
+`anchor.offset.*`, both 1.0 properties: tightening them changes what this build accepts for
+documents that were already valid, so it is a version-policy decision rather than a repair
+(issue #105).
 
-The three unbounded entries are named rather than left for someone to rediscover, and the sweep
-asserts they are still unbounded, so removing one is a deliberate act rather than a silent drift.
-All three predate 1.1 — they are `rect` and `offset`, which 1.0 already had — and the same
-divergence applies: a document with `rect.x` of 1e20 canonicalises to different bytes in the two
-implementations, so it has two `field_schema_sha256`. Bounding them is not a repair but a
-**version-policy decision**, because the importer is shared: tightening `rect` changes what this
-build accepts for documents that were valid under 1.0. Tracked as issue #105, which covers
-`anchor.offset` as well as `rect`.
-
-The integer bound is `2^53 - 1` rather than a page-derived number because integers have no page to
-be derived from: it is the largest value both languages hold *and distinguish from its successor*.
-PHP counts to `2^63 - 1` and JavaScript stops being exact at `2^53`, so anything in between is a
-whole number on one side and a rounded one on the other.
+**Probe at the boundary, not at a large number.** The sweep originally tested `1e20` alone, which
+looks like the stronger case and is strictly weaker. `1e20` is a float; the bound it was meant to
+guard sits at 2^53, where PHP still has an *integer* — so the probe took a different code path
+from the one under test, and PHP accepted 2^53 for three properties while TypeScript refused it. A
+bound is distinguished from its absence by exactly two values: the largest accepted and the
+smallest refused.
 
 **The rule for the next unbounded property.** A canonicaliser that reaches its result by scaling
 has a range where it stops being total, and a schema whose numbers were all bounded never
 exercised it. When adding a number that is not a coordinate, give it a bound with a stated reason,
 and check the canonical form at the extremes of the *type* rather than the extremes of the
-documents you happen to have. The table above is the checklist: a new number belongs in it, on the
-bounded side, before it ships.
+documents you happen to have. The sweep is the checklist, and it enforces itself: a member added
+to the contract without a probe fails the coverage assertion before anyone has to notice.
 
 ## Rejection rules
 

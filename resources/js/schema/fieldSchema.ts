@@ -1527,6 +1527,11 @@ function checkResolvedAnchor(
 
   checkRect(`${path}/rect`, resolved["rect"], null, undefined, issues);
 
+  // And bounded, which the field's own rect is not: `$defs/resolved_rect` arrived in 1.1 and can
+  // carry the bound, while `rect` is 1.0's and tightening it would change what this build accepts
+  // for documents already valid (#105).
+  checkCoordinateMagnitude(`${path}/rect`, resolved["rect"], issues);
+
   const recordedRect = resolved["rect"];
 
   if (!isObject(fieldRect) || !isObject(recordedRect)) {
@@ -1657,10 +1662,31 @@ function checkMeasuredRect(path: string, rect: unknown, issues: ValidationIssue[
       continue;
     }
 
-    // Bounded so the canonical form stays total, exactly as anchor.tolerance is: past roughly
-    // 1e20 this runtime and PHP spell the same value differently, and a document with two
-    // spellings has two digests. A measurement of text on a page cannot exceed the largest page
-    // by more than a page, so nothing real is refused.
+  }
+
+  checkCoordinateMagnitude(path, rect, issues);
+}
+
+/**
+ * Every component of a rectangle within the magnitude both implementations agree on.
+ *
+ * Shared by the measured rectangle and the resolved one, because the reason is shared and has
+ * nothing to do with either being a measurement or a placement: past roughly 1e20 this runtime and
+ * PHP spell the same number differently, so a document holding one canonicalises to two digests.
+ * Nothing on a page is a page-side away from it, so the bound refuses nothing real.
+ */
+function checkCoordinateMagnitude(path: string, rect: unknown, issues: ValidationIssue[]): void {
+  if (!isObject(rect)) {
+    return;
+  }
+
+  for (const name of RECT_REQUIRED) {
+    const value = rect[name];
+
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      continue;
+    }
+
     if (Math.abs(value) > MEASURED_RECT_MAX_MAGNITUDE) {
       issues.push(
         issue(

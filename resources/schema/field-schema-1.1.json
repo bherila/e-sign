@@ -229,6 +229,38 @@
         }
       }
     },
+    "resolved_rect": {
+      "description": "The rectangle resolution produced: a placement, with the same unit, orientation and canonical spelling as rect, and bounded by PDF's largest page side, 14400 pt. It is a separate definition from rect because it arrived in 1.1 and can therefore carry a bound that rect cannot: rect is 1.0's, still published unchanged, and tightening it would change what this build accepts for documents that were already valid (issue #105). The bound is here for the reason anchor.tolerance and measured_rect carry one \u2014 above roughly 1e20 this schema's two implementations spell the same value differently, so such a document would canonicalise to two different digests.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": {
+          "description": "Distance from the left edge of the CropBox, in points.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 14400
+        },
+        "y": {
+          "description": "Distance from the top edge of the CropBox, in points.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 14400
+        },
+        "width": {
+          "description": "Width in points; positive.",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 14400
+        },
+        "height": {
+          "description": "Height in points; positive.",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 14400
+        }
+      }
+    },
     "measured_rect": {
       "description": "A rectangle recording where something was, rather than where something goes. Same unit, orientation and canonical spelling as rect, but x and y may be negative and nothing is checked against the page edge \u2014 see resolved_anchor.anchor_rect. Extents are non-negative, because a box with a negative extent is not a measurement of anything. Every component is bounded by PDF's largest page side, 14400 pt, in both directions: a measurement of a run of text on a page cannot exceed the page by more than a page. As with anchor.tolerance, the bound is there to keep the canonical form total rather than because a larger number would be unreasonable \u2014 above roughly 1e20 this schema's two implementations spell the same value differently (PHP writes 1.0e+20 where JavaScript writes 100000000000000000000), so such a document would canonicalise to two different digests, and field_schema_sha256 is what every attestation binds.",
       "type": "object",
@@ -395,7 +427,7 @@
         },
         "rect": {
           "description": "The rectangle resolution produced: the anchor rect's chosen corner plus the offset, sized by the field. In \"replace\" mode this is required to be the field's own rect, so the receipt cannot describe a placement that did not happen.",
-          "$ref": "#/$defs/rect"
+          "$ref": "#/$defs/resolved_rect"
         }
       }
     }
