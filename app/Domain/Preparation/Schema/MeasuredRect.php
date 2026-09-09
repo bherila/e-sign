@@ -23,14 +23,29 @@ use InvalidArgumentException;
  * - **It is never checked against the page.** A run touching the right or bottom crop edge is a
  *   normal document, not an error, and it is not something anybody placed.
  *
- * Only `width` and `height` are constrained, to being non-negative, because a box with a negative
- * extent is not a measurement of anything.
+ * Only `width` and `height` are constrained in *sign*, to being non-negative, because a box with a
+ * negative extent is not a measurement of anything.
+ *
+ * Every component is bounded in magnitude by {@see self::MAX_MAGNITUDE}, and for the reason
+ * `AnchorPlacement::MAX_TOLERANCE` is bounded rather than any reason about measurement: above
+ * roughly 1e20, PHP and JavaScript spell the same number differently, so a document holding one
+ * canonicalises to two different digests. A measurement of text on a page cannot exceed the
+ * largest page by more than a page, so the bound costs nothing real
+ * (docs/preparation/field-schema.md, "Why every number in this schema is bounded").
  *
  * Canonicalised to three decimals like every other coordinate, so a receipt round trips byte for
  * byte ({@see CanonicalNumber}).
  */
 final readonly class MeasuredRect
 {
+    /**
+     * Largest magnitude any component may have, in points: PDF's maximum page side.
+     *
+     * Applied to `x` and `y` in both directions — a measurement may sit slightly off the page,
+     * but not a page away from it — and as an upper bound on the extents.
+     */
+    public const MAX_MAGNITUDE = 14400.0;
+
     public float $x;
 
     public float $y;
@@ -49,6 +64,14 @@ final readonly class MeasuredRect
 
         if ($width < 0.0 || $height < 0.0) {
             throw new InvalidArgumentException('Measured rect.width and rect.height must not be negative.');
+        }
+
+        foreach (['x' => $x, 'y' => $y, 'width' => $width, 'height' => $height] as $name => $value) {
+            if (abs($value) > self::MAX_MAGNITUDE) {
+                throw new InvalidArgumentException(
+                    'Measured rect.'.$name.' must be within '.self::MAX_MAGNITUDE.' pt of the origin.',
+                );
+            }
         }
 
         $this->x = CanonicalNumber::round($x);

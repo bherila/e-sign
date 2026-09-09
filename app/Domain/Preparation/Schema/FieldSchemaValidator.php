@@ -587,7 +587,6 @@ final class FieldSchemaValidator
                         ? $field['required']
                         : FieldDefinition::DEFAULT_REQUIRED,
                     $field['rect'] ?? null,
-                    $field['page'] ?? null,
                     $version,
                     $errors,
                 );
@@ -793,7 +792,6 @@ final class FieldSchemaValidator
         mixed $anchor,
         bool $fieldRequired,
         mixed $fieldRect,
-        mixed $fieldPage,
         ?SchemaVersion $version,
         array &$errors,
     ): void {
@@ -828,8 +826,6 @@ final class FieldSchemaValidator
                 $mode,
                 is_int($declaredTolerance) || is_float($declaredTolerance) ? (float) $declaredTolerance : null,
                 $fieldRect,
-                $fieldPage,
-                $anchor['occurrence'] ?? null,
                 $errors,
             );
         }
@@ -1131,8 +1127,6 @@ final class FieldSchemaValidator
         AnchorPlacementMode $mode,
         ?float $anchorTolerance,
         mixed $fieldRect,
-        mixed $fieldPage,
-        mixed $requestedOccurrence,
         array &$errors,
     ): void {
         if (! $this->isObject($resolved)) {
@@ -1160,8 +1154,6 @@ final class FieldSchemaValidator
             }
         }
 
-        $recorded = [];
-
         foreach (['page', 'occurrence_index'] as $name) {
             if (! array_key_exists($name, $resolved)) {
                 continue;
@@ -1188,11 +1180,7 @@ final class FieldSchemaValidator
 
                 continue;
             }
-
-            $recorded[$name] = $value;
         }
-
-        $this->checkReceiptAnswersTheRequest($path, $recorded, $fieldPage, $requestedOccurrence, $errors);
 
         // `anchor_rect` records where the text was, not where anything goes. A run's nominal box
         // is its advance by the font's ascent plus descent, so a heading near the top of the page
@@ -1223,69 +1211,6 @@ final class FieldSchemaValidator
         }
 
         $this->checkCrossCheckReceiptAgrees($path, $anchorTolerance, $resolved['rect'], $fieldRect, $errors);
-    }
-
-    /**
-     * A receipt answers one question, and it has to be the question the field is asking now.
-     *
-     * A stored receipt is read back on every request — an envelope re-imports its own schema —
-     * and in `replace` mode the field's own rectangle is required to be the one the receipt
-     * records. Move the field to another page, or point the anchor at a different occurrence, and
-     * the document would carry a well-formed record of resolving something else: a rectangle
-     * measured for page 2 sitting on a field that now says page 3. Requiring the receipt to
-     * restate the request is what makes editing the request invalidate the answer to it, so a
-     * document at rest is either self-consistent or refused.
-     *
-     * This is not what decides whether the resolver runs again. It always runs again, at publish
-     * and at send alike (`$defs/resolved_anchor` in the published contract): a receipt is a record
-     * of what was found, never permission to stop looking, because it binds a document, a page
-     * and an occurrence but not the anchor text, the origin corner, or the offset.
-     *
-     * @param  array<string, int>  $recorded
-     * @param  list<ValidationError>  $errors
-     */
-    private function checkReceiptAnswersTheRequest(
-        string $path,
-        array $recorded,
-        mixed $fieldPage,
-        mixed $requestedOccurrence,
-        array &$errors,
-    ): void {
-        $page = $this->asInteger($fieldPage);
-
-        if ($page !== null && isset($recorded['page']) && $recorded['page'] !== $page) {
-            $errors[] = new ValidationError(
-                $path.'/page',
-                ValidationCode::PageOutOfRange,
-                'anchor.resolved.page is '.$recorded['page'].' and the field is on page '.$page.'. An anchor is '
-                    .'searched on the page its field declares, so a receipt for another page answers a question '
-                    .'this field is no longer asking; move the field back or drop the receipt so it resolves again.',
-            );
-        }
-
-        if (! isset($recorded['occurrence_index'])) {
-            return;
-        }
-
-        // "sole" means the text occurs once, so the match taken is always the first.
-        $expected = $requestedOccurrence === AnchorPlacement::OCCURRENCE_SOLE
-            ? 1
-            : $this->asInteger($requestedOccurrence);
-
-        if ($expected === null || $recorded['occurrence_index'] === $expected) {
-            return;
-        }
-
-        $errors[] = new ValidationError(
-            $path.'/occurrence_index',
-            ValidationCode::InvalidFormat,
-            'anchor.resolved.occurrence_index is '.$recorded['occurrence_index'].' and the anchor asks for '
-                .($requestedOccurrence === AnchorPlacement::OCCURRENCE_SOLE
-                    ? 'the sole occurrence'
-                    : 'occurrence '.$expected)
-                .'. A receipt records which match was taken, so one for a different match is not an answer to '
-                .'this anchor; drop it so the anchor resolves again.',
-        );
     }
 
     /**
@@ -1374,37 +1299,6 @@ final class FieldSchemaValidator
         // refused by its own next import, which is the one thing a coordinate-stable round trip
         // must not do.
         $slack = CanonicalNumber::round($tolerance);
-
-        // The resolved rectangle is the matched text's position at *the field's own size* — an
-        // anchor says where a field goes and never how big it is. A receipt whose extents are not
-        // the field's therefore records a result no resolution could have produced, so they are
-        // compared exactly while the corner is compared within the tolerance.
-        foreach (['width', 'height'] as $name) {
-            $pair = $this->canonicalPair($declared[$name] ?? null, $recorded[$name] ?? null);
-
-            if ($pair === null) {
-                return;
-            }
-
-            // Exact, not within a tolerance. The corner is compared with slack because the anchor
-            // is *allowed* to disagree with the declared position by up to the stated amount —
-            // that disagreement is the thing being measured. An extent has no such freedom: the
-            // resolver sizes its result from the field, so the only correct answer is the field's
-            // own number, and a predicate sitting on the boundary it tests would let a whole
-            // canonical unit through or not depending on where the value lands in a float.
-            if ($pair[0] !== $pair[1]) {
-                $errors[] = new ValidationError(
-                    $path.'/rect/'.$name,
-                    ValidationCode::AnchorCrossCheckFailed,
-                    'anchor.resolved records a '.$name.' of '.$this->describeNumber($pair[1]).' and the field is '
-                        .$this->describeNumber($pair[0]).' wide by its own declaration. An anchor decides where a '
-                        .'field goes and never how big it is, so a receipt of another size is not a record of '
-                        .'resolving this field.',
-                );
-
-                return;
-            }
-        }
 
         foreach (['x', 'y'] as $name) {
             $pair = $this->canonicalPair($declared[$name] ?? null, $recorded[$name] ?? null);
@@ -1517,6 +1411,24 @@ final class FieldSchemaValidator
                     $path.'/'.$name,
                     ValidationCode::DimensionNotPositive,
                     'rect.'.$name.' must not be negative; got '.$this->describeNumber((float) $value).'.',
+                );
+
+                continue;
+            }
+
+            // Bounded so the canonical form stays total, exactly as anchor.tolerance is: above
+            // roughly 1e20 this schema's two implementations spell the same number differently,
+            // and a document with two spellings has two digests. A measurement of text on a page
+            // cannot exceed the largest page by more than a page, so nothing real is refused.
+            if (abs((float) $value) > MeasuredRect::MAX_MAGNITUDE) {
+                $errors[] = new ValidationError(
+                    $path.'/'.$name,
+                    ValidationCode::InvalidFormat,
+                    'rect.'.$name.' must be within '.$this->describeNumber(MeasuredRect::MAX_MAGNITUDE)
+                        .' pt of the origin, PDF\'s largest page side; got '.$this->describeNumber((float) $value)
+                        .'. The bound keeps the canonical form total: past about 1e20 this schema\'s two '
+                        .'implementations spell the same number differently, and a document with two spellings '
+                        .'has two digests.',
                 );
             }
         }

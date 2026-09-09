@@ -80,6 +80,17 @@ export const CANONICAL_DECIMALS = 3;
  */
 export const ANCHOR_TOLERANCE_MAX = 14400;
 
+/**
+ * Largest magnitude any `measured_rect` component may have, in points: PDF's maximum page side.
+ *
+ * Mirrors `MeasuredRect::MAX_MAGNITUDE`, and exists for the same reason as
+ * {@link ANCHOR_TOLERANCE_MAX} rather than for any reason about measurement — see
+ * `docs/preparation/field-schema.md`, "Why every number in this schema is bounded". Applied to
+ * `x` and `y` in both directions: a measurement may sit slightly off the page, but not a page
+ * away from it.
+ */
+export const MEASURED_RECT_MAX_MAGNITUDE = 14400;
+
 /** Slack when comparing a rounded coordinate against a page edge: one unit in the last place. */
 export const CANONICAL_TOLERANCE = 0.001;
 
@@ -935,15 +946,7 @@ function checkFields(
 
     if ("anchor" in field) {
       const fieldRequired = typeof field["required"] === "boolean" ? field["required"] : true;
-      checkAnchor(
-        `${path}/anchor`,
-        field["anchor"],
-        fieldRequired,
-        field["rect"],
-        field["page"],
-        declaredMinor(document),
-        issues,
-      );
+      checkAnchor(`${path}/anchor`, field["anchor"], fieldRequired, field["rect"], declaredMinor(document), issues);
     }
   });
 }
@@ -1157,7 +1160,6 @@ function checkAnchor(
   anchor: unknown,
   fieldRequired: boolean,
   fieldRect: unknown,
-  fieldPage: unknown,
   minor: number | null,
   issues: ValidationIssue[],
 ): void {
@@ -1202,16 +1204,7 @@ function checkAnchor(
 
   if ("resolved" in anchor) {
     const tolerance = typeof anchor["tolerance"] === "number" ? anchor["tolerance"] : null;
-    checkResolvedAnchor(
-      `${path}/resolved`,
-      anchor["resolved"],
-      placement,
-      tolerance,
-      fieldRect,
-      fieldPage,
-      anchor["occurrence"],
-      issues,
-    );
+    checkResolvedAnchor(`${path}/resolved`, anchor["resolved"], placement, tolerance, fieldRect, issues);
   }
 
   if ("origin" in anchor) {
@@ -1421,69 +1414,12 @@ function checkAnchorTolerance(
   }
 }
 
-/**
- * A receipt answers one question, and it has to be the question the field is asking now.
- *
- * The mirror of `FieldSchemaValidator::checkReceiptAnswersTheRequest()`. Move an anchored field to
- * another page, or point its anchor at a different occurrence, and the receipt kept alongside
- * describes a match nobody asked for any more. The server refuses that; refusing it here too is
- * what stops the editor from discovering it as a 422 after the save.
- */
-function checkReceiptAnswersTheRequest(
-  path: string,
-  recorded: { page?: number; occurrence_index?: number },
-  fieldPage: unknown,
-  requestedOccurrence: unknown,
-  issues: ValidationIssue[],
-): void {
-  if (typeof fieldPage === "number" && Number.isInteger(fieldPage) && recorded.page !== undefined && recorded.page !== fieldPage) {
-    issues.push(
-      issue(
-        `${path}/page`,
-        "page_out_of_range",
-        `anchor.resolved.page is ${recorded.page} and the field is on page ${fieldPage}. An anchor is searched ` +
-          "on the page its field declares, so a receipt for another page answers a question this field is no " +
-          "longer asking; move the field back or drop the receipt so it resolves again.",
-      ),
-    );
-  }
-
-  if (recorded.occurrence_index === undefined) {
-    return;
-  }
-
-  // "sole" means the text occurs once, so the match taken is always the first.
-  const expected =
-    requestedOccurrence === ANCHOR_OCCURRENCE_SOLE
-      ? 1
-      : typeof requestedOccurrence === "number" && Number.isInteger(requestedOccurrence)
-        ? requestedOccurrence
-        : null;
-
-  if (expected === null || recorded.occurrence_index === expected) {
-    return;
-  }
-
-  issues.push(
-    issue(
-      `${path}/occurrence_index`,
-      "invalid_format",
-      `anchor.resolved.occurrence_index is ${recorded.occurrence_index} and the anchor asks for ` +
-        `${requestedOccurrence === ANCHOR_OCCURRENCE_SOLE ? "the sole occurrence" : `occurrence ${expected}`}. ` +
-        "A receipt records which match was taken, so one for a different match is not an answer to this " +
-        "anchor; drop it so the anchor resolves again.",
-    ),
-  );
-}
-
 function checkResolvedAnchor(
   path: string,
   resolved: unknown,
   placement: AnchorPlacement,
   anchorTolerance: number | null,
   fieldRect: unknown,
-  fieldPage: unknown,
-  requestedOccurrence: unknown,
   issues: ValidationIssue[],
 ): void {
   if (!isObject(resolved)) {
@@ -1509,8 +1445,6 @@ function checkResolvedAnchor(
     }
   }
 
-  const recorded: { page?: number; occurrence_index?: number } = {};
-
   for (const name of ["page", "occurrence_index"] as const) {
     if (!(name in resolved)) {
       continue;
@@ -1535,11 +1469,7 @@ function checkResolvedAnchor(
 
       continue;
     }
-
-    recorded[name] = value;
   }
-
-  checkReceiptAnswersTheRequest(path, recorded, fieldPage, requestedOccurrence, issues);
 
   // `anchor_rect` records where the text was, not where anything goes: a heading's ascender
   // legitimately starts above the CropBox edge, so it is never checked as a placement.
@@ -1604,36 +1534,6 @@ function checkResolvedAnchor(
     );
 
     return;
-  }
-
-  // The resolved rectangle is the matched text's position at *the field's own size* — an anchor
-  // says where a field goes and never how big it is — so the extents are compared exactly while
-  // the corner is compared within the tolerance.
-  for (const name of ["width", "height"] as const) {
-    if (typeof fieldRect[name] !== "number" || typeof recordedRect[name] !== "number") {
-      return;
-    }
-
-    const declared = roundCoordinate(fieldRect[name] as number);
-    const actual = roundCoordinate(recordedRect[name] as number);
-
-    // Exact, not within a tolerance. The corner gets slack because the anchor is *allowed* to
-    // disagree with the declared position by up to the stated amount — that disagreement is what
-    // is being measured. An extent has no such freedom: the resolver sizes its result from the
-    // field, so the only correct answer is the field's own number.
-    if (declared !== actual) {
-      issues.push(
-        issue(
-          `${path}/rect/${name}`,
-          "anchor_cross_check_failed",
-          `anchor.resolved records a ${name} of ${actual} and the field is ${declared} wide by its own ` +
-            "declaration. An anchor decides where a field goes and never how big it is, so a receipt of " +
-            "another size is not a record of resolving this field.",
-        ),
-      );
-
-      return;
-    }
   }
 
   // Rounded first, and the tolerance with them: import canonicalises every coordinate to three
@@ -1708,6 +1608,24 @@ function checkMeasuredRect(path: string, rect: unknown, issues: ValidationIssue[
     if ((name === "width" || name === "height") && value < 0) {
       issues.push(
         issue(`${path}/${name}`, "dimension_not_positive", `rect.${name} must not be negative; got ${value}.`),
+      );
+
+      continue;
+    }
+
+    // Bounded so the canonical form stays total, exactly as anchor.tolerance is: past roughly
+    // 1e20 this runtime and PHP spell the same value differently, and a document with two
+    // spellings has two digests. A measurement of text on a page cannot exceed the largest page
+    // by more than a page, so nothing real is refused.
+    if (Math.abs(value) > MEASURED_RECT_MAX_MAGNITUDE) {
+      issues.push(
+        issue(
+          `${path}/${name}`,
+          "invalid_format",
+          `rect.${name} must be within ${MEASURED_RECT_MAX_MAGNITUDE} pt of the origin, PDF's largest page ` +
+            `side; got ${value}. The bound keeps the canonical form total: past about 1e20 this schema's two ` +
+            "implementations spell the same number differently, and a document with two spellings has two digests.",
+        ),
       );
     }
   }

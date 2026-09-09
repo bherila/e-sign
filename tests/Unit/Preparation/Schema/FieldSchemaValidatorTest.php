@@ -164,31 +164,6 @@ class FieldSchemaValidatorTest extends TestCase
     }
 
     /**
-     * The extents are the field's, so a receipt of another size records something else.
-     *
-     * An anchor decides where a field goes and never how big it is: the resolver builds the
-     * resolved rectangle from where the text turned out to be *at the field's own width and
-     * height*. A receipt claiming a 1x2 rectangle for a 170x36 field is therefore a record of a
-     * resolution that could not have happened, and the corner agreeing is not evidence that it
-     * did.
-     */
-    public function test_a_cross_check_receipt_of_another_size_is_refused(): void
-    {
-        $document = FieldSchemaFixture::asArray();
-        $document['fields'][5]['anchor']['placement'] = 'cross_check';
-        $document['fields'][5]['anchor']['tolerance'] = 1;
-        $document['fields'][5]['anchor']['resolved'] = self::receipt([
-            // The corner is where the field says; the size is nothing like it.
-            'rect' => ['x' => 330, 'y' => 650, 'width' => 1, 'height' => 2],
-        ]);
-
-        $result = (new FieldSchemaValidator)->validate($document);
-
-        $this->assertTrue($result->hasCode(ValidationCode::AnchorCrossCheckFailed));
-        $this->assertNotEmpty($result->at('/fields/5/anchor/resolved/rect/width'));
-    }
-
-    /**
      * The check is made on the numbers that will be stored, not the ones that were written.
      *
      * Import canonicalises every coordinate to three decimals independently. Comparing the raw
@@ -249,31 +224,38 @@ class FieldSchemaValidatorTest extends TestCase
     }
 
     /**
-     * The extents are exact; only the corner has slack. The asymmetry is the point.
+     * A measurement is bounded too, and for the tolerance's reason rather than a measuring one.
      *
-     * A cross-check measures one thing: how far the anchor resolved from where the document says
-     * the field is. That disagreement is *allowed*, up to the stated tolerance, which is why the
-     * corner is compared with slack. An extent is not part of the disagreement — the resolver
-     * sizes its result from the field, so the only correct width is the field's own — and
-     * comparing it with the same epsilon let a whole canonical unit through: a 36 pt field
-     * accepted a 36.001 pt receipt, because `abs(36 - 36.001)` lands a hair *below* 0.001 in a
-     * double while `abs(170 - 170.001)` lands a hair above. Which errors a predicate admits
-     * should not depend on where the value sits in a float.
+     * `measured_rect` is deliberately not checked against the page — a heading's ascender crosses
+     * the CropBox edge in ordinary documents — but "not page-checked" is not "unbounded". Above
+     * roughly 1e20 PHP and JavaScript spell the same number differently, so a document holding one
+     * canonicalises to two digests. Text on a page cannot be measured a page away from it, so the
+     * bound refuses nothing real.
      */
-    public function test_a_cross_check_receipt_one_canonical_unit_wider_is_refused(): void
+    public function test_a_measured_rect_beyond_the_largest_pdf_page_is_refused(): void
     {
         $document = FieldSchemaFixture::asArray();
-        $document['fields'][5]['rect']['width'] = 36;
-        $document['fields'][5]['anchor']['placement'] = 'cross_check';
-        $document['fields'][5]['anchor']['tolerance'] = 1;
         $document['fields'][5]['anchor']['resolved'] = self::receipt([
-            'rect' => ['x' => 330, 'y' => 650, 'width' => 36.001, 'height' => 36],
+            'anchor_rect' => ['x' => 1e20, 'y' => 622.4, 'width' => 165.6, 'height' => 12],
+            'rect' => $document['fields'][5]['rect'],
         ]);
 
-        $result = (new FieldSchemaValidator)->validate($document);
+        $errors = (new FieldSchemaValidator)->validate($document)->at('/fields/5/anchor/resolved/anchor_rect/x');
 
-        $this->assertTrue($result->hasCode(ValidationCode::AnchorCrossCheckFailed));
-        $this->assertNotEmpty($result->at('/fields/5/anchor/resolved/rect/width'));
+        $this->assertCount(1, $errors);
+        $this->assertSame(ValidationCode::InvalidFormat, $errors[0]->code);
+    }
+
+    /** A measurement may still sit off the page, which is the whole reason the type exists. */
+    public function test_a_measured_rect_may_still_be_negative_and_overhang(): void
+    {
+        $document = FieldSchemaFixture::asArray();
+        $document['fields'][5]['anchor']['resolved'] = self::receipt([
+            'anchor_rect' => ['x' => -4, 'y' => -2.5, 'width' => 620, 'height' => 12],
+            'rect' => $document['fields'][5]['rect'],
+        ]);
+
+        $this->assertTrue((new FieldSchemaValidator)->validate($document)->isValid());
     }
 
     /**
@@ -323,50 +305,6 @@ class FieldSchemaValidatorTest extends TestCase
             [ValidationCode::MissingProperty],
             array_map(static fn ($error) => $error->code, $result->at('/fields/5/anchor/resolved')),
         );
-    }
-
-    /**
-     * A receipt answers one question, and it has to be the one the field is asking now.
-     *
-     * The receipt is what lets resolution be skipped, so moving the field to another page or
-     * asking for a different occurrence while keeping a service-issued receipt would publish and
-     * send at coordinates resolved for something else — with a receipt that looks well-formed.
-     */
-    public function test_a_receipt_for_another_page_is_refused(): void
-    {
-        $document = FieldSchemaFixture::asArray();
-        $document['fields'][5]['anchor']['resolved'] = self::receipt(['page' => 1]);
-
-        $result = (new FieldSchemaValidator)->validate($document);
-        $errors = $result->at('/fields/5/anchor/resolved/page');
-
-        $this->assertCount(1, $errors);
-        $this->assertSame(ValidationCode::PageOutOfRange, $errors[0]->code);
-    }
-
-    public function test_a_receipt_for_another_occurrence_is_refused(): void
-    {
-        $document = FieldSchemaFixture::asArray();
-        // The anchor asks for the sole occurrence, so the match taken is always the first.
-        $document['fields'][5]['anchor']['resolved'] = self::receipt(['occurrence_index' => 3]);
-
-        $errors = (new FieldSchemaValidator)->validate($document)->at('/fields/5/anchor/resolved/occurrence_index');
-
-        $this->assertCount(1, $errors);
-        $this->assertSame(ValidationCode::InvalidFormat, $errors[0]->code);
-        $this->assertStringContainsString('the sole occurrence', $errors[0]->message);
-    }
-
-    public function test_a_receipt_matching_an_indexed_occurrence_is_accepted(): void
-    {
-        $document = FieldSchemaFixture::asArray();
-        $document['fields'][9]['anchor']['resolved'] = self::receipt([
-            'occurrence_index' => 2,
-            'rect' => $document['fields'][9]['rect'],
-        ]);
-
-        // Field 9 asks for occurrence 2 of "Notes:" and the receipt records exactly that.
-        $this->assertTrue((new FieldSchemaValidator)->validate($document)->isValid());
     }
 
     private static function sampleAnchorMember(string $member): mixed

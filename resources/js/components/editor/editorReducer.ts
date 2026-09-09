@@ -418,6 +418,18 @@ function applyPatch(field: FieldDefinition, patch: FieldPatch): FieldDefinition 
 
   if (patch.required !== undefined) {
     next.required = patch.required;
+
+    // `anchor.required: false` says the text may legitimately be absent and the field is then
+    // omitted, which can only be true of a field nobody has to fill in. Making the field required
+    // therefore contradicts it, and the contract refuses the pair. The inspector has no control
+    // for the anchor's own requiredness, so leaving the two to disagree would produce a document
+    // no sequence of editor actions could repair — Save would 422 for ever. Clearing the property
+    // restores the default, which is that the anchor is required too: the same treatment a drag
+    // gives a receipt it has invalidated.
+    if (patch.required && next.anchor?.required === false) {
+      const { required: _required, ...anchor } = next.anchor;
+      next.anchor = anchor;
+    }
   }
 
   if (patch.read_only !== undefined) {

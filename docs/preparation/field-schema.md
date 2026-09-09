@@ -243,11 +243,34 @@ magnitude below where the encoders start to disagree. The alternative — defini
 number-to-string encoding — would mean owning a float formatter in two languages forever, for
 values no document will ever hold.
 
+Every numeric property 1.1 admits, and what bounds it:
+
+| Property | Bound | How |
+|---|---|---|
+| `fields[].page` | yes | integer; a value the platform integer cannot hold is `invalid_type` |
+| `fields[].rect.x` / `.y` | **no upper bound** | `minimum: 0`; the page-fit check needs page sizes the importer is not always given |
+| `fields[].rect.width` / `.height` | **no upper bound** | `exclusiveMinimum: 0`, same reason |
+| `anchor.occurrence` | yes | integer, as `page` |
+| `anchor.offset.dx` / `.dy` | **no bound** | a displacement, in either direction, with nothing constraining it |
+| `anchor.tolerance` | yes | `0 … 14400` |
+| `anchor.resolved.page` | yes | integer, as `page` |
+| `anchor.resolved.occurrence_index` | yes | integer, as `page` |
+| `anchor.resolved.anchor_rect.*` | yes | `-14400 … 14400`, extents non-negative |
+| `anchor.resolved.rect.*` | **no upper bound** | it is a `rect` |
+
+The three unbounded entries are named rather than left for someone to rediscover. All three
+predate 1.1 — they are `rect` and `offset`, which 1.0 already had — and the same divergence
+applies to them: a document with `rect.x` of 1e20 canonicalises to different bytes in the two
+implementations, so it has two `field_schema_sha256`. Bounding them is not a repair but a
+**version-policy decision**, because the importer is shared: tightening `rect` changes what this
+build accepts for documents that were valid under 1.0. Tracked as issue #105.
+
 **The rule for the next unbounded property.** A canonicaliser that reaches its result by scaling
 has a range where it stops being total, and a schema whose numbers were all bounded never
 exercised it. When adding a number that is not a coordinate, give it a bound with a stated reason,
 and check the canonical form at the extremes of the *type* rather than the extremes of the
-documents you happen to have.
+documents you happen to have. The table above is the checklist: a new number belongs in it, on the
+bounded side, before it ships.
 
 ## Rejection rules
 

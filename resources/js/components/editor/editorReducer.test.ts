@@ -2,6 +2,7 @@ import {
   type FieldSchemaDocument,
   parseFieldSchema,
   serializeFieldSchema,
+  validateFieldSchema,
 } from "@/schema/fieldSchema";
 
 import fixtureJson from "../../../../tests/Fixtures/schema/nda-two-signers.json";
@@ -417,6 +418,58 @@ describe("a resolution receipt", () => {
     });
 
     expect(findField(next.document, "counterparty_signature")?.anchor?.resolved).toBeDefined();
+  });
+});
+
+describe("no editor action can produce an unsavable document", () => {
+  /**
+   * The invariant, stated once: whatever sequence of actions the UI allows, the result validates.
+   *
+   * The contract has cross-property rules — a receipt is bound to its field's rectangle, and an
+   * optional anchor is only allowed on an optional field — and the inspector exposes a control
+   * for one side of each pair and not the other. So the reducer owns the consequence: an edit
+   * that breaks a pair has to repair it, or the editor can reach a state Save refuses with no
+   * control able to undo it.
+   */
+  it("keeps the anchor's requiredness coherent when the field becomes required", () => {
+    // Field 9 is the optional notes field whose anchor may legitimately be absent.
+    const before = findField(state().document, "counterparty_notes");
+    expect(before?.required).toBe(false);
+    expect(before?.anchor?.required).toBe(false);
+
+    const next = editorReducer(state(), {
+      type: "update_field",
+      id: "counterparty_notes",
+      patch: { required: true },
+    });
+    const field = findField(next.document, "counterparty_notes");
+
+    expect(field?.required).toBe(true);
+    expect(field?.anchor?.required).toBeUndefined();
+    expect(field?.anchor?.text).toBe("Notes:");
+    expect(validateFieldSchema(JSON.parse(serializeFieldSchema(next.document)))).toEqual([]);
+  });
+
+  it("leaves an optional anchor alone when the field stays optional", () => {
+    const next = editorReducer(state(), {
+      type: "update_field",
+      id: "counterparty_notes",
+      patch: { label: "Notes" },
+    });
+
+    expect(findField(next.document, "counterparty_notes")?.anchor?.required).toBe(false);
+  });
+
+  it("still validates after a drag, a page change and a requiredness toggle in sequence", () => {
+    const next = apply(
+      state(),
+      { type: "update_field", id: "counterparty_notes", patch: { required: true } },
+      { type: "move_field", id: "counterparty_signature", x: 340, y: 660 },
+      { type: "update_field", id: "counterparty_signature", patch: { page: 1 } },
+      { type: "duplicate_field", id: "counterparty_signature" },
+    );
+
+    expect(validateFieldSchema(JSON.parse(serializeFieldSchema(next.document)))).toEqual([]);
   });
 });
 

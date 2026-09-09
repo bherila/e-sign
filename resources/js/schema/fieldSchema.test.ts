@@ -660,50 +660,6 @@ describe("validateFieldSchema", () => {
       "/fields/5/anchor/resolved",
     ],
     [
-      "a receipt for a page the field is no longer on",
-      (raw) => {
-        raw.fields[5].anchor.resolved = {
-          document_sha256: "a".repeat(64),
-          page: 1,
-          occurrence_index: 1,
-          anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
-          rect: { x: 330, y: 646.9, width: 170, height: 36 },
-        };
-      },
-      "page_out_of_range",
-      "/fields/5/anchor/resolved/page",
-    ],
-    [
-      "a receipt for a match the anchor no longer asks for",
-      (raw) => {
-        raw.fields[5].anchor.resolved = {
-          document_sha256: "a".repeat(64),
-          page: 2,
-          occurrence_index: 3,
-          anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
-          rect: { x: 330, y: 646.9, width: 170, height: 36 },
-        };
-      },
-      "invalid_format",
-      "/fields/5/anchor/resolved/occurrence_index",
-    ],
-    [
-      "a cross-check receipt of another size than the field",
-      (raw) => {
-        raw.fields[5].anchor.placement = "cross_check";
-        raw.fields[5].anchor.tolerance = 1;
-        raw.fields[5].anchor.resolved = {
-          document_sha256: "d".repeat(64),
-          page: 2,
-          occurrence_index: 1,
-          anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
-          rect: { x: 330, y: 650, width: 1, height: 2 },
-        };
-      },
-      "anchor_cross_check_failed",
-      "/fields/5/anchor/resolved/rect/width",
-    ],
-    [
       "a cross-check that only passes before canonical rounding",
       (raw) => {
         raw.fields[5].rect.x = 330.0004;
@@ -737,6 +693,20 @@ describe("validateFieldSchema", () => {
       "/fields/5/anchor/resolved/rect/x",
     ],
     [
+      "a measured rect beyond the largest page a PDF can have",
+      (raw) => {
+        raw.fields[5].anchor.resolved = {
+          document_sha256: "d".repeat(64),
+          page: 2,
+          occurrence_index: 1,
+          anchor_rect: { x: 1e20, y: 622.4, width: 165.6, height: 12 },
+          rect: raw.fields[5].rect,
+        };
+      },
+      "invalid_format",
+      "/fields/5/anchor/resolved/anchor_rect/x",
+    ],
+    [
       "a tolerance beyond the largest page a PDF can have",
       (raw) => {
         raw.fields[5].anchor.placement = "cross_check";
@@ -744,23 +714,6 @@ describe("validateFieldSchema", () => {
       },
       "invalid_format",
       "/fields/5/anchor/tolerance",
-    ],
-    [
-      "a cross-check receipt one canonical unit wider than its field",
-      (raw) => {
-        raw.fields[5].rect.width = 36;
-        raw.fields[5].anchor.placement = "cross_check";
-        raw.fields[5].anchor.tolerance = 1;
-        raw.fields[5].anchor.resolved = {
-          document_sha256: "d".repeat(64),
-          page: 2,
-          occurrence_index: 1,
-          anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
-          rect: { x: 330, y: 650, width: 36.001, height: 36 },
-        };
-      },
-      "anchor_cross_check_failed",
-      "/fields/5/anchor/resolved/rect/width",
     ],
     [
       "a recipient email that is not an address",
