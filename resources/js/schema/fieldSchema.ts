@@ -1273,8 +1273,9 @@ function checkAnchorPlacement(
         "invalid_format",
         `anchor.placement must be one of ${ANCHOR_PLACEMENTS.join(", ")}; got "${placement}". ` +
           '"replace" lets the anchor decide where the field goes and keeps only the rectangle\'s size; ' +
-          '"cross_check" keeps the declared rectangle and requires the anchor to agree with it. There is ' +
-          "no default: a field with a rectangle and an anchor that does not say which one governs is refused.",
+          '"cross_check" keeps the declared rectangle and requires the anchor to agree with it. Omitting ' +
+          'the property is "replace", which is what an anchor has always meant here; "cross_check" is the ' +
+          "narrower mode and has to be stated.",
       ),
     );
 
@@ -1600,9 +1601,15 @@ function checkResolvedAnchor(
 
     const declared = roundCoordinate(fieldRect[name] as number);
     const actual = roundCoordinate(recordedRect[name] as number);
-    const distance = Math.abs(declared - actual);
+    // The stated bound, enforced exactly. Both sides and the tolerance are already canonical, so
+    // the page-edge epsilon has nothing left to absorb and would only widen what the document
+    // says — a receipt 0.001 pt outside a stated `tolerance: 0` would pass and then be stored
+    // claiming it had been checked to zero. The distance is rounded rather than compared raw
+    // because subtracting two three-decimal values can land a few ulps above the bound they sit
+    // exactly on.
+    const distance = roundCoordinate(Math.abs(declared - actual));
 
-    if (distance > slack + CANONICAL_TOLERANCE) {
+    if (distance > slack) {
       issues.push(
         issue(
           `${path}/rect/${name}`,

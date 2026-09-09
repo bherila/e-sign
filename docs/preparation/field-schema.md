@@ -6,7 +6,7 @@ facade converts its own convention into it. It is the only field vocabulary in t
 
 | | |
 |---|---|
-| Contract | [`resources/schema/field-schema-1.0.json`](../../resources/schema/field-schema-1.0.json) (JSON Schema draft 2020-12) |
+| Contract | [`resources/schema/field-schema-1.1.json`](../../resources/schema/field-schema-1.1.json) — current (JSON Schema draft 2020-12). [`field-schema-1.0.json`](../../resources/schema/field-schema-1.0.json) is retained, unchanged, and still read; validate a 1.0 document against that one |
 | Server | `app/Domain/Preparation/Schema` (`FieldSchemaDocument`, `FieldSchemaValidator`) |
 | Editor | [`resources/js/schema/fieldSchema.ts`](../../resources/js/schema/fieldSchema.ts) (`parseFieldSchema`, `serializeFieldSchema`); the editor itself is [editor.md](editor.md) |
 | Fixture | [`tests/Fixtures/schema/nda-two-signers.json`](../../tests/Fixtures/schema/nda-two-signers.json), synthetic, shared by both suites |
@@ -47,7 +47,10 @@ facade converts its own convention into it. It is the only field vocabulary in t
 
 ## Sections
 
-**`schema_version`** — exactly `"1.0"` in this version. See [versioning](#versioning) below.
+**`schema_version`** — `"1.1"`, the version this build writes, or `"1.0"`, which is still read and
+still published. A document keeps the version it arrived with, and each version has its own
+contract file: validate against the one the document declares, not against the newest. See
+[versioning](#versioning) below.
 
 **`document_id`** — the prepared document this field set belongs to. Preserved verbatim.
 
@@ -104,11 +107,14 @@ mapping. Neither is ever rewritten by the importer.
 ### Anchor placement
 
 `anchor` is a placement *request*: find this text, then place the field's rectangle relative to
-it. Resolution is deterministic positioned-text extraction (`app/Domain/Preparation/Text`) that
-writes the resolved rectangle into `rect` and a receipt into `anchor.resolved` — when a template
-version is published, and again when an envelope is sent, and never after that. A missing or
-ambiguous required anchor is an error, never a guess, and matching is an exact case-sensitive
-match on decoded text runs — never a regular expression over PDF bytes.
+it, or check the rectangle that is already there. Resolution is deterministic positioned-text
+extraction (`app/Domain/Preparation/Text`) that writes a receipt into `anchor.resolved` — when a
+template version is published, and again when an envelope is sent, and never after that. Whether
+it also writes the resolved rectangle into `rect` is exactly what `placement` decides: `replace`
+does, and `cross_check` does **not** — there the declared rectangle is authoritative and a
+disagreement larger than the tolerance is a refusal, never a silent move. A missing or ambiguous
+required anchor is an error, never a guess, and matching is an exact case-sensitive match on
+decoded text runs — never a regular expression over PDF bytes.
 
 This section is the **shape**: what a document may say and what the published contract makes of
 it. Resolution itself — when it runs, which failure fires when, what happens to a field whose

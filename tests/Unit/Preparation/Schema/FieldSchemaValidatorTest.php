@@ -211,6 +211,42 @@ class FieldSchemaValidatorTest extends TestCase
         $this->assertTrue($result->hasCode(ValidationCode::AnchorCrossCheckFailed));
     }
 
+    /**
+     * A stated tolerance is the bound, not the bound plus a little.
+     *
+     * Both coordinates and the tolerance are canonical by the time they are compared, so there is
+     * no rounding slack left for an epsilon to absorb — adding one would only widen what the
+     * document says. `tolerance: 0` is the case that shows it: a receipt 0.001 pt away would pass
+     * and then be stored, unchanged, claiming it had been checked to zero.
+     */
+    public function test_a_cross_check_is_held_to_the_tolerance_it_states(): void
+    {
+        $document = FieldSchemaFixture::asArray();
+        $document['fields'][5]['anchor']['placement'] = 'cross_check';
+        $document['fields'][5]['anchor']['tolerance'] = 0;
+        $document['fields'][5]['anchor']['resolved'] = self::receipt([
+            'rect' => ['x' => 330.001, 'y' => 650, 'width' => 170, 'height' => 36],
+        ]);
+
+        $this->assertTrue(
+            (new FieldSchemaValidator)->validate($document)->hasCode(ValidationCode::AnchorCrossCheckFailed),
+        );
+    }
+
+    /** And a receipt exactly on the bound passes: the comparison is not made stricter either. */
+    public function test_a_cross_check_exactly_on_its_tolerance_is_accepted(): void
+    {
+        $document = FieldSchemaFixture::asArray();
+        $document['fields'][5]['anchor']['placement'] = 'cross_check';
+        $document['fields'][5]['anchor']['tolerance'] = 1.5;
+        $document['fields'][5]['rect']['x'] = 330.001;
+        $document['fields'][5]['anchor']['resolved'] = self::receipt([
+            'rect' => ['x' => 331.501, 'y' => 650, 'width' => 170, 'height' => 36],
+        ]);
+
+        $this->assertTrue((new FieldSchemaValidator)->validate($document)->isValid());
+    }
+
     public function test_a_cross_check_receipt_without_a_tolerance_has_nothing_to_prove(): void
     {
         $document = FieldSchemaFixture::asArray();

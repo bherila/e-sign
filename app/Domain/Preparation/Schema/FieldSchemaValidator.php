@@ -976,8 +976,9 @@ final class FieldSchemaValidator
                 'anchor.placement must be one of '.implode(', ', AnchorPlacementMode::values()).'; got "'.$placement
                     .'". "'.AnchorPlacementMode::Replace->value.'" lets the anchor decide where the field goes and '
                     .'keeps only the rectangle\'s size; "'.AnchorPlacementMode::CrossCheck->value.'" keeps the '
-                    .'declared rectangle and requires the anchor to agree with it. There is no default: a field '
-                    .'with a rectangle and an anchor that does not say which one governs is refused.',
+                    .'declared rectangle and requires the anchor to agree with it. Omitting the property is '
+                    .'"'.AnchorPlacementMode::Replace->value.'", which is what an anchor has always meant here; '
+                    .'"'.AnchorPlacementMode::CrossCheck->value.'" is the narrower mode and has to be stated.',
             );
 
             return null;
@@ -1380,9 +1381,15 @@ final class FieldSchemaValidator
                 return;
             }
 
-            $distance = abs($pair[0] - $pair[1]);
+            // The stated bound, enforced exactly. Both sides and the tolerance are already
+            // canonical, so the page-edge epsilon has nothing left to absorb here and would only
+            // widen what the document says: a receipt 0.001 pt outside a stated `tolerance: 0`
+            // would pass and then be stored, unchanged, saying it had been checked to zero. The
+            // distance is rounded rather than compared raw because subtracting two three-decimal
+            // values can land a few ulps above the bound they are exactly on.
+            $distance = CanonicalNumber::round(abs($pair[0] - $pair[1]));
 
-            if ($distance > $slack + CanonicalNumber::TOLERANCE) {
+            if ($distance > $slack) {
                 $errors[] = new ValidationError(
                     $path.'/rect/'.$name,
                     ValidationCode::AnchorCrossCheckFailed,

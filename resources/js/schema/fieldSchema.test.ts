@@ -699,6 +699,22 @@ describe("validateFieldSchema", () => {
       "/fields/5/anchor/resolved/rect/x",
     ],
     [
+      "a cross-check receipt outside the exact tolerance it states",
+      (raw) => {
+        raw.fields[5].anchor.placement = "cross_check";
+        raw.fields[5].anchor.tolerance = 0;
+        raw.fields[5].anchor.resolved = {
+          document_sha256: "d".repeat(64),
+          page: 2,
+          occurrence_index: 1,
+          anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
+          rect: { x: 330.001, y: 650, width: 170, height: 36 },
+        };
+      },
+      "anchor_cross_check_failed",
+      "/fields/5/anchor/resolved/rect/x",
+    ],
+    [
       "a recipient email that is not an address",
       (raw) => (raw.recipients[0].email = "buyer at example.test"),
       "invalid_email",
