@@ -87,6 +87,35 @@ final class AnchorResolutionGateTest extends TestCase
     }
 
     /**
+     * The refusal has to reach the caller as a code, not only inside a sentence.
+     *
+     * The native API maps `InvalidFieldSchemaException` to a `problems[]` list carrying each
+     * pointer and code. `EnvelopeSourceSnapshot` therefore runs the gate *outside* the catch that
+     * wraps ordinary schema failures in `invalid_field_schema`: flattening the gate's refusal into
+     * that generic reason would leave a caller reading "your snapshot is invalid" with nothing to
+     * branch on and no idea which option to drop.
+     */
+    public function test_the_refusal_survives_as_structured_errors(): void
+    {
+        $document = FieldSchemaFixture::asArray();
+        $document['fields'][5]['anchor']['placement'] = 'cross_check';
+        $document['fields'][5]['anchor']['tolerance'] = 2;
+
+        try {
+            AnchorResolutionGate::assertAvailable($document);
+            $this->fail('Expected the gated option to be refused.');
+        } catch (InvalidFieldSchemaException $refused) {
+            $this->assertSame(
+                [['path' => '/fields/5/anchor/placement', 'code' => 'anchor_resolution_unavailable']],
+                array_map(
+                    static fn ($error): array => ['path' => $error->path, 'code' => $error->code->value],
+                    $refused->errors(),
+                ),
+            );
+        }
+    }
+
+    /**
      * The gate must not outlive its reason.
      *
      * When `feat/anchor-resolution-at-send` lands, delete `AnchorResolutionGate`, its two call

@@ -7,6 +7,7 @@ namespace App\Domain\Integration\Native;
 use App\Domain\Delivery\Outbound\Exceptions\DestinationRefusedException;
 use App\Domain\Delivery\Webhooks\Exceptions\UnknownEventNameException;
 use App\Domain\Preparation\Schema\InvalidFieldSchemaException;
+use App\Domain\Preparation\Schema\ValidationError;
 use App\Domain\Preparation\Templates\TemplateStateException;
 use App\Domain\Signing\Exceptions\FieldSubmissionRejected;
 use App\Domain\Signing\Exceptions\IllegalTransition;
@@ -87,10 +88,20 @@ final class ApiErrorMap
                 ['reason' => $exception->reason],
             ),
 
+            // Every structured error, not only the first one flattened into a sentence. Codes
+            // are API surface and a client is expected to branch on them — `coordinate_too_precise`
+            // and `anchor_resolution_unavailable` in particular say something a caller can act on
+            // that "invalid_field_schema" does not.
             $exception instanceof InvalidFieldSchemaException => ApiException::of(
                 ErrorCode::InvalidSnapshot,
                 $exception->getMessage(),
-                ['reason' => 'invalid_field_schema'],
+                [
+                    'reason' => 'invalid_field_schema',
+                    'problems' => array_map(
+                        static fn (ValidationError $error): array => $error->toArray(),
+                        $exception->errors(),
+                    ),
+                ],
             ),
 
             // Anything else the signing module refuses. `code()` is documented as a stable

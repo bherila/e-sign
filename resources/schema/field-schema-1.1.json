@@ -163,7 +163,7 @@
           "$ref": "#/$defs/rect"
         },
         "required": {
-          "description": "Whether the recipient must complete the field. Omitted means true: an unstated requirement fails closed. Not accepted by every deployment: a build without anchor resolution refuses this option with anchor_resolution_unavailable rather than storing a promise it cannot keep.",
+          "description": "Whether the recipient must complete the field. Omitted means true: an unstated requirement fails closed.",
           "type": "boolean",
           "default": true
         },
