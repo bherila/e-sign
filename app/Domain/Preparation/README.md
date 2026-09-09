@@ -13,6 +13,7 @@ See docs/ARCHITECTURE.md for what this module owns. Keep cross-module calls behi
 | `Preflight/` | Classification result types: findings, codes, limits, metrics. |
 | `Assembly/` | Overlay and output value types for document assembly. |
 | `Text/` | Positioned text runs, anchor semantics and the library-independent resolver. |
+| `Anchoring/` | What those semantics mean for a whole field document, and for the bytes of one revision. |
 | `TcPdf/` | The tc-lib-pdf implementations of the three ports, plus the parsing helpers they need. |
 
 Only `TcPdf/` depends on `tecnickcom/tc-lib-pdf`. Everything else is plain PHP so the
@@ -39,6 +40,16 @@ The versioned native field schema is documented in
 [docs/preparation/field-schema.md](../../../docs/preparation/field-schema.md); the contract itself
 is `resources/schema/field-schema-1.0.json`, shared with the editor and the native API. `Schema/`
 stores rectangles as plain numbers in the space above and leaves every conversion to `Geometry/`.
+
+## Anchors
+
+`Text/` owns the semantics — what counts as a match and which match wins. `Anchoring/` owns what
+that means for a field document: which fields still need resolving, what the resolved rectangle
+does to the field, which failures are reported together, and what happens to a field whose
+optional anchor is genuinely absent. Resolution runs when a template version is published and
+again when an envelope is sent, and never after that; the whole account, including when a
+consumer-generated document should use explicit rectangles instead, is in
+[docs/preparation/anchors.md](../../../docs/preparation/anchors.md).
 
 ## Stage 0 status
 

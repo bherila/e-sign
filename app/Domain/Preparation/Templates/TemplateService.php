@@ -7,8 +7,12 @@ namespace App\Domain\Preparation\Templates;
 use App\Domain\Identity\Audit\AuditActor;
 use App\Domain\Identity\Audit\AuditRecorder;
 use App\Domain\Identity\Models\Workspace;
+use App\Domain\Preparation\Anchoring\AnchorResolutionFailed;
+use App\Domain\Preparation\Anchoring\AnchorResolutionOutcome;
+use App\Domain\Preparation\Anchoring\RevisionAnchorResolver;
 use App\Domain\Preparation\Documents\Models\Document;
 use App\Domain\Preparation\Documents\Models\DocumentRevision;
+use App\Domain\Preparation\Documents\PreflightPageSizes;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\FieldSchemaValidator;
 use App\Domain\Preparation\Schema\InvalidFieldSchemaException;
@@ -53,6 +57,7 @@ final readonly class TemplateService
     public function __construct(
         private FieldSchemaValidator $validator,
         private AuditRecorder $audit,
+        private RevisionAnchorResolver $anchors,
         private string $defaultConsentPolicyVersion,
     ) {}
 
@@ -334,14 +339,34 @@ final readonly class TemplateService
     }
 
     /**
-     * Publish a draft: lock it forever and make it the template's current version.
+     * Publish a draft: resolve its anchors, then lock it forever and make it the template's
+     * current version.
      *
      * The row is re-read `FOR UPDATE` inside the transaction and re-checked before the
      * stamp, so two concurrent publishes produce one published version and one
      * `version_already_published` error rather than two audit events and an ambiguous
      * `current_version_id` (architecture invariant 6).
      *
+     * ## Why anchors resolve here
+     *
+     * Publishing is the last moment a template can be fixed cheaply, and it is the first moment
+     * a field set and the exact bytes it will be placed on are both fixed: a version snapshots a
+     * specific immutable review revision, and publishing freezes the field set against it. So an
+     * anchor whose text is not in that document, or is in it twice, is discoverable *now* — while
+     * the sender is still authoring — instead of when they try to send.
+     *
+     * It is not the authoritative resolution. Send is, because an envelope does not have to come
+     * from a template at all. What publishing buys is the early failure and a published version
+     * whose rectangles are already concrete, so every envelope drawn from it starts with the
+     * placement settled and re-resolves nothing.
+     *
+     * An *optional* anchor that is absent is reported here and left unresolved rather than
+     * omitted: which fields an envelope leaves out is a fact about that envelope, and it is
+     * recorded on the envelope when it is sent.
+     *
      * @throws TemplateStateException When the template is retired or the version is already published.
+     * @throws InvalidFieldSchemaException When an anchor cannot be resolved, with one entry per
+     *                                     unplaceable field and a JSON Pointer to each.
      */
     public function publish(TemplateVersion $version, User $actor): TemplateVersion
     {
@@ -351,7 +376,23 @@ final readonly class TemplateService
             throw TemplateStateException::templateRetired($template);
         }
 
-        return DB::transaction(function () use ($version, $actor, $template): TemplateVersion {
+        // Cheap refusal first. A published version that left an optional anchor unresolved — the
+        // absent-anchor case, which publishing reports without acting on — would otherwise reach
+        // the resolution below on every repeat request and pay for a document read and a full
+        // parse before the locked check told the caller what it already knew. The authoritative
+        // check is still the one under the lock; this one just declines to do the work twice.
+        if ($version->isPublished()) {
+            throw TemplateStateException::versionAlreadyPublished($version->public_id);
+        }
+
+        // Outside the transaction, for the reason EnvelopeStateMachine::send() gives: resolving
+        // means reading a document object and parsing its content streams, and doing that under
+        // `lockForUpdate()` would hold the template-version row for the length of a PDF parse.
+        // It is safe out here because the result is confirmed against the locked row below, and
+        // a draft nobody else is editing will simply match.
+        $prepared = $this->resolveAnchors($version);
+
+        return DB::transaction(function () use ($version, $actor, $template, $prepared): TemplateVersion {
             /** @var TemplateVersion $locked */
             $locked = TemplateVersion::query()
                 ->whereKey($version->getKey())
@@ -360,6 +401,14 @@ final readonly class TemplateService
 
             if ($locked->isPublished()) {
                 throw TemplateStateException::versionAlreadyPublished($locked->public_id);
+            }
+
+            $resolution = $this->resolutionFor($locked, $prepared);
+
+            if ($resolution->changed()) {
+                $schema = $resolution->schema;
+                $locked->field_schema = $schema->toArray();
+                $locked->field_schema_sha256 = hash('sha256', $schema->canonicalJson());
             }
 
             $locked->published_at = now();
@@ -382,8 +431,24 @@ final readonly class TemplateService
                     'document_revision_id' => $locked->documentRevision?->public_id,
                     'field_schema_sha256' => $locked->field_schema_sha256,
                     'consent_policy_version' => $locked->consent_policy_version,
+                    'anchors_resolved' => count($resolution->resolved),
+                    'anchor_fields_absent' => $resolution->omissionsToArray(),
                 ],
             );
+
+            if ($resolution->resolved !== [] || $resolution->omissions !== []) {
+                $this->audit->record(
+                    AuditActor::user($actor),
+                    'preparation.template_version_anchors_resolved',
+                    $locked,
+                    [
+                        'workspace_id' => $template?->workspace?->public_id,
+                        'template_id' => $template?->public_id,
+                        'template_version_id' => $locked->public_id,
+                        'document_revision_id' => $locked->documentRevision?->public_id,
+                    ] + $resolution->toAuditPayload(),
+                );
+            }
 
             return $locked;
         });
@@ -557,43 +622,62 @@ final readonly class TemplateService
     }
 
     /**
-     * Displayed page sizes from a document's preflight report, or null when the report does
-     * not carry usable geometry (a document that never parsed, or a factory-made row).
+     * The resolution to store, confirmed against the row actually holding the lock.
+     *
+     * {@see publish()} resolves before opening the transaction so a PDF parse does not happen
+     * under the row lock. A draft can still be edited between the two, so the digest of the field
+     * set the pass ran against is compared with the locked row's, and a disagreement resolves
+     * again — inside the lock this time, because correctness outranks the lock-duration saving
+     * and a racing edit is rare enough that paying for it twice costs nothing in practice.
+     *
+     * @throws InvalidFieldSchemaException
      */
-    private function pageSizesFor(?Document $document): ?PageSizes
+    private function resolutionFor(TemplateVersion $locked, AnchorResolutionOutcome $prepared): AnchorResolutionOutcome
     {
-        $report = $document?->preflight_report;
-        $pages = is_array($report) ? ($report['pages'] ?? null) : null;
-
-        if (! is_array($pages) || $pages === []) {
-            return null;
+        if (hash_equals((string) $locked->field_schema_sha256, $prepared->sourceSchemaSha256)) {
+            return $prepared;
         }
 
-        $sizes = [];
+        return $this->resolveAnchors($locked);
+    }
 
-        foreach ($pages as $page) {
-            if (! is_array($page)
-                || ! isset($page['page'], $page['native_width'], $page['native_height'])
-                || ! is_numeric($page['page'])
-                || ! is_numeric($page['native_width'])
-                || ! is_numeric($page['native_height'])
-            ) {
-                return null;
-            }
+    /**
+     * Resolve the version's anchors against the revision it snapshots.
+     *
+     * Absent optional anchors are reported, not applied: see {@see publish()}. A failure becomes
+     * an {@see InvalidFieldSchemaException} so publishing answers exactly like drafting does — a
+     * 422 carrying every problem at once, each with a stable code and a JSON Pointer to the
+     * offending field, which is what lets the editor put the message on the field instead of on
+     * the document.
+     *
+     * @throws InvalidFieldSchemaException
+     */
+    private function resolveAnchors(TemplateVersion $version): AnchorResolutionOutcome
+    {
+        $schema = $version->fieldSchemaDocument();
+        $revision = $version->documentRevision;
 
-            $sizes[(int) $page['page']] = [
-                'width' => (float) $page['native_width'],
-                'height' => (float) $page['native_height'],
-            ];
+        if (! $revision instanceof DocumentRevision || $schema->anchoredFields() === []) {
+            return AnchorResolutionOutcome::unchanged($schema);
         }
 
         try {
-            return PageSizes::fromMap($sizes);
-        } catch (InvalidArgumentException) {
-            // A report this application cannot read is not a reason to refuse a draft; it
-            // means the page-fit check is not performed, which the validator's messages say.
-            return null;
+            return $this->anchors->resolve($revision, $schema, omitAbsentFields: false);
+        } catch (AnchorResolutionFailed $failed) {
+            throw new InvalidFieldSchemaException($failed->toValidationResult());
         }
+    }
+
+    /**
+     * Displayed page sizes from a document's preflight report, or null when the report does
+     * not carry usable geometry (a document that never parsed, or a factory-made row).
+     *
+     * A report this application cannot read is not a reason to refuse a draft; it means the
+     * page-fit check is not performed, which the validator's messages say.
+     */
+    private function pageSizesFor(?Document $document): ?PageSizes
+    {
+        return PreflightPageSizes::of($document);
     }
 
     /**

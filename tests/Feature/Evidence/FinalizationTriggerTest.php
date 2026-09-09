@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Evidence;
 
 use App\Domain\Evidence\Finalization\Jobs\FinalizeEnvelope;
+use App\Domain\Signing\Contracts\AnchorResolution;
 use App\Domain\Signing\Contracts\EnvelopeEventSink;
 use App\Domain\Signing\Envelopes\EnvelopeState;
 use App\Domain\Signing\Envelopes\EnvelopeStateMachine;
@@ -161,7 +162,7 @@ class FinalizationTriggerTest extends TestCase
 
     private function machine(SigningScenario $scenario): EnvelopeStateMachine
     {
-        return new EnvelopeStateMachine(app(EnvelopeEventSink::class), $scenario->assurance);
+        return new EnvelopeStateMachine(app(EnvelopeEventSink::class), $scenario->assurance, app(AnchorResolution::class));
     }
 
     /**

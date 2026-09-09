@@ -15,6 +15,7 @@ use App\Domain\Evidence\Finalization\ExecutedDocumentRenderer;
 use App\Domain\Evidence\Sealing\AssuranceLevel;
 use App\Domain\Preparation\Contracts\PdfAssembler;
 use App\Domain\Preparation\Documents\DocumentBlobStore;
+use App\Domain\Signing\Contracts\AnchorResolution;
 use App\Domain\Signing\Contracts\EnvelopeEventSink;
 use App\Domain\Signing\Envelopes\EnvelopeState;
 use App\Domain\Signing\Envelopes\EnvelopeStateMachine;
@@ -118,7 +119,7 @@ final class FinalizationScenario
         return new EnvelopeFinalizer(
             stateMachine: $sink === null
                 ? app(EnvelopeStateMachine::class)
-                : new EnvelopeStateMachine($sink, $this->signing->assurance),
+                : new EnvelopeStateMachine($sink, $this->signing->assurance, app(AnchorResolution::class)),
             sealer: $sealer ?? app(PdfSealer::class),
             validator: app(ArtifactValidator::class),
             sealIdentity: app(SealIdentity::class),

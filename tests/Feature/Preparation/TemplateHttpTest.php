@@ -53,7 +53,9 @@ class TemplateHttpTest extends TestCase
 
         $this->workspace = Workspace::factory()->create();
         $this->sender = DocumentWorkspace::memberOf($this->workspace, WorkspaceRole::Sender);
-        $this->document = $this->intake('multi-page-mixed-size');
+        // The PDF the shared field-schema fixture is written against: publishing resolves its
+        // anchors against the revision the version snapshots, so the two have to match.
+        $this->document = $this->intake('nda-two-signers');
     }
 
     protected function tearDown(): void
@@ -179,7 +181,7 @@ class TemplateHttpTest extends TestCase
             ->assertJsonPath('recipients.0.id', 'buyer')
             ->assertJsonPath('recipients.0.stage', 1)
             ->assertJsonPath('recipients.1.stage', 2)
-            ->assertJsonPath('field_schema.schema_version', '1.0');
+            ->assertJsonPath('field_schema.schema_version', '1.1');
 
         // No storage handle in a version payload, for the same reason there is none in a
         // document payload.

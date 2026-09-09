@@ -52,7 +52,7 @@ class FieldEditorPageTest extends TestCase
 
         $this->workspace = Workspace::factory()->create();
         $this->sender = DocumentWorkspace::memberOf($this->workspace, WorkspaceRole::Sender);
-        $this->document = $this->intake('multi-page-mixed-size');
+        $this->document = $this->intake('nda-two-signers');
     }
 
     protected function tearDown(): void
@@ -143,8 +143,16 @@ class FieldEditorPageTest extends TestCase
 
     public function test_the_payload_carries_the_displayed_geometry_of_every_page(): void
     {
-        $template = $this->createTemplate();
-        $version = $this->draftVersion($template);
+        // Its own document: the class fixture is the two-page PDF the shared field set's
+        // anchors are written against, and this case is about page geometry.
+        $mixed = $this->intake('multi-page-mixed-size');
+        $template = $this->createTemplate('Mixed sizes');
+        $version = $this->service()->createDraftVersion(
+            $template,
+            $this->sender,
+            $mixed,
+            $this->emptyFieldSchema(),
+        );
 
         $payload = $this->payload(
             $this->actingAs($this->sender)

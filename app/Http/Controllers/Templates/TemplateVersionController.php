@@ -31,7 +31,9 @@ use Illuminate\Http\JsonResponse;
  * on this controller remembering it.
  *
  * Field-schema failures come back as a 422 carrying every problem at once with JSON
- * Pointers — see TranslatesTemplateFailures for why the list appears in two shapes.
+ * Pointers — see TranslatesTemplateFailures for why the list appears in two shapes. Publishing
+ * answers the same way, because it runs one more check the draft could not: it resolves every
+ * anchor against the document revision the version snapshots (docs/preparation/anchors.md).
  */
 class TemplateVersionController extends Controller
 {
@@ -92,6 +94,11 @@ class TemplateVersionController extends Controller
     {
         try {
             $version = $this->templates->publish($request->templateVersion(), $request->currentUser());
+        } catch (InvalidFieldSchemaException $e) {
+            // Publishing resolves every anchor against the revision the version snapshots, so a
+            // field whose anchor text is missing from that document — or in it twice — is refused
+            // here, with a pointer to the field, rather than discovered at send.
+            return $this->invalidFieldSchemaResponse($e);
         } catch (TemplateStateException $e) {
             return $this->templateStateResponse($e);
         }

@@ -214,6 +214,19 @@ describe("duplicate and delete", () => {
     );
   });
 
+  it("drops the anchor so a duplicate stays where it was put", () => {
+    // `counterparty_signature` is placed by anchor. A `replace` anchor decides x and y at
+    // publish and send, so a copy that kept it would resolve straight back onto the original —
+    // two fields in one place, in a document whose canvas showed two.
+    const next = editorReducer(state(), { type: "duplicate_field", id: "counterparty_signature" });
+    const copy = findField(next.document, "counterparty_signature_copy");
+
+    expect(copy).toBeDefined();
+    expect(copy?.anchor).toBeUndefined();
+    expect(copy?.rect).toEqual({ x: 342, y: 662, width: 170, height: 36 });
+    expect(findField(next.document, "counterparty_signature")?.anchor).toBeDefined();
+  });
+
   it("clears the selection when the selected field is deleted", () => {
     const selected = apply(state(), { type: "select", fieldId: "buyer_initials" });
     const deleted = editorReducer(selected, { type: "delete_field", id: "buyer_initials" });

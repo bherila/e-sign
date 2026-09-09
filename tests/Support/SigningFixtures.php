@@ -6,6 +6,7 @@ namespace Tests\Support;
 
 use App\Domain\Preparation\Schema\FieldDefinition;
 use App\Domain\Preparation\Schema\FieldType;
+use App\Domain\Preparation\Schema\SchemaVersion;
 use App\Domain\Signing\Fields\FieldMateriality;
 use App\Domain\Signing\Models\Envelope;
 
@@ -132,6 +133,13 @@ final class SigningFixtures
      */
     public static function mutateField(array $schema, string $fieldId, array $changes): array
     {
+        // An anchor written by a test may use members that arrived in 1.1, and a document may
+        // only use what the version it declares declares. Saying so here keeps every caller from
+        // having to remember it.
+        if (array_key_exists('anchor', $changes) && is_array($changes['anchor'])) {
+            $schema['schema_version'] = SchemaVersion::CURRENT;
+        }
+
         foreach ($schema['fields'] as $index => $field) {
             if ($field['id'] === $fieldId) {
                 $schema['fields'][$index] = array_replace($field, $changes);

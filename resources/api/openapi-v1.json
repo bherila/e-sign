@@ -678,6 +678,16 @@
               }
             }
           },
+          "503": {
+            "description": "The document behind the envelope could not be read, so its anchors could not be resolved (`document_unavailable`). Nothing about the request needs to change: this is a storage failure on the service side and the same call may succeed on a retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "500": {
             "description": "An unexpected failure. The body carries no stack trace, no file path, and no SQL.",
             "content": {
@@ -1944,6 +1954,7 @@
                   "destination_refused",
                   "unknown_event_name",
                   "unsupported",
+                  "document_unavailable",
                   "internal_error"
                 ],
                 "description": "Stable machine code. Renaming one is a breaking change."
@@ -2203,7 +2214,7 @@
               "null"
             ],
             "additionalProperties": true,
-            "description": "A native field schema 1.0 document. Refused with `template_version_id`, which already carries one."
+            "description": "A native field schema document. The current contract version is 1.1; a document declaring an older supported minor is read against that minor's contract, and one declaring a newer minor is refused. Refused with `template_version_id`, which already carries one."
           },
           "title": {
             "type": [
@@ -2418,6 +2429,45 @@
               "string",
               "null"
             ]
+          },
+          "omitted_anchor_fields": {
+            "description": "Fields the source declared that were deliberately not placed, because their anchor declared that its text may legitimately be absent from this document and it was. Empty for almost every envelope. Written once, when the envelope is sent; an anchor that could not be resolved is a refused send, not an entry here. See docs/preparation/anchors.md.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field_id": {
+                  "type": "string"
+                },
+                "recipient_id": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "alias": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "page": {
+                  "type": "integer"
+                },
+                "anchor_text": {
+                  "type": "string"
+                },
+                "occurrence": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "optional_anchor_absent"
+                  ]
+                }
+              }
+            }
           },
           "created_at": {
             "type": [

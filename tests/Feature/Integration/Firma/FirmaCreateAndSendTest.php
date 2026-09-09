@@ -5,8 +5,15 @@ declare(strict_types=1);
 namespace Tests\Feature\Integration\Firma;
 
 use App\Domain\Identity\Credentials\IssuedServiceCredential;
+use App\Domain\Integration\Firma\FieldPlacement;
+use App\Domain\Integration\Firma\PlannedRecipient;
+use App\Domain\Preparation\Contracts\PdfPreflight;
 use App\Domain\Preparation\Documents\DocumentBlobStore;
 use App\Domain\Preparation\Documents\Models\Document;
+use App\Domain\Preparation\Schema\AnchorPlacementMode;
+use App\Domain\Preparation\Schema\FieldSchemaDocument;
+use App\Domain\Preparation\Schema\FieldSchemaValidator;
+use App\Domain\Preparation\Schema\SchemaVersion;
 use App\Domain\Signing\Envelopes\EnvelopeState;
 use App\Domain\Signing\Models\Envelope;
 use App\Domain\Signing\Sessions\Models\RecipientInvitation;
@@ -245,6 +252,171 @@ class FirmaCreateAndSendTest extends TestCase
         $this->assertEqualsWithDelta(582.4, $field->rect->y, 0.01);
         $this->assertEqualsWithDelta(170.0, $field->rect->width, 0.01);
         $this->assertEqualsWithDelta(36.0, $field->rect->height, 0.01);
+
+        // Issue #23: the request is kept beside the rectangle it produced, with a receipt
+        // naming the revision the text was located in. Send resolves the request again from
+        // scratch — a receipt records what was found and is never a reason to skip looking — so
+        // what is stored here has to be a request the native resolver can answer identically.
+        $anchor = $field->anchor;
+        $this->assertNotNull($anchor);
+        $this->assertSame('Signature:', $anchor->text);
+        $this->assertSame(AnchorPlacementMode::Replace, $anchor->mode());
+        $this->assertTrue($anchor->required);
+
+        $receipt = $anchor->resolved;
+        $this->assertNotNull($receipt);
+        $this->assertSame($envelope->document_sha256, $receipt->documentSha256);
+        $this->assertSame(1, $receipt->page);
+        $this->assertSame(1, $receipt->occurrenceIndex);
+        $this->assertSame($field->rect->toArray(), $receipt->rect->toArray());
+        // The receipt also records where the *text* was, which is not the field's rectangle.
+        $this->assertSame(['x' => 72, 'y' => 582.4, 'width' => 72, 'height' => 12], $receipt->anchorRect->toArray());
+
+        // And the send that create-and-send performed did not move any of it.
+        $this->assertSame(
+            hash('sha256', $envelope->fieldSchema()->canonicalJson()),
+            $envelope->field_schema_sha256,
+        );
+        $this->assertNull($envelope->omitted_anchor_fields);
+    }
+
+    /**
+     * The stored request is the one that was actually resolved, whitespace and all.
+     *
+     * `anchoredRect()` trims what it is handed before looking it up, so `" Signature: "` finds
+     * `"Signature:"`. Send then resolves the same document again from scratch, and it resolves
+     * whatever the schema *says* — so storing the caller's untrimmed string would have the facade
+     * place the field and the native resolver immediately fail to find it, on the same bytes, in
+     * the same request.
+     *
+     * Driven through `FieldPlacement` rather than the HTTP surface on purpose: Laravel's
+     * `TrimStrings` middleware happens to trim the payload first, so over HTTP the two
+     * normalisations agree by accident. A domain object's contract does not get to depend on
+     * which middleware ran.
+     */
+    public function test_a_whitespace_padded_anchor_is_stored_as_the_text_that_was_resolved(): void
+    {
+        $bytes = PdfFixtures::bytes('single-page-letter');
+        $pages = [];
+
+        foreach (app(PdfPreflight::class)->inspect($bytes)->pages as $geometry) {
+            $pages[$geometry->pageNumber] = $geometry;
+        }
+
+        $schema = app(FieldPlacement::class)->schema(
+            'doc_whitespace_anchor',
+            $pages,
+            [new PlannedRecipient('r1', 'Dana Buyer', 'dana@buyer.example.test', 1, ['temp_1'])],
+            [[
+                'type' => 'signature',
+                'page_number' => 1,
+                'recipient_id' => 'temp_1',
+                'anchor' => ['text' => "  Signature: \n", 'occurrence' => 'sole'],
+                'position' => [
+                    'x' => 0.0,
+                    'y' => 0.0,
+                    'width' => 170.0 / self::PAGE_WIDTH * 100,
+                    'height' => 36.0 / self::PAGE_HEIGHT * 100,
+                ],
+            ]],
+            static fn (): string => $bytes,
+            true,
+            hash('sha256', $bytes),
+        );
+
+        $field = FieldSchemaDocument::fromArray($schema)->fields[0];
+
+        $this->assertSame('Signature:', $field->anchor?->text);
+        $this->assertEqualsWithDelta(72.0, $field->rect->x, 0.01);
+        $this->assertEqualsWithDelta(582.4, $field->rect->y, 0.01);
+    }
+
+    /**
+     * A generated document has to declare the version it was generated as.
+     *
+     * The emitted anchor carries a `resolved` receipt, which is a 1.1 member. A document that
+     * said 1.0 while containing one would be rejected by every consumer holding the unchanged
+     * 1.0 contract — it forbids undeclared properties — and the envelope persists that document
+     * verbatim, because send finds the receipt already matches its digest and rewrites nothing.
+     */
+    public function test_a_generated_schema_declares_the_version_it_was_generated_as(): void
+    {
+        [, $issued] = $this->scenario();
+
+        $response = $this->postJson(self::BASE.'/create-and-send', [
+            'name' => 'Synthetic anchored agreement',
+            'document' => base64_encode(PdfFixtures::bytes('single-page-letter')),
+            'recipients' => [['first_name' => 'Dana', 'email' => 'dana@buyer.example.test', 'order' => 1]],
+            'fields' => [[
+                'type' => 'signature',
+                'page_number' => 1,
+                'anchor' => ['text' => 'Signature:', 'occurrence' => 'sole'],
+                'position' => [
+                    'x' => 0.0,
+                    'y' => 0.0,
+                    'width' => 170.0 / self::PAGE_WIDTH * 100,
+                    'height' => 36.0 / self::PAGE_HEIGHT * 100,
+                ],
+            ]],
+        ], FirmaFacadeScenario::headers($issued))->assertStatus(201);
+
+        $envelope = Envelope::query()->where('public_id', $response->json('id'))->firstOrFail();
+
+        $this->assertSame(SchemaVersion::CURRENT, $envelope->field_schema['schema_version']);
+        $this->assertNotNull($envelope->fieldSchema()->fields[0]->anchor?->resolved);
+
+        // And it is a document the published contract for that version accepts.
+        $this->assertTrue(
+            (new FieldSchemaValidator)->validate($envelope->field_schema)->isValid(),
+            'The stored schema must re-import cleanly; an envelope carries it on every request.',
+        );
+    }
+
+    /**
+     * The receipt has to name the bytes the text was actually located in.
+     *
+     * With `rebuild_pages` on, intake stores a *rewritten* review revision, so the upload and the
+     * revision are two different PDFs. The page geometry has always come from the revision; if
+     * the text came from the upload while the receipt claimed the revision's digest, send would
+     * take that receipt as proof the work was already done and place fields using coordinates
+     * measured in a document nobody signs.
+     */
+    public function test_an_anchor_is_resolved_in_the_review_revision_that_will_be_signed(): void
+    {
+        config()->set('esign.documents.normalization.rebuild_pages', true);
+
+        [, $issued] = $this->scenario();
+
+        $response = $this->postJson(self::BASE.'/create-and-send', [
+            'name' => 'Synthetic anchored agreement',
+            'document' => base64_encode(PdfFixtures::bytes('single-page-letter')),
+            'recipients' => [['first_name' => 'Dana', 'email' => 'dana@buyer.example.test', 'order' => 1]],
+            'fields' => [[
+                'type' => 'signature',
+                'page_number' => 1,
+                'anchor' => ['text' => 'Signature:', 'occurrence' => 'sole'],
+                'position' => [
+                    'x' => 0.0,
+                    'y' => 0.0,
+                    'width' => 170.0 / self::PAGE_WIDTH * 100,
+                    'height' => 36.0 / self::PAGE_HEIGHT * 100,
+                ],
+            ]],
+        ], FirmaFacadeScenario::headers($issued))->assertStatus(201);
+
+        $envelope = Envelope::query()->where('public_id', $response->json('id'))->firstOrFail();
+        $revision = $envelope->documentRevision;
+        $receipt = $envelope->fieldSchema()->fields[0]->anchor?->resolved;
+
+        $this->assertNotNull($receipt);
+        $this->assertNotNull($revision);
+
+        // The revision is a rewrite of the upload, so its digest is its own.
+        $this->assertNotSame(hash('sha256', PdfFixtures::bytes('single-page-letter')), $revision->sha256);
+
+        // And the receipt names it, because that is the document the text was read from.
+        $this->assertSame($revision->sha256, $receipt->documentSha256);
+        $this->assertSame($envelope->document_sha256, $receipt->documentSha256);
     }
 
     /**
@@ -664,6 +836,79 @@ class FirmaCreateAndSendTest extends TestCase
         // only evidence of what was uploaded — but no signing request exists.
         $this->assertSame(0, Envelope::query()->count());
         $this->assertSame(1, $this->ingestedCount());
+    }
+
+    /**
+     * `create-and-send` opens the document once, so there is no window to lose it in.
+     *
+     * Anchors are resolved twice by design — once by the facade to place the fields, and again
+     * inside `send()`, because a receipt is a record of what was found and never permission to
+     * skip looking. Two *reads* would be a different matter: the envelope is committed between
+     * them, so an object that became unavailable in between would return an error to a client
+     * whose whole contract is that this is one call, leave a draft behind anyway, and turn the
+     * obvious retry into a duplicate agreement.
+     *
+     * The fix carries the proven bytes through the request rather than compensating afterwards:
+     * a rollback would itself have to succeed while the object store is the thing that is
+     * failing. `RevisionBytes` is bound `scoped` and remembers what it has proved, so the second
+     * resolution measures the same bytes without a second `get()`.
+     *
+     * This makes the object vanish the instant it has been read — the failure Codex described,
+     * exactly in the window it described — and asserts the call still succeeds, with one
+     * envelope, `sent`, no draft, and one read. (`putVerified()` confirms its write through
+     * `readStream()`, so intercepting `get()` catches only the anchor reads.)
+     */
+    public function test_the_document_is_opened_once_so_there_is_no_window_between_create_and_send(): void
+    {
+        [, $issued] = $this->scenario();
+
+        $real = Storage::disk('documents');
+        $reads = 0;
+
+        $disk = Mockery::mock($real)->makePartial();
+        $disk->shouldReceive('get')->andReturnUsing(function (string $path) use ($real, &$reads): ?string {
+            $reads++;
+            $bytes = $real->get($path);
+            // Gone the moment it has been handed over. A second read cannot succeed.
+            $real->delete($path);
+
+            return $bytes;
+        });
+
+        $filesystems = Mockery::mock(FilesystemManager::class);
+        $filesystems->shouldReceive('disk')->andReturn($disk);
+        $this->app->instance(DocumentBlobStore::class, new DocumentBlobStore($filesystems));
+
+        $response = $this->postJson(self::BASE.'/create-and-send', [
+            'name' => 'Synthetic anchored agreement',
+            'document' => base64_encode(PdfFixtures::bytes('single-page-letter')),
+            'recipients' => [['first_name' => 'Dana', 'email' => 'dana@buyer.example.test', 'order' => 1]],
+            'fields' => [[
+                'type' => 'signature',
+                'page_number' => 1,
+                'anchor' => ['text' => 'Signature:', 'occurrence' => 'sole'],
+                'position' => [
+                    'x' => 0.0,
+                    'y' => 0.0,
+                    'width' => 170.0 / self::PAGE_WIDTH * 100,
+                    'height' => 36.0 / self::PAGE_HEIGHT * 100,
+                ],
+            ]],
+        ], FirmaFacadeScenario::headers($issued))->assertStatus(201);
+
+        $this->assertSame(1, $reads, 'The document is read once and carried through the request.');
+        $this->assertSame(1, Envelope::query()->count());
+        $this->assertSame(0, Envelope::query()->where('state', EnvelopeState::Draft->value)->count());
+
+        $envelope = Envelope::query()->where('public_id', $response->json('id'))->firstOrFail();
+
+        $this->assertSame(EnvelopeState::Sent, $envelope->state);
+
+        // And the fields really were placed from the document, so the read that was skipped was
+        // a second one rather than the only one.
+        $field = $envelope->fieldSchema()->fields[0];
+        $this->assertEqualsWithDelta(72.0, $field->rect->x, 0.01);
+        $this->assertEqualsWithDelta(582.4, $field->rect->y, 0.01);
     }
 
     /**

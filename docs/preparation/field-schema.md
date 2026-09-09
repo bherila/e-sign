@@ -86,7 +86,7 @@ address recorded here.
 | `recipient_id` | yes | must resolve to a declared recipient |
 | `type` | yes | one of the [field types](#field-types) |
 | `page` | yes | 1-based |
-| `rect` | yes | `x`, `y`, `width`, `height` in the declared space, top-left anchored |
+| `rect` | yes | `x`, `y`, `width`, `height` in the declared space, top-left anchored. With a `replace` anchor, `x` and `y` are a placeholder resolution overwrites; the size is always the field's own |
 | `required` | no, default `true` | an unstated requirement fails closed |
 | `read_only` | no, default `false` | |
 | `label` | no | shown in the editor and to the signer |
@@ -104,17 +104,24 @@ mapping. Neither is ever rewritten by the importer.
 ### Anchor placement
 
 `anchor` is a placement *request*: find this text, then place the field's rectangle relative to
-it. Version 1.0 stores the request; resolution is deterministic positioned-text extraction
-(`app/Domain/Preparation/Text`) that writes the resolved rectangle into `rect` before send. A
-missing or ambiguous required anchor is an error, never a guess, and matching is an exact
-case-sensitive match on decoded text runs — never a regular expression over PDF bytes.
+it. Resolution is deterministic positioned-text extraction (`app/Domain/Preparation/Text`) that
+writes the resolved rectangle into `rect` and a receipt into `anchor.resolved` — when a template
+version is published, and again when an envelope is sent, and never after that. A missing or
+ambiguous required anchor is an error, never a guess, and matching is an exact case-sensitive
+match on decoded text runs — never a regular expression over PDF bytes.
+
+[anchors.md](anchors.md) is the full account: when each failure fires, the narrow compatibility
+option for an anchor that may be absent and where the omission is recorded, and when a
+consumer-generated document should use explicit rectangles instead. What follows is the shape.
 
 ```json
 {
   "text": "Counterparty signature:",
   "occurrence": "sole",
+  "placement": "replace",
   "origin": "bottom_left",
-  "offset": {"dx": 0, "dy": 12.5}
+  "offset": {"dx": 0, "dy": 12.5},
+  "required": true
 }
 ```
 
@@ -122,19 +129,54 @@ case-sensitive match on decoded text runs — never a regular expression over PD
 |---|---|---|
 | `text` | yes | exact string to locate |
 | `occurrence` | yes | `"sole"`, or a 1-based index in document order |
+| `placement` | no, default `replace` | `"replace"` (the anchor decides x and y) or `"cross_check"` (the rect decides, and the anchor must agree) |
 | `origin` | no, default `top_left` | corner of the matched text the offset is measured from; one of `top_left`, `top_right`, `bottom_left`, `bottom_right` |
 | `offset` | no | `dx`, `dy` in the declared unit, `dy` downwards, either may be negative |
+| `required` | no, default `true` | false says the text may legitimately be absent; only accepted on a field that is itself optional and whose placement is `replace` |
+| `tolerance` | no | how far, in points, a `cross_check` anchor may resolve from the declared rect; meaningless with `replace` |
+| `resolved` | written by the service | the receipt: the digest of the bytes the text was found in, the page, the occurrence taken, and both rectangles. `anchor_rect` is a `measured_rect` — an observation of where the text was, which may overhang the page — while `rect` is a placement and, in `replace` mode, must be the field's own |
 
-`occurrence` is **required and has no default.** The resolver refuses a "first match wins"
+`occurrence` is **required and has no default**: the resolver refuses a "first match wins"
 fallback, because silently taking the first match moves a signature box the moment the contract
-text changes; an anchor that matches twice without saying which one it means is under-specified.
-The resolver's third mode, `all`, places one box per match, which a single field with a single id
-cannot represent, so it is not a document value: a document that wants several boxes says so with
-several fields.
+text changes. Its third mode, `all`, places one box per match, which a single field with a single
+id cannot represent, so it is not a document value: a document that wants several boxes says so
+with several fields.
+
+`placement` is defaulted rather than required, and `anchors.md` explains why the two are treated
+differently: `replace` is not a guess between readings but the only behaviour an anchor has ever
+had here, and defaulting it is what keeps an already-written anchor's canonical bytes — and the
+field-schema digest every attestation is bound to — unchanged.
+
+`placement`, `required`, `tolerance` and `resolved` are additive optional members and therefore
+arrive in **schema 1.1**. `resources/schema/field-schema-1.0.json` is unchanged and still
+published; a 1.0 document keeps its version and its bytes, and this build reads both. Using one of
+those members in a document that declares 1.0 is `unknown_property` — exactly what a consumer
+holding the 1.0 contract would say — so the version string is enforced rather than merely
+written.
 
 `occurrence` and `origin` are the serialised form of `Text\AnchorOccurrence` and
 `Text\AnchorOrigin`, so the document cannot express a placement the resolver does not implement,
 and there is one definition of what each mode means.
+
+**1.1 also states the relationships between these properties, and 1.0 did not.** Four rules tie
+one property to another, and each is now an `if`/`then` in the contract file rather than only a
+rule in the importers:
+
+| Rule | Where |
+|---|---|
+| `anchor.required: false` requires the field's own `required` to be `false` | `$defs/field` |
+| `anchor.tolerance` requires `placement: "cross_check"` | `$defs/anchor` |
+| `anchor.required: false` requires `placement: "replace"` | `$defs/anchor` |
+| a `cross_check` `resolved` receipt requires `anchor.tolerance` | `$defs/anchor` |
+
+A relationship between two properties is the easiest kind of rule for a contract file and an
+importer to disagree about, because the file can only say it with a conditional and it is tempting
+not to write one. The cost of that disagreement falls entirely on an integration: it validates
+against the published file, is told its document conforms, and then gets a 422 from the service.
+`fieldSchemaContract.test.ts` runs `ajv` and the TypeScript importer over the same document for
+each rule and asserts both refuse it; `FieldSchemaContractTest` pins the conditionals' shape so
+they cannot be dropped from the file. 1.0 stays exactly as published — these are not backported,
+because the file is frozen and its consumers are entitled to the bytes they have.
 
 ## Field types
 
@@ -156,8 +198,10 @@ bytes on both the server and the client:
 
 1. Properties in the order above, at every level. Fixed, not alphabetical, so the emitted document
    reads like the schema file and the specification example.
-2. `required` and `read_only` always stated. (`anchor.occurrence` is required by the schema
-   itself, so it is always present.)
+2. `required` and `read_only` always stated. Inside `anchor` the opposite rule applies: `placement`
+   and `required` are written only when they differ from their defaults, which is what keeps an
+   anchor written before those properties existed byte-identical. (`anchor.occurrence` is required
+   by the schema itself, so it is always present.)
 3. Coordinates rounded once to **three decimals**, half away from zero (0.001 pt is roughly a
    third of a micron; no drag can express less). Integral values are written `60`, never `60.0`.
 4. No insignificant whitespace; slashes and non-ASCII characters unescaped.
@@ -199,6 +243,17 @@ breaking change.
 | `dimension_not_positive` | a zero or negative `width` or `height` |
 | `rect_out_of_page` | a rectangle extending past the edge of its page |
 | `unresolved_prefill_variable` | a prefill variable the sending context cannot resolve |
+| `anchor_optional_on_required_field` | `anchor.required: false` on a field whose own `required` is true |
+| `anchor_not_found` | a required anchor's text is not on the field's page |
+| `anchor_ambiguous` | `occurrence: "sole"` matched more than once |
+| `anchor_occurrence_out_of_range` | `occurrence: n` with fewer than *n* matches |
+| `anchor_text_unreadable` | the document's bytes were read and could not be parsed. Bytes that could not be *read* are a retryable server failure instead, never a validation error |
+| `anchor_cross_check_failed` | a `cross_check` anchor resolved further than its tolerance from the declared rect |
+| `anchor_resolved_off_page` | an anchor's offset put the rectangle off the page it was found on |
+
+The last six need a document, so they are reported when a template version is published and when
+an envelope is sent, not when a field set is merely written; see [anchors.md](anchors.md).
+`anchor_optional_on_required_field` needs no document and is checked with the rest.
 
 Every rule has a test on both sides, from the same fixture:
 `tests/Unit/Preparation/Schema/FieldSchemaValidatorTest.php` and

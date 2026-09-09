@@ -202,8 +202,13 @@ say so.
   what happens to fields bound to somebody who is removed.
 - **Anchor authoring.** An anchor on an imported field is displayed and preserved; the editor
   does not create one. Anchor resolution is deterministic positioned-text extraction on the
-  server (`app/Domain/Preparation/Text`), and an authoring UI for it needs the extracted text
-  runs, which this page does not have.
+  server (`app/Domain/Preparation/Anchoring`, over `app/Domain/Preparation/Text`), and an
+  authoring UI for it needs the extracted text runs, which this page does not have. What the
+  editor does have to handle is the *result*: publishing resolves every anchor, so a published
+  version's fields carry concrete rectangles and a receipt under `anchor.resolved`, and the
+  mirror in `resources/js/schema/fieldSchema.ts` validates and round-trips both. A resolved
+  anchored field draws exactly like a hand-placed one — see
+  [anchors.md](anchors.md).
 - **Publishing.** The editor saves a draft. Publishing is a separate, deliberate action on the
   template version endpoint.
 - **Undo across reloads.** History is in memory. A saved version is the durable record, and the

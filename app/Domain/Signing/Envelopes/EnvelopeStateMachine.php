@@ -4,8 +4,13 @@ declare(strict_types=1);
 
 namespace App\Domain\Signing\Envelopes;
 
+use App\Domain\Preparation\Anchoring\AnchorOmission;
+use App\Domain\Preparation\Anchoring\AnchorResolutionFailed;
+use App\Domain\Preparation\Anchoring\AnchorResolutionOutcome;
 use App\Domain\Preparation\Schema\FieldDefinition;
+use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\FieldType;
+use App\Domain\Signing\Contracts\AnchorResolution;
 use App\Domain\Signing\Contracts\AssurancePolicyCheck;
 use App\Domain\Signing\Contracts\EnvelopeEventSink;
 use App\Domain\Signing\Exceptions\ConsentMismatch;
@@ -110,6 +115,7 @@ final readonly class EnvelopeStateMachine
     public function __construct(
         private EnvelopeEventSink $sink,
         private AssurancePolicyCheck $assurance,
+        private AnchorResolution $anchors,
     ) {}
 
     /**
@@ -129,12 +135,35 @@ final readonly class EnvelopeStateMachine
      */
     public function send(Envelope $envelope, ?int $expectedVersion = null): TransitionResult
     {
+        // Outside the transaction on purpose. Resolving an anchor means reading a document object
+        // and parsing its content streams, which is orders of magnitude slower than anything else
+        // send() does, and doing it under `lockForUpdate()` would hold the envelope row for the
+        // length of a PDF parse. It is safe out here because resolution is a pure function of the
+        // copied field schema and the document's bytes, and both are pinned by the version
+        // compare-and-swap below: any change to either bumps `version`, and a stale resolution is
+        // therefore a `StaleEnvelope` rather than a wrong rectangle. The re-check inside the lock
+        // says so rather than relying on the reader to know it.
+        /** @var list<array{code: string, message: string}> $anchorProblems */
+        $anchorProblems = [];
+        $prepared = $envelope->state === EnvelopeState::Draft
+            ? $this->resolveAnchors($envelope, $anchorProblems)
+            // Not a draft as far as the caller's copy knows, so `assertLegal()` is about to
+            // refuse this anyway and there is no point parsing a PDF to find that out. If the
+            // copy is wrong, the version compare-and-swap refuses it instead.
+            : AnchorResolutionOutcome::unchanged($envelope->fieldSchema());
+
         return $this->withLockedEnvelope(
             $envelope,
             $expectedVersion,
-            function (Envelope $locked) use ($envelope): TransitionResult {
+            function (Envelope $locked) use ($envelope, $prepared, $anchorProblems): TransitionResult {
                 $from = $this->assertLegal('send', $locked);
-                $this->assertSendable($locked);
+
+                // Anchors first: the gate below reasons about the field set that will actually
+                // be sent, which is the resolved one. A field whose optional anchor was absent
+                // is gone by then, and a field that could not be placed is reported alongside
+                // every other reason this envelope is not ready.
+                $resolution = $this->resolutionFor($locked, $prepared, $anchorProblems);
+                $this->assertSendable($locked, $resolution->schema, $anchorProblems);
 
                 $now = CarbonImmutable::now();
                 $changes = [
@@ -149,7 +178,10 @@ final readonly class EnvelopeStateMachine
                     $changes['content_frozen_at'] = $now;
                 }
 
+                $changes += $this->resolvedSchemaChanges($resolution);
+
                 $this->commitEnvelope($locked, $changes);
+                $this->discardOmittedValues($locked, $resolution);
 
                 if ($locked->signing_mode->freezesAtSend()) {
                     $this->stampMaterialValuesFrozen($locked, $now);
@@ -162,6 +194,9 @@ final readonly class EnvelopeStateMachine
                     'expires_at' => $locked->expires_at?->toIso8601String(),
                     'signing_mode' => $locked->signing_mode->value,
                     'content_frozen' => $locked->isContentFrozen(),
+                    'field_schema_sha256' => $locked->field_schema_sha256,
+                    'anchors_resolved' => count($resolution->resolved),
+                    'anchor_fields_omitted' => $resolution->omissionsToArray(),
                 ]);
 
                 $this->syncBack($envelope, $locked);
@@ -902,6 +937,121 @@ final readonly class EnvelopeStateMachine
     // ---------------------------------------------------------------------------------
 
     /**
+     * Turn every anchor in the copied field schema into a stored rectangle.
+     *
+     * Send is the authoritative resolution, and for a good reason: an envelope does not have to
+     * come from a template. The native API and the facade can both build one straight from a
+     * document, and neither has a publish step to have caught anything at. Publishing a template
+     * version resolves too, but that is an early warning while a sender can still fix it, not the
+     * moment that decides where a box goes.
+     *
+     * Failures are collected rather than thrown, so an unplaceable anchor is reported in the same
+     * 422 as a recipient with no email address instead of hiding the rest of the list behind it.
+     * Nothing is placed at a fallback position and nothing is quietly dropped: a required anchor
+     * that is absent or ambiguous stops the send.
+     *
+     * @param  list<array{code: string, message: string}>  $anchorProblems  Filled in on failure.
+     */
+    private function resolveAnchors(Envelope $envelope, array &$anchorProblems): AnchorResolutionOutcome
+    {
+        try {
+            return $this->anchors->forEnvelope($envelope);
+        } catch (AnchorResolutionFailed $failed) {
+            $anchorProblems = $failed->toSendProblems();
+
+            return AnchorResolutionOutcome::unchanged($envelope->fieldSchema());
+        }
+    }
+
+    /**
+     * The resolution to commit, confirmed against the row actually holding the lock.
+     *
+     * {@see send()} resolves before opening the transaction so a PDF parse does not happen under
+     * the row lock. The version check has already established that the locked row is the one the
+     * caller read, so the pre-computed outcome is almost always the right one — but "almost
+     * always" is not a guarantee, and a caller may pass an `expectedVersion` that does not match
+     * the instance it handed in. So the digest of the schema the resolution was computed from is
+     * compared with the locked row's, and a disagreement resolves again, inside the lock, rather
+     * than committing rectangles measured against a different field set.
+     *
+     * @param  list<array{code: string, message: string}>  $anchorProblems
+     */
+    private function resolutionFor(
+        Envelope $locked,
+        AnchorResolutionOutcome $prepared,
+        array &$anchorProblems,
+    ): AnchorResolutionOutcome {
+        if (hash_equals($locked->field_schema_sha256, $prepared->sourceSchemaSha256)) {
+            return $prepared;
+        }
+
+        // The locked row is not the field set the pre-computed pass ran against, so that pass —
+        // and any problems it found — describes something else. Discard both and resolve again
+        // under the lock: correctness outranks the lock-duration saving.
+        $anchorProblems = [];
+
+        return $this->resolveAnchors($locked, $anchorProblems);
+    }
+
+    /**
+     * The columns that carry the resolved field set, or nothing at all when nothing moved.
+     *
+     * Written in the same statement as the transition to `sent` so that resolution and the
+     * invitations it makes possible commit together: there is no window in which an envelope is
+     * sent with unresolved anchors, and none in which it holds resolved rectangles for a send
+     * that rolled back.
+     *
+     * An envelope with no anchors produces an empty array — its stored schema and digest are left
+     * exactly as they were. An envelope whose anchors resolve to what they already said produces
+     * the same bytes and therefore the same digest, so storing it is a no-op either way.
+     *
+     * @return array<string, mixed>
+     */
+    private function resolvedSchemaChanges(AnchorResolutionOutcome $resolution): array
+    {
+        if (! $resolution->changed()) {
+            return [];
+        }
+
+        return [
+            // Encoded here because a query-builder update does not apply the model's casts, and
+            // this write has to be part of the compare-and-swap statement.
+            'field_schema' => json_encode($resolution->schema->toArray(), JSON_THROW_ON_ERROR),
+            'field_schema_sha256' => hash('sha256', $resolution->schema->canonicalJson()),
+            'omitted_anchor_fields' => $resolution->omissions === []
+                ? null
+                : json_encode($resolution->omissionsToArray(), JSON_THROW_ON_ERROR),
+        ];
+    }
+
+    /**
+     * Forget any value a sender supplied for a field that was then omitted.
+     *
+     * A sender may prefill an optional anchored field before send, and its anchor may then turn
+     * out not to be in the document. The field is gone from the copied schema at that point, but
+     * its `envelope_field_values` row would outlive it — and the finalizer captures every row it
+     * finds, so the evidence would describe a value for a field the agreement does not contain,
+     * typed `unknown` because nothing in the schema explains it.
+     *
+     * Deleted in the same transaction as the send, so the field set and the values recorded
+     * against it always describe the same agreement.
+     */
+    private function discardOmittedValues(Envelope $locked, AnchorResolutionOutcome $resolution): void
+    {
+        if ($resolution->omissions === []) {
+            return;
+        }
+
+        EnvelopeFieldValue::query()
+            ->where('envelope_id', $locked->getKey())
+            ->whereIn('schema_field_id', array_map(
+                static fn (AnchorOmission $omission): string => $omission->fieldId,
+                $resolution->omissions,
+            ))
+            ->delete();
+    }
+
+    /**
      * Everything that must be true before anyone is invited, reported all at once.
      *
      * The interesting rule is the last one. A required *material* field can only be
@@ -912,12 +1062,17 @@ final readonly class EnvelopeStateMachine
      * that only becomes visible once a person is sitting in front of an uncompletable form,
      * so it is refused here instead.
      *
+     * `$schema` is the field set as it will be *stored*, which after anchor resolution is not
+     * always the one on the row: a recipient whose only fields were omitted has nothing to do,
+     * and that has to be caught here rather than discovered by the person who opens the link.
+     *
+     * @param  list<array{code: string, message: string}>  $anchorProblems  Reported with the rest.
+     *
      * @throws SendPreconditionsFailed
      */
-    private function assertSendable(Envelope $locked): void
+    private function assertSendable(Envelope $locked, FieldSchemaDocument $schema, array $anchorProblems = []): void
     {
-        $problems = [];
-        $schema = $locked->fieldSchema();
+        $problems = $anchorProblems;
         $recipients = EnvelopeRecipient::query()
             ->where('envelope_id', $locked->getKey())
             ->get()
@@ -991,7 +1146,7 @@ final readonly class EnvelopeStateMachine
             $ownerActsAfterFreeze = $locked->signing_mode->freezesAtSend()
                 || $owner === null
                 || $owner->order_index > 1
-                || count($locked->fieldSchema()->signingOrder[0] ?? []) > 1;
+                || count($schema->signingOrder[0] ?? []) > 1;
 
             if ($ownerActsAfterFreeze) {
                 $problems[] = [
