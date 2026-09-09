@@ -1278,8 +1278,10 @@ final class FieldSchemaValidator
         array $declared,
         array &$errors,
     ): void {
+        // Canonical values, because canonical values are what will be stored: comparing what the
+        // caller wrote would accept a document that stops importing the moment it is written down.
         foreach (self::RECT_REQUIRED as $name) {
-            $pair = $this->numericPair($declared[$name] ?? null, $recorded[$name] ?? null);
+            $pair = $this->canonicalPair($declared[$name] ?? null, $recorded[$name] ?? null);
 
             if ($pair === null) {
                 return;
@@ -1337,8 +1339,42 @@ final class FieldSchemaValidator
             return;
         }
 
+        // Rounded first, and the tolerance with them. Import canonicalises every coordinate to
+        // three decimals independently, so comparing the raw values would let a document pass on
+        // numbers it will not have once it is stored: a declared 330.0004 and a resolved
+        // 331.00179 are 1.00139 apart and inside a stated 1.0004, and they canonicalise to 330,
+        // 331.002 and 1 — 1.002 apart and outside. The document would be accepted once and
+        // refused by its own next import, which is the one thing a coordinate-stable round trip
+        // must not do.
+        $slack = CanonicalNumber::round($tolerance);
+
+        // The resolved rectangle is the matched text's position at *the field's own size* — an
+        // anchor says where a field goes and never how big it is. A receipt whose extents are not
+        // the field's therefore records a result no resolution could have produced, so they are
+        // compared exactly while the corner is compared within the tolerance.
+        foreach (['width', 'height'] as $name) {
+            $pair = $this->canonicalPair($declared[$name] ?? null, $recorded[$name] ?? null);
+
+            if ($pair === null) {
+                return;
+            }
+
+            if (abs($pair[0] - $pair[1]) > CanonicalNumber::TOLERANCE) {
+                $errors[] = new ValidationError(
+                    $path.'/rect/'.$name,
+                    ValidationCode::AnchorCrossCheckFailed,
+                    'anchor.resolved records a '.$name.' of '.$this->describeNumber($pair[1]).' and the field is '
+                        .$this->describeNumber($pair[0]).' wide by its own declaration. An anchor decides where a '
+                        .'field goes and never how big it is, so a receipt of another size is not a record of '
+                        .'resolving this field.',
+                );
+
+                return;
+            }
+        }
+
         foreach (['x', 'y'] as $name) {
-            $pair = $this->numericPair($declared[$name] ?? null, $recorded[$name] ?? null);
+            $pair = $this->canonicalPair($declared[$name] ?? null, $recorded[$name] ?? null);
 
             if ($pair === null) {
                 return;
@@ -1346,19 +1382,39 @@ final class FieldSchemaValidator
 
             $distance = abs($pair[0] - $pair[1]);
 
-            if ($distance > $tolerance + CanonicalNumber::TOLERANCE) {
+            if ($distance > $slack + CanonicalNumber::TOLERANCE) {
                 $errors[] = new ValidationError(
                     $path.'/rect/'.$name,
                     ValidationCode::AnchorCrossCheckFailed,
                     'anchor.resolved records a '.$name.' of '.$this->describeNumber($pair[1]).' against a declared '
                         .$name.' of '.$this->describeNumber($pair[0]).', which is '.$this->describeNumber($distance)
-                        .' pt apart and outside the '.$this->describeNumber($tolerance).' pt tolerance the anchor '
+                        .' pt apart and outside the '.$this->describeNumber($slack).' pt tolerance the anchor '
                         .'states. A receipt that records a failed check is not a record that the check passed.',
                 );
 
                 return;
             }
         }
+    }
+
+    /**
+     * The same pair as {@see numericPair()}, rounded the way import will round it.
+     *
+     * Every comparison a stored document has to survive is made on canonical values, because
+     * canonical values are what will be stored. Comparing what the caller wrote instead accepts
+     * documents that stop importing the moment they are written down.
+     *
+     * @return array{float, float}|null
+     */
+    private function canonicalPair(mixed $declared, mixed $recorded): ?array
+    {
+        $pair = $this->numericPair($declared, $recorded);
+
+        if ($pair === null || ! is_finite($pair[0]) || ! is_finite($pair[1])) {
+            return null;
+        }
+
+        return [CanonicalNumber::round($pair[0]), CanonicalNumber::round($pair[1])];
     }
 
     /**

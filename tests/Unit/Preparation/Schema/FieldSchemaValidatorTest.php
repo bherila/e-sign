@@ -162,6 +162,55 @@ class FieldSchemaValidatorTest extends TestCase
         $this->assertTrue((new FieldSchemaValidator)->validate($document)->isValid());
     }
 
+    /**
+     * The extents are the field's, so a receipt of another size records something else.
+     *
+     * An anchor decides where a field goes and never how big it is: the resolver builds the
+     * resolved rectangle from where the text turned out to be *at the field's own width and
+     * height*. A receipt claiming a 1x2 rectangle for a 170x36 field is therefore a record of a
+     * resolution that could not have happened, and the corner agreeing is not evidence that it
+     * did.
+     */
+    public function test_a_cross_check_receipt_of_another_size_is_refused(): void
+    {
+        $document = FieldSchemaFixture::asArray();
+        $document['fields'][5]['anchor']['placement'] = 'cross_check';
+        $document['fields'][5]['anchor']['tolerance'] = 1;
+        $document['fields'][5]['anchor']['resolved'] = self::receipt([
+            // The corner is where the field says; the size is nothing like it.
+            'rect' => ['x' => 330, 'y' => 650, 'width' => 1, 'height' => 2],
+        ]);
+
+        $result = (new FieldSchemaValidator)->validate($document);
+
+        $this->assertTrue($result->hasCode(ValidationCode::AnchorCrossCheckFailed));
+        $this->assertNotEmpty($result->at('/fields/5/anchor/resolved/rect/width'));
+    }
+
+    /**
+     * The check is made on the numbers that will be stored, not the ones that were written.
+     *
+     * Import canonicalises every coordinate to three decimals independently. Comparing the raw
+     * values would accept the document below — 330.0004 and 331.00179 are 1.00139 apart, inside
+     * the stated 1.0004 — and then store 330, 331.002 and 1, which are 1.002 apart and outside.
+     * The document would be accepted once and refused by its own next import, which is exactly
+     * what a coordinate-stable round trip must never do.
+     */
+    public function test_a_cross_check_that_only_passes_before_rounding_is_refused(): void
+    {
+        $document = FieldSchemaFixture::asArray();
+        $document['fields'][5]['anchor']['placement'] = 'cross_check';
+        $document['fields'][5]['anchor']['tolerance'] = 1.0004;
+        $document['fields'][5]['rect']['x'] = 330.0004;
+        $document['fields'][5]['anchor']['resolved'] = self::receipt([
+            'rect' => ['x' => 331.00179, 'y' => 650, 'width' => 170, 'height' => 36],
+        ]);
+
+        $result = (new FieldSchemaValidator)->validate($document);
+
+        $this->assertTrue($result->hasCode(ValidationCode::AnchorCrossCheckFailed));
+    }
+
     public function test_a_cross_check_receipt_without_a_tolerance_has_nothing_to_prove(): void
     {
         $document = FieldSchemaFixture::asArray();

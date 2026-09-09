@@ -637,6 +637,7 @@ function LoadedFieldEditor({ payload, initial, pages }: LoadedFieldEditorProps) 
             issues={issues}
             serverIssues={serverIssues}
             serverMessage={serverMessage}
+            schemaVersion={state.document.schema_version}
             prefillChecked={payload.variables.length > 0}
             onSelectPath={(path) => {
               const id = fieldIdForPath(state.document, path);

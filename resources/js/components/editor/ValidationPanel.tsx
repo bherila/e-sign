@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { FIELD_SCHEMA_VERSION, type ValidationIssue } from "@/schema/fieldSchema";
+import type { ValidationIssue } from "@/schema/fieldSchema";
 
 import type { ServerIssue } from "./api";
 
@@ -27,6 +27,15 @@ export interface ValidationPanelProps {
   issues: ValidationIssue[];
   serverIssues: ServerIssue[];
   serverMessage: string | null;
+  /**
+   * The version the open document declares, which is not necessarily the one this build writes.
+   *
+   * A 1.0 document keeps its version and its bytes, and is read against the 1.0 contract — the
+   * one that does not have the 1.1 anchor members. Naming the build's current version here would
+   * tell somebody editing such a document that it satisfies a contract it does not satisfy, and
+   * imply an upgrade that deliberately did not happen.
+   */
+  schemaVersion: string;
   /** False when no variable list was supplied, in which case prefills were not checked at all. */
   prefillChecked: boolean;
   onSelectPath: (path: string) => void;
@@ -36,6 +45,7 @@ export function ValidationPanel({
   issues,
   serverIssues,
   serverMessage,
+  schemaVersion,
   prefillChecked,
   onSelectPath,
 }: ValidationPanelProps) {
@@ -57,7 +67,7 @@ export function ValidationPanel({
         className={cn("text-sm", total === 0 ? "text-muted-foreground" : "text-destructive")}
       >
         {total === 0
-          ? `The field set is valid against schema ${FIELD_SCHEMA_VERSION}.`
+          ? `The field set is valid against schema ${schemaVersion}.`
           : `${total} ${total === 1 ? "problem" : "problems"} in the field set.`}
       </p>
 

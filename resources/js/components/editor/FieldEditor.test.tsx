@@ -85,6 +85,25 @@ describe("opening a draft", () => {
     );
   });
 
+  /**
+   * A 1.0 document keeps its version, so the panel has to name that one.
+   *
+   * 1.0 is read against the 1.0 contract — the one without the 1.1 anchor members — and it stays
+   * a 1.0 document byte for byte. Naming the build's current version instead would tell somebody
+   * editing a legacy template that it satisfies a contract it does not, and imply an upgrade that
+   * deliberately did not happen.
+   */
+  it("names the document's own schema version, not the one this build writes", () => {
+    const legacy = JSON.parse(JSON.stringify(fixtureJson)) as Record<string, any>;
+    legacy.schema_version = "1.0";
+    delete legacy.fields[9].anchor.required;
+
+    render(<FieldEditor payload={payload({ field_schema: legacy })} />);
+
+    expect(screen.getByText("The field set is valid against schema 1.0.")).toBeInTheDocument();
+    expect(screen.queryByText(`The field set is valid against schema ${FIELD_SCHEMA_VERSION}.`)).toBeNull();
+  });
+
   it("says that prefill variables were not checked, rather than reporting a pass", () => {
     render(<FieldEditor payload={payload()} />);
 

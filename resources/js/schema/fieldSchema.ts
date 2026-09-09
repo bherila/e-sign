@@ -1518,11 +1518,13 @@ function checkResolvedAnchor(
 
   if (placement === "replace") {
     // In `replace` mode the receipt's rectangle is where the field went, so the two must agree.
+    // Compared canonically, because canonical values are what will be stored: comparing what the
+    // caller wrote would accept a document that stops importing the moment it is written down.
     for (const name of RECT_REQUIRED) {
-      const declared = fieldRect[name];
-      const actual = recordedRect[name];
+      const declared = roundCoordinate(fieldRect[name] as number);
+      const actual = roundCoordinate(recordedRect[name] as number);
 
-      if (typeof declared !== "number" || typeof actual !== "number") {
+      if (typeof fieldRect[name] !== "number" || typeof recordedRect[name] !== "number") {
         return;
       }
 
@@ -1559,23 +1561,54 @@ function checkResolvedAnchor(
     return;
   }
 
-  for (const name of ["x", "y"] as const) {
-    const declared = fieldRect[name];
-    const actual = recordedRect[name];
-
-    if (typeof declared !== "number" || typeof actual !== "number") {
+  // The resolved rectangle is the matched text's position at *the field's own size* — an anchor
+  // says where a field goes and never how big it is — so the extents are compared exactly while
+  // the corner is compared within the tolerance.
+  for (const name of ["width", "height"] as const) {
+    if (typeof fieldRect[name] !== "number" || typeof recordedRect[name] !== "number") {
       return;
     }
 
+    const declared = roundCoordinate(fieldRect[name] as number);
+    const actual = roundCoordinate(recordedRect[name] as number);
+
+    if (Math.abs(declared - actual) > CANONICAL_TOLERANCE) {
+      issues.push(
+        issue(
+          `${path}/rect/${name}`,
+          "anchor_cross_check_failed",
+          `anchor.resolved records a ${name} of ${actual} and the field is ${declared} wide by its own ` +
+            "declaration. An anchor decides where a field goes and never how big it is, so a receipt of " +
+            "another size is not a record of resolving this field.",
+        ),
+      );
+
+      return;
+    }
+  }
+
+  // Rounded first, and the tolerance with them: import canonicalises every coordinate to three
+  // decimals independently, so a declared 330.0004 and a resolved 331.00179 are 1.00139 apart and
+  // inside a stated 1.0004 — and canonicalise to 330, 331.002 and 1, which is 1.002 apart and
+  // outside. Accepting that would emit a document its own next import refuses.
+  const slack = roundCoordinate(anchorTolerance);
+
+  for (const name of ["x", "y"] as const) {
+    if (typeof fieldRect[name] !== "number" || typeof recordedRect[name] !== "number") {
+      return;
+    }
+
+    const declared = roundCoordinate(fieldRect[name] as number);
+    const actual = roundCoordinate(recordedRect[name] as number);
     const distance = Math.abs(declared - actual);
 
-    if (distance > anchorTolerance + CANONICAL_TOLERANCE) {
+    if (distance > slack + CANONICAL_TOLERANCE) {
       issues.push(
         issue(
           `${path}/rect/${name}`,
           "anchor_cross_check_failed",
           `anchor.resolved records a ${name} of ${actual} against a declared ${name} of ${declared}, which is ` +
-            `${distance} pt apart and outside the ${anchorTolerance} pt tolerance the anchor states. A receipt ` +
+            `${distance} pt apart and outside the ${slack} pt tolerance the anchor states. A receipt ` +
             "that records a failed check is not a record that the check passed.",
         ),
       );
