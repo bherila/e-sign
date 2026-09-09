@@ -5,10 +5,14 @@ declare(strict_types=1);
 namespace Tests\Unit\Signing;
 
 use App\Domain\Evidence\Sealing\AssuranceLevel;
+use App\Domain\Preparation\Schema\AnchorPlacementMode;
+use App\Domain\Preparation\Schema\InvalidFieldSchemaException;
+use App\Domain\Preparation\Schema\SchemaVersion;
 use App\Domain\Signing\Envelopes\EnvelopeSourceSnapshot;
 use App\Domain\Signing\Envelopes\SigningMode;
 use App\Domain\Signing\Exceptions\InvalidEnvelopeSnapshot;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\SigningFixtures;
 
@@ -104,6 +108,83 @@ class EnvelopeSourceSnapshotTest extends TestCase
             $this->fail('An envelope that carries a schema it cannot read back is unsignable.');
         } catch (InvalidEnvelopeSnapshot $e) {
             $this->assertSame('invalid_field_schema', $e->code());
+        }
+    }
+
+    /**
+     * Validity and availability are two independent questions, and the order between them matters.
+     *
+     * The boundary answers two different refusals — the schema cannot be read (`invalid_field_schema`)
+     * and the schema uses an option this deployment cannot honour yet (`anchor_resolution_unavailable`,
+     * carrying its own pointer). Which one a caller gets is decided by an ordering, and an ordering
+     * with two independent inputs has four states, not one.
+     *
+     * Both of the last two review rounds found a defect in exactly those three lines: one fix made
+     * the gate's structured refusal survive by moving it outside the catch, which also moved it
+     * before validation; the next fix restored the order. Each was correct alone and wrong in
+     * interaction, and each was covered by a test of the case that had just broken. This asserts
+     * the whole matrix, so either ordering being wrong in either direction fails here — including
+     * the direction neither round happened to produce.
+     *
+     * @return iterable<string, array{bool, bool, string}>
+     */
+    public static function validityAndAvailability(): iterable
+    {
+        //        malformed  gated   expected refusal (null = accepted)
+        yield 'valid, ungated' => [false, false, ''];
+        yield 'valid, gated' => [false, true, 'anchor_resolution_unavailable'];
+        yield 'malformed, ungated' => [true, false, 'invalid_field_schema'];
+        // The cell the ordering is about: malformed *and* gated. The document stays malformed
+        // after resolution ships, so telling the caller to wait for it is an answer to a question
+        // they did not ask.
+        yield 'malformed, gated' => [true, true, 'invalid_field_schema'];
+    }
+
+    #[DataProvider('validityAndAvailability')]
+    public function test_the_boundary_answers_validity_before_availability(
+        bool $malformed,
+        bool $gated,
+        string $expected,
+    ): void {
+        $schema = SigningFixtures::sequentialTwoSigners();
+
+        if ($gated) {
+            $schema['schema_version'] = SchemaVersion::CURRENT;
+            $schema['fields'][0]['anchor'] = [
+                'text' => 'Signature:',
+                'occurrence' => 'sole',
+                'placement' => AnchorPlacementMode::CrossCheck->value,
+                'tolerance' => 2,
+            ];
+        }
+
+        if ($malformed) {
+            // A field pointing at a recipient the document does not declare: invalid whatever
+            // this deployment can do, and still invalid after resolution ships.
+            $schema['fields'][0]['recipient_id'] = 'somebody_else';
+        }
+
+        if ($expected === '') {
+            $this->assertInstanceOf(
+                EnvelopeSourceSnapshot::class,
+                EnvelopeSourceSnapshot::fromArray($this->snapshot(['field_schema' => $schema])),
+            );
+
+            return;
+        }
+
+        try {
+            EnvelopeSourceSnapshot::fromArray($this->snapshot(['field_schema' => $schema]));
+            $this->fail('Expected '.$expected.'.');
+        } catch (InvalidEnvelopeSnapshot $refused) {
+            $this->assertSame($expected, $refused->code());
+        } catch (InvalidFieldSchemaException $refused) {
+            $this->assertSame(
+                $expected,
+                $refused->errors()[0]->code->value,
+                'The gate\'s refusal must keep its own code and pointer rather than being flattened.',
+            );
+            $this->assertSame('/fields/0/anchor/placement', $refused->errors()[0]->path);
         }
     }
 

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Tests\Unit\Preparation\Schema;
 
 use App\Domain\Preparation\Schema\AnchorResolutionGate;
-use App\Domain\Preparation\Schema\FieldSchemaValidator;
 use App\Domain\Preparation\Schema\InvalidFieldSchemaException;
 use App\Domain\Preparation\Schema\ValidationCode;
 use PHPUnit\Framework\TestCase;
@@ -19,6 +18,12 @@ use Tests\Support\FieldSchemaFixture;
  * `anchor.required: false` promises an absent anchor leaves its field off the document. Until the
  * resolver lands, nothing does either — so accepting them would be a successful no-op of an
  * unsupported option, which AGENTS.md forbids, on a document people sign.
+ *
+ * The *ordering* between this gate and validation is not asserted here, because it is not a
+ * property of the gate: it belongs to each boundary that applies it, and asserting it against the
+ * validator alone would test a proxy for the rule rather than the rule. The four-cell matrix —
+ * document valid or malformed, crossed with a gated member present or absent — is pinned at the
+ * boundaries themselves, in `EnvelopeSourceSnapshotTest` and `TemplateLifecycleTest`.
  *
  * The last case here exists to make the gate mortal. A gate that stays after the thing it was
  * waiting for has arrived is its own kind of lie, and the cheapest way for that to happen is for
@@ -114,28 +119,6 @@ final class AnchorResolutionGateTest extends TestCase
                 ),
             );
         }
-    }
-
-    /**
-     * Validity is decided before availability, at both entry points.
-     *
-     * A document that is malformed *and* uses a gated option is malformed whatever this deployment
-     * can do. Answering "wait for anchor resolution" about it would send a caller to wait for
-     * something that will not help them, and the two entry points would disagree about which
-     * failure a document has — the template path validates first, so this one does too.
-     */
-    public function test_a_malformed_document_is_reported_as_malformed_not_as_gated(): void
-    {
-        $document = FieldSchemaFixture::asArray();
-        $document['schema_version'] = '1.0';
-        $document['fields'][5]['anchor']['placement'] = 'cross_check';
-
-        // The gate would refuse this too, but the document is a 1.0 one carrying a 1.1 member: it
-        // is invalid, and it stays invalid after resolution ships.
-        $errors = (new FieldSchemaValidator)->validate($document)->errors;
-
-        $this->assertNotSame([], $errors);
-        $this->assertSame(ValidationCode::UnknownProperty, $errors[0]->code);
     }
 
     /**
