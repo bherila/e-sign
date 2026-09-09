@@ -71,7 +71,12 @@ final class NumericBoundsSweepTest extends TestCase
             $type = $node['type'] ?? null;
 
             if ($type === 'number' || $type === 'integer') {
-                $found[$path] = ['type' => $type, 'maximum' => $node['maximum'] ?? null];
+                $found[$path] = [
+                    'type' => $type,
+                    'minimum' => $node['minimum'] ?? null,
+                    'exclusiveMinimum' => $node['exclusiveMinimum'] ?? null,
+                    'maximum' => $node['maximum'] ?? null,
+                ];
 
                 return;
             }
@@ -185,7 +190,7 @@ final class NumericBoundsSweepTest extends TestCase
     /**
      * @return array<string, mixed>
      */
-    private static function documentWith(string $path, int|float $value): array
+    public static function documentWith(string $path, int|float|string $value): array
     {
         $document = FieldSchemaFixture::asArray();
         $index = str_starts_with($path, 'fields[].anchor') ? self::ANCHORED_FIELD : self::PLAIN_FIELD;
@@ -233,7 +238,7 @@ final class NumericBoundsSweepTest extends TestCase
         ];
     }
 
-    private static function pointer(string $path): string
+    public static function pointer(string $path): string
     {
         $index = str_starts_with($path, 'fields[].anchor') ? self::ANCHORED_FIELD : self::PLAIN_FIELD;
 

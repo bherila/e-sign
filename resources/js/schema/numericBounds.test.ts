@@ -1,6 +1,5 @@
-import fixtureJson from "../../../tests/Fixtures/schema/nda-two-signers.json";
-import schemaJson from "../../schema/field-schema-1.1.json";
 import { parseFieldSchema, serializeFieldSchema, validateFieldSchema } from "./fieldSchema";
+import { contractMembers, documentWith, type Json, pointer } from "./numericSweep.support";
 
 /**
  * Every numeric member the published contract admits, probed at its boundary, in this projection.
@@ -19,55 +18,6 @@ import { parseFieldSchema, serializeFieldSchema, validateFieldSchema } from "./f
  * distinguished from its absence by exactly two values, the largest accepted and the smallest
  * refused.
  */
-type Json = Record<string, any>;
-
-const ANCHORED_FIELD = 5;
-const PLAIN_FIELD = 0;
-
-/** Every numeric member of the contract, as a document path, with its declared maximum. */
-function contractMembers(): Map<string, { type: string; maximum: number | null }> {
-  const defs = (schemaJson as Json)["$defs"];
-  const found = new Map<string, { type: string; maximum: number | null }>();
-
-  const walk = (node: Json, path: string, seen: string[]): void => {
-    if (typeof node["$ref"] === "string") {
-      const name = (node["$ref"] as string).slice("#/$defs/".length);
-
-      if (!seen.includes(name)) {
-        walk(defs[name] as Json, path, [...seen, name]);
-      }
-
-      return;
-    }
-
-    for (const combinator of ["oneOf", "anyOf", "allOf"]) {
-      for (const branch of (node[combinator] ?? []) as Json[]) {
-        walk(branch, path, seen);
-      }
-    }
-
-    if (node["type"] === "number" || node["type"] === "integer") {
-      found.set(path, { type: node["type"] as string, maximum: (node["maximum"] as number) ?? null });
-
-      return;
-    }
-
-    if (node["type"] === "array" && node["items"] !== undefined) {
-      walk(node["items"] as Json, `${path}[]`, seen);
-
-      return;
-    }
-
-    for (const [key, child] of Object.entries((node["properties"] ?? {}) as Json)) {
-      walk(child as Json, path === "" ? key : `${path}.${key}`, seen);
-    }
-  };
-
-  walk(schemaJson as Json, "", []);
-
-  return new Map([...found.entries()].sort(([a], [b]) => a.localeCompare(b)));
-}
-
 /** The members this sweep knows about; the values are documentation beside the derived truth. */
 const EXPECTATIONS: Record<string, string> = {
   "fields[].anchor.occurrence": "bounded: an integer both languages agree on",
@@ -91,67 +41,14 @@ const EXPECTATIONS: Record<string, string> = {
   "fields[].rect.y": "unbounded, 1.0 legacy (#105)",
 };
 
-function documentWith(path: string, value: number): Json {
-  const document = JSON.parse(JSON.stringify(fixtureJson)) as Json;
-  const index = path.startsWith("fields[].anchor") ? ANCHORED_FIELD : PLAIN_FIELD;
-  const field = document["fields"][index] as Json;
-
-  if (path.startsWith("fields[].anchor.resolved")) {
-    field["anchor"]["resolved"] = {
-      document_sha256: "d".repeat(64),
-      page: 2,
-      occurrence_index: 1,
-      anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
-      rect: field["rect"],
-    };
-  }
-
-  // `tolerance` only means anything in cross_check, and a `replace` receipt's rect must be the
-  // field's own — which would refuse every probe on `resolved.rect` before its own bound could.
-  // The widest legal tolerance isolates the bound under test.
-  if (path.startsWith("fields[].anchor.tolerance") || path.startsWith("fields[].anchor.resolved.rect")) {
-    field["anchor"]["placement"] = "cross_check";
-    field["anchor"]["tolerance"] = 14400;
-  }
-
-  const keys = path.replace("fields[].", "").split(".");
-  let target: Json = field;
-
-  keys.forEach((key, depth) => {
-    if (depth === keys.length - 1) {
-      target[key] = value;
-
-      return;
-    }
-
-    target = target[key] as Json;
-  });
-
-  return document;
-}
-
 function refuses(path: string, value: number): boolean {
-  const index = path.startsWith("fields[].anchor") ? ANCHORED_FIELD : PLAIN_FIELD;
-  const pointer = `/fields/${index}/${path.replace("fields[].", "").split(".").join("/")}`;
-
-  return validateFieldSchema(documentWith(path, value)).some((problem) => problem.path === pointer);
+  return validateFieldSchema(documentWith(path, value)).some((problem) => problem.path === pointer(path));
 }
 
-/**
- * A value the importer accepts must still be acceptable once it has been stored.
- *
- * The other half of the same idea as the bounds sweep, and the half it structurally cannot reach:
- * bounds probe the *upper* edge, and this defect lives at the lower one. Import canonicalises to
- * three decimals, so `0.0004` is a positive width as written and a zero one as stored — accepted
- * once, then refused by its own next import. The probe is one canonical step below the smallest
- * legal value, which is where a disagreement between a constraint and the rounding must show.
- */
 describe("the numeric round-trip sweep", () => {
   it.each(Object.keys(EXPECTATIONS))("%s survives its own round trip", (path) => {
     const document = documentWith(path, 0.0004);
-    const index = path.startsWith("fields[].anchor") ? ANCHORED_FIELD : PLAIN_FIELD;
-    const pointer = `/fields/${index}/${path.replace("fields[].", "").split(".").join("/")}`;
-    const at = (candidate: Json) => validateFieldSchema(candidate).filter((problem) => problem.path === pointer);
+    const at = (candidate: Json) => validateFieldSchema(candidate).filter((problem) => problem.path === pointer(path));
 
     if (at(document).length > 0) {
       return;

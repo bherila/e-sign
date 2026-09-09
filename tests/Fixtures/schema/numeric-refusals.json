@@ -1,0 +1,198 @@
+{
+    "fields[].anchor.occurrence / maximum": {
+        "code": "invalid_format",
+        "message": "anchor.occurrence is at most 9007199254740991, the largest integer this schema's two implementations agree on: PHP counts to 2^63 and JavaScript stops being exact at 2^53, so a larger value means one thing in the editor and another in the API."
+    },
+    "fields[].anchor.occurrence / minimum": {
+        "code": "invalid_format",
+        "message": "anchor.occurrence indexes are 1-based; got 0."
+    },
+    "fields[].anchor.occurrence / type": {
+        "code": "invalid_format",
+        "message": "anchor.occurrence must be \"sole\" or a 1-based index; got \"not-a-number\". \"all\" places one box per match, which a single field cannot represent: use one field per box."
+    },
+    "fields[].anchor.offset.dx / type": {
+        "code": "invalid_type",
+        "message": "anchor.offset.dx must be a number."
+    },
+    "fields[].anchor.offset.dy / type": {
+        "code": "invalid_type",
+        "message": "anchor.offset.dy must be a number."
+    },
+    "fields[].anchor.resolved.anchor_rect.height / maximum": {
+        "code": "invalid_format",
+        "message": "rect.height must be within 14400 pt of the origin, PDF's largest page side; got 14400.001. The bound keeps the canonical form total: past about 1e20 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
+    },
+    "fields[].anchor.resolved.anchor_rect.height / minimum": {
+        "code": "dimension_not_positive",
+        "message": "rect.height must not be negative; got -0.001."
+    },
+    "fields[].anchor.resolved.anchor_rect.height / type": {
+        "code": "invalid_type",
+        "message": "rect.height must be a number."
+    },
+    "fields[].anchor.resolved.anchor_rect.width / maximum": {
+        "code": "invalid_format",
+        "message": "rect.width must be within 14400 pt of the origin, PDF's largest page side; got 14400.001. The bound keeps the canonical form total: past about 1e20 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
+    },
+    "fields[].anchor.resolved.anchor_rect.width / minimum": {
+        "code": "dimension_not_positive",
+        "message": "rect.width must not be negative; got -0.001."
+    },
+    "fields[].anchor.resolved.anchor_rect.width / type": {
+        "code": "invalid_type",
+        "message": "rect.width must be a number."
+    },
+    "fields[].anchor.resolved.anchor_rect.x / maximum": {
+        "code": "invalid_format",
+        "message": "rect.x must be within 14400 pt of the origin, PDF's largest page side; got 14400.001. The bound keeps the canonical form total: past about 1e20 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
+    },
+    "fields[].anchor.resolved.anchor_rect.x / minimum": {
+        "code": "invalid_format",
+        "message": "rect.x must be within 14400 pt of the origin, PDF's largest page side; got -14400.001. The bound keeps the canonical form total: past about 1e20 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
+    },
+    "fields[].anchor.resolved.anchor_rect.x / type": {
+        "code": "invalid_type",
+        "message": "rect.x must be a number."
+    },
+    "fields[].anchor.resolved.anchor_rect.y / maximum": {
+        "code": "invalid_format",
+        "message": "rect.y must be within 14400 pt of the origin, PDF's largest page side; got 14400.001. The bound keeps the canonical form total: past about 1e20 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
+    },
+    "fields[].anchor.resolved.anchor_rect.y / minimum": {
+        "code": "invalid_format",
+        "message": "rect.y must be within 14400 pt of the origin, PDF's largest page side; got -14400.001. The bound keeps the canonical form total: past about 1e20 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
+    },
+    "fields[].anchor.resolved.anchor_rect.y / type": {
+        "code": "invalid_type",
+        "message": "rect.y must be a number."
+    },
+    "fields[].anchor.resolved.occurrence_index / maximum": {
+        "code": "invalid_format",
+        "message": "anchor.resolved.occurrence_index is at most 9007199254740991, the largest integer this schema's two implementations agree on: PHP counts to 2^63 and JavaScript stops being exact at 2^53, so a larger value means one thing in the editor and another in the API."
+    },
+    "fields[].anchor.resolved.occurrence_index / minimum": {
+        "code": "invalid_format",
+        "message": "anchor.resolved.occurrence_index is 1-based; got 0."
+    },
+    "fields[].anchor.resolved.occurrence_index / type": {
+        "code": "invalid_type",
+        "message": "anchor.resolved.occurrence_index must be an integer."
+    },
+    "fields[].anchor.resolved.page / maximum": {
+        "code": "page_out_of_range",
+        "message": "anchor.resolved.page is at most 9007199254740991, the largest integer this schema's two implementations agree on: PHP counts to 2^63 and JavaScript stops being exact at 2^53, so a larger value means one thing in the editor and another in the API."
+    },
+    "fields[].anchor.resolved.page / minimum": {
+        "code": "page_out_of_range",
+        "message": "anchor.resolved.page is 1-based; got 0."
+    },
+    "fields[].anchor.resolved.page / type": {
+        "code": "invalid_type",
+        "message": "anchor.resolved.page must be an integer."
+    },
+    "fields[].anchor.resolved.rect.height / exclusiveMinimum": {
+        "code": "dimension_not_positive",
+        "message": "rect.height must be greater than zero; got 0."
+    },
+    "fields[].anchor.resolved.rect.height / maximum": {
+        "code": "invalid_format",
+        "message": "rect.height must be within 14400 pt of the origin, PDF's largest page side; got 14400.001. The bound keeps the canonical form total: past about 1e20 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
+    },
+    "fields[].anchor.resolved.rect.height / type": {
+        "code": "invalid_type",
+        "message": "rect.height must be a number."
+    },
+    "fields[].anchor.resolved.rect.width / exclusiveMinimum": {
+        "code": "dimension_not_positive",
+        "message": "rect.width must be greater than zero; got 0."
+    },
+    "fields[].anchor.resolved.rect.width / maximum": {
+        "code": "invalid_format",
+        "message": "rect.width must be within 14400 pt of the origin, PDF's largest page side; got 14400.001. The bound keeps the canonical form total: past about 1e20 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
+    },
+    "fields[].anchor.resolved.rect.width / type": {
+        "code": "invalid_type",
+        "message": "rect.width must be a number."
+    },
+    "fields[].anchor.resolved.rect.x / maximum": {
+        "code": "invalid_format",
+        "message": "rect.x must be within 14400 pt of the origin, PDF's largest page side; got 14400.001. The bound keeps the canonical form total: past about 1e20 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
+    },
+    "fields[].anchor.resolved.rect.x / minimum": {
+        "code": "coordinate_negative",
+        "message": "rect.x must not be negative: the native origin is the top-left corner of the displayed page, so a negative value is off the page."
+    },
+    "fields[].anchor.resolved.rect.x / type": {
+        "code": "invalid_type",
+        "message": "rect.x must be a number."
+    },
+    "fields[].anchor.resolved.rect.y / maximum": {
+        "code": "invalid_format",
+        "message": "rect.y must be within 14400 pt of the origin, PDF's largest page side; got 14400.001. The bound keeps the canonical form total: past about 1e20 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
+    },
+    "fields[].anchor.resolved.rect.y / minimum": {
+        "code": "coordinate_negative",
+        "message": "rect.y must not be negative: the native origin is the top-left corner of the displayed page, so a negative value is off the page."
+    },
+    "fields[].anchor.resolved.rect.y / type": {
+        "code": "invalid_type",
+        "message": "rect.y must be a number."
+    },
+    "fields[].anchor.tolerance / maximum": {
+        "code": "invalid_format",
+        "message": "anchor.tolerance is a distance on one page and must be at most 14400 pt, PDF's largest page side; got 14400.001. The bound keeps the canonical form total: past about 1e20 this schema's two implementations spell the same number differently, and a document with two spellings has two digests."
+    },
+    "fields[].anchor.tolerance / minimum": {
+        "code": "invalid_format",
+        "message": "anchor.tolerance is a distance in points and must not be negative; got -0.001."
+    },
+    "fields[].anchor.tolerance / type": {
+        "code": "invalid_type",
+        "message": "anchor.tolerance must be a number of points."
+    },
+    "fields[].page / maximum": {
+        "code": "page_out_of_range",
+        "message": "page is at most 9007199254740991, the largest integer this schema's two implementations agree on: PHP counts to 2^63 and JavaScript stops being exact at 2^53, so a larger value means one thing in the editor and another in the API."
+    },
+    "fields[].page / minimum": {
+        "code": "page_out_of_range",
+        "message": "page is 1-based (coordinate_space.page_index_base is 1); got 0."
+    },
+    "fields[].page / type": {
+        "code": "invalid_type",
+        "message": "page must be an integer."
+    },
+    "fields[].rect.height / exclusiveMinimum": {
+        "code": "dimension_not_positive",
+        "message": "rect.height must be greater than zero; got 0."
+    },
+    "fields[].rect.height / type": {
+        "code": "invalid_type",
+        "message": "rect.height must be a number."
+    },
+    "fields[].rect.width / exclusiveMinimum": {
+        "code": "dimension_not_positive",
+        "message": "rect.width must be greater than zero; got 0."
+    },
+    "fields[].rect.width / type": {
+        "code": "invalid_type",
+        "message": "rect.width must be a number."
+    },
+    "fields[].rect.x / minimum": {
+        "code": "coordinate_negative",
+        "message": "rect.x must not be negative: the native origin is the top-left corner of the displayed page, so a negative value is off the page."
+    },
+    "fields[].rect.x / type": {
+        "code": "invalid_type",
+        "message": "rect.x must be a number."
+    },
+    "fields[].rect.y / minimum": {
+        "code": "coordinate_negative",
+        "message": "rect.y must not be negative: the native origin is the top-left corner of the displayed page, so a negative value is off the page."
+    },
+    "fields[].rect.y / type": {
+        "code": "invalid_type",
+        "message": "rect.y must be a number."
+    }
+}

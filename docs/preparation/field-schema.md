@@ -262,6 +262,24 @@ with that expectation written down, so the set cannot quietly change. Those are 
 documents that were already valid, so it is a version-policy decision rather than a repair
 (issue #105).
 
+**Three derived sweeps, and between them the whole property.** A contract validated by two
+independent implementations has to hold three things, and each has its own sweep, each derived from
+`field-schema-1.1.json` and each failing if a member has no probe:
+
+| Sweep | Property |
+|---|---|
+| `NumericBoundsSweepTest` / `numericBounds.test.ts` | a value is inside the bound the contract states — `maximum` accepted, `maximum + 1` refused |
+| the round-trip cases in the same files | a value the importer accepts survives being stored: accepted, canonicalised, still acceptable |
+| `RefusalAgreementSweepTest` / `refusalAgreement.test.ts` | a refusal means the same thing on both sides — same code, same message, for every stated constraint |
+
+The third exists because only *verdicts* had ever been compared between the projections. Codes are
+API surface, an integration branches on them, and a message is what a person reads when their
+document is refused; two implementations that agree a document is invalid and disagree about why
+are one contract in name only. Agreement across two runtimes is checked through a generated
+artifact, `tests/Fixtures/schema/numeric-refusals.json`: each side computes its own refusals and
+asserts they match the file, so neither can drift silently and the file is regenerated deliberately
+rather than edited.
+
 **Validate what will be stored, not what was typed.** Import canonicalises to three decimals, so
 a constraint checked against the submitted value is checking a number the document will not hold:
 a `width` of `0.0004` is positive as written and zero as stored, and a document accepted on those
