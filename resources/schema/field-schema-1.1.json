@@ -154,9 +154,10 @@
           "$ref": "#/$defs/field_type"
         },
         "page": {
-          "description": "1-based page number in the prepared document.",
+          "description": "1-based page number in the prepared document. Bounded by 9007199254740991 (2^53 - 1), the largest integer this schema's two implementations agree on: PHP counts to 2^63 and JavaScript stops being exact at 2^53, so a larger value would mean one thing in the editor and another in the API.",
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "maximum": 9007199254740991
         },
         "rect": {
           "$ref": "#/$defs/rect"
@@ -311,14 +312,15 @@
           "maxLength": 255
         },
         "occurrence": {
-          "description": "Which match to place against: \"sole\" means the text must occur exactly once in scope, an integer is a 1-based index in document order. Required, with no default: an anchor that matches twice without saying which one it means is under-specified, and silently taking the first would move a signature box the moment the contract text changes. The resolver's \"all\" mode places one box per match, which a single field cannot represent, so it is not a value here.",
+          "description": "Which match to place against: \"sole\" means the text must occur exactly once in scope, an integer is a 1-based index in document order. Required, with no default: an anchor that matches twice without saying which one it means is under-specified, and silently taking the first would move a signature box the moment the contract text changes. The resolver's \"all\" mode places one box per match, which a single field cannot represent, so it is not a value here. An index is bounded by 9007199254740991 (2^53 - 1), the largest integer this schema's two implementations agree on: PHP counts to 2^63 and JavaScript stops being exact at 2^53, so a larger value would mean one thing in the editor and another in the API.",
           "oneOf": [
             {
               "const": "sole"
             },
             {
               "type": "integer",
-              "minimum": 1
+              "minimum": 1,
+              "maximum": 9007199254740991
             }
           ]
         },
@@ -376,14 +378,16 @@
           "pattern": "^[0-9a-f]{64}$"
         },
         "page": {
-          "description": "1-based page the match was found on. Equal to the field's own page: an anchor is searched on the page the field declares.",
+          "description": "1-based page the match was found on. Equal to the field's own page: an anchor is searched on the page the field declares. Bounded by 9007199254740991 (2^53 - 1), the largest integer this schema's two implementations agree on: PHP counts to 2^63 and JavaScript stops being exact at 2^53, so a larger value would mean one thing in the editor and another in the API.",
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "maximum": 9007199254740991
         },
         "occurrence_index": {
-          "description": "1-based index, in deterministic document order, of the match that was taken.",
+          "description": "1-based index, in deterministic document order, of the match that was taken. Bounded by 9007199254740991 (2^53 - 1), the largest integer this schema's two implementations agree on: PHP counts to 2^63 and JavaScript stops being exact at 2^53, so a larger value would mean one thing in the editor and another in the API.",
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "maximum": 9007199254740991
         },
         "anchor_rect": {
           "description": "Where the matched text itself sits. A measurement, not a placement: a run's nominal box is its advance by the font's ascent plus descent, so a heading near the top of the page legitimately starts above the CropBox edge and a run at the margin legitimately ends on it. Never checked against the page.",

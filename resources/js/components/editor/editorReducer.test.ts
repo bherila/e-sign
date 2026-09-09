@@ -410,6 +410,40 @@ describe("a resolution receipt", () => {
     expect(copy?.anchor?.text).toBe("Counterparty signature:");
   });
 
+  /**
+   * The rule is the result, not the action: a gesture that changes nothing invalidates nothing.
+   *
+   * `FieldBox.finish()` reports a pointer-up as a move even when the displacement is zero, so a
+   * plain selection click arrives here as `move_field`. Deciding invalidation from the action
+   * deleted the receipt, marked the document dirty and pushed an undo entry for a click.
+   */
+  it("survives a move that does not move it", () => {
+    const start = resolved();
+    const at = findField(start.document, "counterparty_signature")!;
+    const next = editorReducer(start, {
+      type: "move_field",
+      id: "counterparty_signature",
+      x: at.rect.x,
+      y: at.rect.y,
+    });
+
+    expect(findField(next.document, "counterparty_signature")?.anchor?.resolved).toBeDefined();
+    expect(isDirty(next)).toBe(false);
+    expect(canUndo(next)).toBe(false);
+  });
+
+  it("survives a patch that sets the rectangle to what it already is", () => {
+    const start = resolved();
+    const at = findField(start.document, "counterparty_signature")!;
+    const next = editorReducer(start, {
+      type: "update_field",
+      id: "counterparty_signature",
+      patch: { rect: { x: at.rect.x, y: at.rect.y } },
+    });
+
+    expect(findField(next.document, "counterparty_signature")?.anchor?.resolved).toBeDefined();
+  });
+
   it("survives an edit that cannot invalidate it", () => {
     const next = editorReducer(resolved(), {
       type: "update_field",

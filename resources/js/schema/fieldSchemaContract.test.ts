@@ -13,6 +13,7 @@ import {
   FIELD_REQUIRED,
   FIELD_SCHEMA_VERSION,
   FIELD_TYPES,
+  MAX_SCHEMA_INTEGER,
   NATIVE_COORDINATE_SPACE,
   parseFieldSchema,
   RECIPIENT_OPTIONAL,
@@ -234,7 +235,10 @@ describe("the TypeScript mirror", () => {
     expect(anchor.required).toEqual([...ANCHOR_REQUIRED]);
     expect(Object.keys(anchor.properties)).toEqual([...ANCHOR_REQUIRED, ...ANCHOR_OPTIONAL]);
     expect(anchor.properties.occurrence.default).toBeUndefined();
-    expect(anchor.properties.occurrence.oneOf).toEqual([{ const: "sole" }, { type: "integer", minimum: 1 }]);
+    expect(anchor.properties.occurrence.oneOf).toEqual([
+      { const: "sole" },
+      { type: "integer", minimum: 1, maximum: MAX_SCHEMA_INTEGER },
+    ]);
     expect(anchor.properties.origin.enum).toEqual([...ANCHOR_ORIGINS]);
     expect(anchor.properties.origin.default).toBe(DEFAULT_ANCHOR_ORIGIN);
   });

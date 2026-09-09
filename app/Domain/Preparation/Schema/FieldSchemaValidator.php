@@ -623,10 +623,28 @@ final class FieldSchemaValidator
      */
     private function checkPage(string $path, mixed $page, ?PageSizes $pageSizes, array &$errors): void
     {
+        if ($this->isWholeNumberBeyondRange($page)) {
+            $errors[] = new ValidationError($path, ValidationCode::PageOutOfRange, 'page'.' is at most '.CanonicalNumber::MAX_INTEGER.', the largest integer this schema\'s two '
+                    .'implementations agree on: PHP counts to 2^63 and JavaScript stops being exact at 2^53, '
+                    .'so a larger value means one thing in the editor and another in the API.',
+            );
+
+            return;
+        }
+
         $number = $this->asInteger($page);
 
         if ($number === null) {
             $errors[] = new ValidationError($path, ValidationCode::InvalidType, 'page must be an integer.');
+
+            return;
+        }
+
+        if ($this->isOutsideIntegerRange($number)) {
+            $errors[] = new ValidationError($path, ValidationCode::PageOutOfRange, 'page'.' is at most '.CanonicalNumber::MAX_INTEGER.', the largest integer this schema\'s two '
+                    .'implementations agree on: PHP counts to 2^63 and JavaScript stops being exact at 2^53, '
+                    .'so a larger value means one thing in the editor and another in the API.',
+            );
 
             return;
         }
@@ -1159,6 +1177,18 @@ final class FieldSchemaValidator
                 continue;
             }
 
+            if ($this->isWholeNumberBeyondRange($resolved[$name])) {
+                $errors[] = new ValidationError(
+                    $path.'/'.$name,
+                    $name === 'page' ? ValidationCode::PageOutOfRange : ValidationCode::InvalidFormat,
+                    'anchor.resolved.'.$name.' is at most '.CanonicalNumber::MAX_INTEGER.', the largest integer this schema\'s two '
+                    .'implementations agree on: PHP counts to 2^63 and JavaScript stops being exact at 2^53, '
+                    .'so a larger value means one thing in the editor and another in the API.',
+                );
+
+                continue;
+            }
+
             $value = $this->asInteger($resolved[$name]);
 
             if ($value === null) {
@@ -1461,6 +1491,15 @@ final class FieldSchemaValidator
             return;
         }
 
+        if ($this->isWholeNumberBeyondRange($occurrence)) {
+            $errors[] = new ValidationError($path, ValidationCode::InvalidFormat, 'anchor.occurrence'.' is at most '.CanonicalNumber::MAX_INTEGER.', the largest integer this schema\'s two '
+                    .'implementations agree on: PHP counts to 2^63 and JavaScript stops being exact at 2^53, '
+                    .'so a larger value means one thing in the editor and another in the API.',
+            );
+
+            return;
+        }
+
         $index = $this->asInteger($occurrence);
 
         if ($index === null) {
@@ -1610,6 +1649,36 @@ final class FieldSchemaValidator
         }
 
         return null;
+    }
+
+    /**
+     * True when an integer is outside the range both implementations agree on.
+     *
+     * Kept separate from {@see asInteger()} so the *bound* is reported as a bound rather than as
+     * "not an integer": a caller sending 1e20 has sent an integer, and the reason to refuse it is
+     * that this schema does not admit one that large. It is also what makes the two projections
+     * agree — PHP's own limit is 2^63 and JavaScript's is 2^53, so leaving each to its own would
+     * accept in the editor what the API refuses.
+     */
+    private function isOutsideIntegerRange(int|float $value): bool
+    {
+        return abs($value) > CanonicalNumber::MAX_INTEGER;
+    }
+
+    /**
+     * A whole number too large for {@see asInteger()} to hand back.
+     *
+     * Without this the two projections refuse the same document for different reasons: PHP's
+     * integers stop at 2^63, so 1e20 arrives as a float `asInteger()` cannot narrow and would be
+     * reported as "not an integer", while the TypeScript importer sees a perfectly good integer
+     * and reports the bound. Same verdict, different code and different message, for a value
+     * whose only problem is its size. Reporting the bound in both is what makes the contract one
+     * contract.
+     */
+    private function isWholeNumberBeyondRange(mixed $value): bool
+    {
+        return is_float($value) && is_finite($value) && $value === floor($value)
+            && abs($value) > CanonicalNumber::MAX_INTEGER;
     }
 
     private function describeNumber(float $value): string

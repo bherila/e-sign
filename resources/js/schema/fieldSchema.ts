@@ -91,6 +91,20 @@ export const ANCHOR_TOLERANCE_MAX = 14400;
  */
 export const MEASURED_RECT_MAX_MAGNITUDE = 14400;
 
+/**
+ * Largest integer this schema admits: 2^53 - 1, the largest both implementations agree on.
+ *
+ * Mirrors `CanonicalNumber::MAX_INTEGER`. Every integer property — a page number, an occurrence
+ * index — is bounded by it so a document means the same thing on both sides. PHP's integers run
+ * to 2^63 - 1 and this runtime stops being exact at 2^53, so between the two a value is a whole
+ * number here and unrepresentable there: the editor would accept a document the API refuses, and
+ * an integration would meet that as a 422 after being told its document was fine.
+ *
+ * `Number.MAX_SAFE_INTEGER` is the line because it is the largest integer this runtime can hold
+ * *and distinguish from its successor*.
+ */
+export const MAX_SCHEMA_INTEGER = Number.MAX_SAFE_INTEGER;
+
 /** Slack when comparing a rounded coordinate against a page edge: one unit in the last place. */
 export const CANONICAL_TOLERANCE = 0.001;
 
@@ -972,6 +986,24 @@ function checkFieldType(path: string, type: unknown, issues: ValidationIssue[]):
   );
 }
 
+function checkIntegerRange(path: string, label: string, value: number, issues: ValidationIssue[], code: ValidationCode): boolean {
+  if (Math.abs(value) <= MAX_SCHEMA_INTEGER) {
+    return true;
+  }
+
+  issues.push(
+    issue(
+      path,
+      code,
+      `${label} is at most ${MAX_SCHEMA_INTEGER}, the largest integer this schema's two implementations agree ` +
+        "on: PHP counts to 2^63 and JavaScript stops being exact at 2^53, so a larger value means one thing in " +
+        "the editor and another in the API.",
+    ),
+  );
+
+  return false;
+}
+
 function checkPage(path: string, page: unknown, pageSizes: PageSize[] | undefined, issues: ValidationIssue[]): number | null {
   if (typeof page !== "number" || !Number.isInteger(page)) {
     issues.push(issue(path, "invalid_type", "page must be an integer."));
@@ -984,6 +1016,10 @@ function checkPage(path: string, page: unknown, pageSizes: PageSize[] | undefine
       issue(path, "page_out_of_range", `page is 1-based (coordinate_space.page_index_base is 1); got ${page}.`),
     );
 
+    return null;
+  }
+
+  if (!checkIntegerRange(path, "page", page, issues, "page_out_of_range")) {
     return null;
   }
 
@@ -1469,6 +1505,14 @@ function checkResolvedAnchor(
 
       continue;
     }
+
+    checkIntegerRange(
+      `${path}/${name}`,
+      `anchor.resolved.${name}`,
+      value,
+      issues,
+      name === "page" ? "page_out_of_range" : "invalid_format",
+    );
   }
 
   // `anchor_rect` records where the text was, not where anything goes: a heading's ascender
@@ -1659,7 +1703,11 @@ function checkAnchorOccurrence(path: string, occurrence: unknown, issues: Valida
 
   if (occurrence < 1) {
     issues.push(issue(path, "invalid_format", `anchor.occurrence indexes are 1-based; got ${occurrence}.`));
+
+    return;
   }
+
+  checkIntegerRange(path, "anchor.occurrence", occurrence, issues, "invalid_format");
 }
 
 /**

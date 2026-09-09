@@ -343,29 +343,48 @@ function mapField(
 }
 
 function withRect(field: FieldDefinition, rect: Rect): FieldDefinition {
-  return withoutStaleReceipt({ ...field, rect: roundRect(rect) });
+  return settled(field, { ...field, rect: roundRect(rect) });
 }
 
+const RECT_KEYS = ["x", "y", "width", "height"] as const;
+
 /**
- * Drop a resolution receipt whose field has moved out from under it.
+ * Drop a resolution receipt that the *result* of an edit has invalidated.
  *
- * `anchor.resolved` records what resolution found *for this field on this page*: the importer
+ * `anchor.resolved` records what resolution found for this field on this page: the importer
  * requires its `page` to be the field's and, in `replace` mode, its rectangle to be the field's
- * own. Dragging a field, resizing it, or moving it to another page therefore invalidates the
- * receipt immediately, and keeping it would make the next Save a 422 with nothing in the editor
+ * own. An edit that changes either therefore leaves an answer to a question the field is no
+ * longer asking, and keeping it would make the next Save a 422 with nothing in the editor
  * offering a way to clear it.
+ *
+ * **The rule is about the result, not the action.** Invalidation is a property of whether the
+ * canonical rectangle or the page actually changed, never of which gesture produced it. Deciding
+ * it from the action was wrong in both directions: a pointer-up with zero displacement still
+ * arrives as a move, so merely clicking a field deleted its receipt, dirtied the document and
+ * pushed an undo entry; and every future action that can move a field would have needed its own
+ * case here. Comparing canonical values means each editor action — including ones not yet
+ * written — inherits the rule instead of restating it.
  *
  * Dropping the receipt is not losing anything: the anchor *request* is kept, so publishing
  * resolves it again against the document. What is thrown away is a stale answer.
  */
-function withoutStaleReceipt(field: FieldDefinition): FieldDefinition {
-  if (field.anchor?.resolved === undefined) {
-    return field;
+function settled(before: FieldDefinition, after: FieldDefinition): FieldDefinition {
+  if (after.anchor?.resolved === undefined) {
+    return after;
   }
 
-  const { resolved: _resolved, ...anchor } = field.anchor;
+  if (before.page === after.page && sameRect(before.rect, after.rect)) {
+    return after;
+  }
 
-  return { ...field, anchor };
+  const { resolved: _resolved, ...anchor } = after.anchor;
+
+  return { ...after, anchor };
+}
+
+/** Canonical equality: the comparison the importer will make, on the values it will be given. */
+function sameRect(a: Rect, b: Rect): boolean {
+  return RECT_KEYS.every((key) => roundCoordinate(a[key]) === roundCoordinate(b[key]));
 }
 
 function roundRect(rect: Rect): Rect {
@@ -447,13 +466,7 @@ function applyPatch(field: FieldDefinition, patch: FieldPatch): FieldDefinition 
     }
   }
 
-  // The page and the rectangle are the two properties a receipt is bound to, so editing either
-  // is what makes the stored answer stale.
-  if (patch.page !== undefined || patch.rect !== undefined) {
-    return withoutStaleReceipt(next);
-  }
-
-  return next;
+  return settled(field, next);
 }
 
 /**
@@ -494,6 +507,6 @@ function duplicateField(source: FieldDefinition, document: FieldSchemaDocument):
   delete copy.alias;
 
   // The copy is offset from the original, so a receipt describing the original's rectangle
-  // describes nothing about this one. The anchor request is kept and resolves again.
-  return withoutStaleReceipt(copy);
+  // describes nothing about this one. Decided by the same comparison as every other edit.
+  return settled(source, copy);
 }

@@ -6,6 +6,7 @@ namespace Tests\Unit\Preparation\Schema;
 
 use App\Domain\Preparation\Schema\AnchorPlacement;
 use App\Domain\Preparation\Schema\AnchorPlacementMode;
+use App\Domain\Preparation\Schema\CanonicalNumber;
 use App\Domain\Preparation\Schema\CoordinateSpaceDeclaration;
 use App\Domain\Preparation\Schema\FieldDefinition;
 use App\Domain\Preparation\Schema\FieldSchemaValidator;
@@ -192,7 +193,10 @@ class FieldSchemaContractTest extends TestCase
             'A default occurrence would be the "first match wins" fallback the Text module refuses.',
         );
         $this->assertSame(
-            [['const' => AnchorPlacement::OCCURRENCE_SOLE], ['type' => 'integer', 'minimum' => 1]],
+            [
+                ['const' => AnchorPlacement::OCCURRENCE_SOLE],
+                ['type' => 'integer', 'minimum' => 1, 'maximum' => CanonicalNumber::MAX_INTEGER],
+            ],
             $anchor['properties']['occurrence']['oneOf'],
         );
         $this->assertStringNotContainsString('"all"', json_encode($anchor['properties']['occurrence']['oneOf']) ?: '');

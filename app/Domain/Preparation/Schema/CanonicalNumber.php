@@ -29,6 +29,23 @@ final class CanonicalNumber
     public const DECIMALS = 3;
 
     /**
+     * Largest integer this schema admits: 2^53 - 1, the largest both implementations agree on.
+     *
+     * Every integer property — a page number, an occurrence index — is bounded by it, and for the
+     * reason `AnchorPlacement::MAX_TOLERANCE` bounds a distance: a document must mean the same
+     * thing in both projections. PHP's integers run to 2^63 - 1, and JavaScript's numbers stop
+     * being exact at 2^53, so between the two a value is representable on one side and rounded on
+     * the other — and the TypeScript importer would accept a document the PHP one refuses, which
+     * an integration meets as a 422 after its own editor said the document was fine.
+     *
+     * `Number.MAX_SAFE_INTEGER` is the line because it is the largest integer JavaScript can hold
+     * *and distinguish from its successor*. Below it both languages parse, compare and print the
+     * same digits (docs/preparation/field-schema.md, "Why every number in this schema is
+     * bounded").
+     */
+    public const MAX_INTEGER = 9_007_199_254_740_991;
+
+    /**
      * Slack allowed when comparing a rounded coordinate against a page boundary.
      *
      * One unit in the last retained place: a rectangle that sits exactly on the page edge must

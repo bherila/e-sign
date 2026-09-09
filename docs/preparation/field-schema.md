@@ -247,23 +247,41 @@ Every numeric property 1.1 admits, and what bounds it:
 
 | Property | Bound | How |
 |---|---|---|
-| `fields[].page` | yes | integer; a value the platform integer cannot hold is `invalid_type` |
+| `fields[].page` | yes | `1 … 2^53 - 1` |
 | `fields[].rect.x` / `.y` | **no upper bound** | `minimum: 0`; the page-fit check needs page sizes the importer is not always given |
 | `fields[].rect.width` / `.height` | **no upper bound** | `exclusiveMinimum: 0`, same reason |
-| `anchor.occurrence` | yes | integer, as `page` |
+| `anchor.occurrence` | yes | `1 … 2^53 - 1`, or `"sole"` |
 | `anchor.offset.dx` / `.dy` | **no bound** | a displacement, in either direction, with nothing constraining it |
 | `anchor.tolerance` | yes | `0 … 14400` |
-| `anchor.resolved.page` | yes | integer, as `page` |
-| `anchor.resolved.occurrence_index` | yes | integer, as `page` |
+| `anchor.resolved.page` | yes | `1 … 2^53 - 1` |
+| `anchor.resolved.occurrence_index` | yes | `1 … 2^53 - 1` |
 | `anchor.resolved.anchor_rect.*` | yes | `-14400 … 14400`, extents non-negative |
 | `anchor.resolved.rect.*` | **no upper bound** | it is a `rect` |
 
-The three unbounded entries are named rather than left for someone to rediscover. All three
-predate 1.1 — they are `rect` and `offset`, which 1.0 already had — and the same divergence
-applies to them: a document with `rect.x` of 1e20 canonicalises to different bytes in the two
+**How this table was checked, which matters as much as what it says.** Every row was probed at
+1e20 — the magnitude where the two implementations part company — in *both* PHP and TypeScript,
+and both were required to give the same verdict. That method is the point: an earlier version of
+this table said the integer properties were bounded because PHP refused them, which was a claim
+about the contract inferred from one implementation's behaviour. TypeScript accepted the same
+documents, so the editor validated what the API then refused with a 422. A reader cannot tell a
+verified row from an inferred one unless the table says which it is, so: **these rows are
+verified, on both sides.** The probes are `FieldSchemaValidatorTest::numericSweep` and the
+matching "the numeric sweep" cases in `fieldSchema.test.ts` — the same list, the same
+expectations, so a bound added on one side and not the other fails there rather than in review.
+
+The three unbounded entries are named rather than left for someone to rediscover, and the sweep
+asserts they are still unbounded, so removing one is a deliberate act rather than a silent drift.
+All three predate 1.1 — they are `rect` and `offset`, which 1.0 already had — and the same
+divergence applies: a document with `rect.x` of 1e20 canonicalises to different bytes in the two
 implementations, so it has two `field_schema_sha256`. Bounding them is not a repair but a
 **version-policy decision**, because the importer is shared: tightening `rect` changes what this
-build accepts for documents that were valid under 1.0. Tracked as issue #105.
+build accepts for documents that were valid under 1.0. Tracked as issue #105, which covers
+`anchor.offset` as well as `rect`.
+
+The integer bound is `2^53 - 1` rather than a page-derived number because integers have no page to
+be derived from: it is the largest value both languages hold *and distinguish from its successor*.
+PHP counts to `2^63 - 1` and JavaScript stops being exact at `2^53`, so anything in between is a
+whole number on one side and a rounded one on the other.
 
 **The rule for the next unbounded property.** A canonicaliser that reaches its result by scaling
 has a range where it stops being total, and a schema whose numbers were all bounded never
