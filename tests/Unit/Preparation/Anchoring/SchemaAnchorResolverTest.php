@@ -6,7 +6,10 @@ namespace Tests\Unit\Preparation\Anchoring;
 
 use App\Domain\Preparation\Anchoring\AnchorResolutionFailed;
 use App\Domain\Preparation\Anchoring\SchemaAnchorResolver;
+use App\Domain\Preparation\Geometry\NativeRect;
+use App\Domain\Preparation\Schema\AnchorPlacement;
 use App\Domain\Preparation\Schema\AnchorPlacementMode;
+use App\Domain\Preparation\Schema\CanonicalNumber;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\PageSizes;
 use App\Domain\Preparation\Schema\SchemaVersion;
@@ -17,6 +20,7 @@ use App\Domain\Preparation\Text\AnchorOccurrence;
 use App\Domain\Preparation\Text\AnchorOrigin;
 use App\Domain\Preparation\Text\AnchorResolver;
 use App\Domain\Preparation\Text\TextRun;
+use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\PdfFixtures;
@@ -426,6 +430,160 @@ final class SchemaAnchorResolverTest extends TestCase
     }
 
     // ------------------------------------------------------------------ helpers
+
+    /**
+     * A cross-check is judged at the bound it states, on the numbers the document will hold.
+     *
+     * Two mistakes are possible and they are different. The resolved side comes from extraction
+     * and carries whatever precision the font metrics produced, so comparing it raw judges a value
+     * the document never holds. And subtracting two already-canonical values can land a few ulps
+     * above the bound they sit exactly on, which refuses a cross-check that is precisely at its
+     * stated tolerance.
+     *
+     * The *declared* side needs no such care and cannot be given any: from 1.1 the schema refuses
+     * a coordinate finer than three decimals, so a declared rectangle is canonical by the time it
+     * reaches here. Rounding it is defensive; rounding the resolved side and the distance is not.
+     *
+     * The combination is distance against boundary, which is why one case cannot stand in for the
+     * others: a test just inside the bound passes while exact matches are refused, and a test at
+     * zero passes while everything near the boundary is wrong. The offsets are taken from the
+     * resolver's own answer rather than from a number written down here, so the case says what it
+     * means even if the fixture moves.
+     *
+     * @return iterable<string, array{float, float, bool}>
+     */
+    public static function crossCheckBoundaries(): iterable
+    {
+        //                                  offset from the resolved corner, tolerance, accepted?
+        yield 'an exact match' => [0.0, 1.0, true];
+        yield 'inside the tolerance' => [0.5, 1.0, true];
+        yield 'exactly at the tolerance' => [1.0, 1.0, true];
+        yield 'one canonical step past it' => [1.001, 1.0, false];
+        yield 'well past it' => [8.0, 1.0, false];
+        yield 'an exact match at zero tolerance' => [0.0, 0.0, true];
+        yield 'one canonical step away at zero tolerance' => [0.001, 0.0, false];
+    }
+
+    /**
+     * The resolved side carries whatever precision the page's metrics produced.
+     *
+     * The declared side is always canonical — from 1.1 the schema refuses a finer coordinate — so
+     * the value that can be sub-thousandth is the one extraction hands back. A run whose glyphs
+     * divide unevenly gives a match rectangle a fraction of a thousandth from the round number the
+     * document declares, and comparing raw refuses that as a disagreement while the stored
+     * document shows none: the message even reports it as "off by 0", because the numbers it
+     * prints are canonical and the numbers it compared were not.
+     *
+     * Synthetic runs rather than a fixture, because the fixture matrix resolves to exact values
+     * and cannot exercise this. A test that cannot fail is the thing this branch keeps finding.
+     */
+    public function test_a_sub_thousandth_resolved_position_is_not_a_disagreement(): void
+    {
+        // A run whose width does not divide evenly by its character count, so the match rectangle
+        // lands a fraction of a thousandth away from a round number.
+        $runs = [new TextRun(
+            page: 1,
+            text: 'xxSignature:',
+            rect: new NativeRect(60.0, 200.0, 72.0004 * 12 / 10, 12.0),
+            fontSize: 12.0,
+            fontResource: 'F1',
+        )];
+
+        $document = $this->documentWith(
+            $this->replacingAnchor([
+                'placement' => AnchorPlacementMode::CrossCheck->value,
+                'tolerance' => 0,
+            ]),
+            rect: ['x' => 74.4, 'y' => 200, 'width' => 170, 'height' => 36],
+        );
+
+        $resolved = (new AnchorResolver)->resolve(
+            $runs,
+            $document->fields[0]->anchor?->toAnchor(1, 170, 36) ?? throw new InvalidArgumentException('no anchor'),
+        )[0];
+
+        // Precondition: the resolver really did produce a sub-thousandth coordinate, and the
+        // declared rectangle is the canonical form of it. Without this the case proves nothing.
+        $this->assertNotSame(CanonicalNumber::round($resolved->resolvedRect->x), $resolved->resolvedRect->x);
+        $this->assertSame(74.4, CanonicalNumber::round($resolved->resolvedRect->x));
+
+        $this->assertSame(['signature'], $this->resolver()->resolve($document, $runs, self::DIGEST)->resolved);
+    }
+
+    #[DataProvider('crossCheckBoundaries')]
+    public function test_a_cross_check_is_judged_on_stored_values_at_its_stated_bound(
+        float $offset,
+        float $tolerance,
+        bool $accepted,
+    ): void {
+        $runs = (new TcPdfTextLocator)->extract(PdfFixtures::bytes('single-page-letter'));
+
+        // Where this anchor actually resolves, asked rather than assumed.
+        $placed = $this->resolver()
+            ->resolve($this->documentWith($this->replacingAnchor()), $runs, self::DIGEST)
+            ->schema->field('signature')?->rect;
+
+        $this->assertNotNull($placed);
+
+        $document = $this->documentWith(
+            $this->replacingAnchor([
+                'placement' => AnchorPlacementMode::CrossCheck->value,
+                'tolerance' => $tolerance,
+            ]),
+            rect: [
+                'x' => CanonicalNumber::round($placed->x + $offset),
+                'y' => $placed->y,
+                'width' => $placed->width,
+                'height' => $placed->height,
+            ],
+        );
+
+        if ($accepted) {
+            $this->assertSame(['signature'], $this->resolver()->resolve($document, $runs, self::DIGEST)->resolved);
+
+            return;
+        }
+
+        $this->assertSame(
+            ValidationCode::AnchorCrossCheckFailed,
+            $this->failureOf($document, $runs)->problems[0]->code,
+        );
+    }
+
+    /**
+     * A deployment's tolerance is held to the range a document's is, and refused where it is set.
+     *
+     * Unvalidated, a negative setting reports every exact match as `anchor_cross_check_failed` — a
+     * 422 blaming a document that is right — and one above the maximum reaches
+     * `AnchorPlacement::withTolerance()` on a *successful* match, throwing at request time. Both
+     * are configuration mistakes wearing a document's clothes.
+     *
+     * Sign and magnitude are independent, so both ends are checked along with the two values that
+     * must remain legal.
+     *
+     * @return iterable<string, array{float, bool}>
+     */
+    public static function configuredTolerances(): iterable
+    {
+        yield 'zero' => [0.0, true];
+        yield 'the default' => [SchemaAnchorResolver::DEFAULT_CROSS_CHECK_TOLERANCE, true];
+        yield 'the largest page side' => [AnchorPlacement::MAX_TOLERANCE, true];
+        yield 'negative' => [-1.0, false];
+        yield 'one step past the largest page side' => [AnchorPlacement::MAX_TOLERANCE + 0.001, false];
+        yield 'not a number' => [NAN, false];
+    }
+
+    #[DataProvider('configuredTolerances')]
+    public function test_the_deployment_tolerance_is_refused_where_it_is_configured(float $tolerance, bool $legal): void
+    {
+        if (! $legal) {
+            $this->expectException(InvalidArgumentException::class);
+        }
+
+        $resolver = new SchemaAnchorResolver(new AnchorResolver, $tolerance);
+
+        $this->assertInstanceOf(SchemaAnchorResolver::class, $resolver);
+    }
 
     private function resolver(): SchemaAnchorResolver
     {

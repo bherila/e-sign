@@ -194,6 +194,75 @@ final class ReceiptVerifierTest extends TestCase
     }
 
     /**
+     * A receipt is stored component-by-component, and reconstructing it re-adds them.
+     *
+     * `anchor_rect` is canonicalised per component before storage, while `rect` is canonicalised
+     * *after* the corner and the offset are added. So the value the receipt records and the value
+     * this verifier reconstructs from the stored components can legitimately sit one canonical
+     * step apart — and subtracting two three-decimal values can land a few ulps above that step.
+     * Comparing raw therefore rejects the resolver's own correct output.
+     *
+     * The combination that matters is *which corner* × *how far the reconstruction drifts*, so the
+     * matrix walks every origin at the drift the rounding actually produces. A single origin would
+     * pass while the right-hand ones failed, which is exactly the shape the reported case had.
+     *
+     * @return iterable<string, array{AnchorOrigin, float, float, float, float}>
+     */
+    public static function componentRounding(): iterable
+    {
+        // Values chosen so each component rounds one way and the sum rounds the other.
+        foreach (AnchorOrigin::cases() as $origin) {
+            yield $origin->value => [$origin, 541.50045, 622.40055, 97.61745, 11.60055];
+        }
+    }
+
+    #[DataProvider('componentRounding')]
+    public function test_a_receipt_survives_being_stored_component_by_component(
+        AnchorOrigin $origin,
+        float $x,
+        float $y,
+        float $width,
+        float $height,
+    ): void {
+        $request = AnchorPlacement::fromArray([
+            'text' => 'Signature:',
+            'occurrence' => 'sole',
+            'placement' => AnchorPlacementMode::Replace->value,
+            'origin' => $origin->value,
+            'offset' => ['dx' => -100, 'dy' => -100],
+        ]);
+
+        // The resolver's own arithmetic: the corner of the *raw* measurement, plus the offset,
+        // canonicalised once at the end.
+        $cornerX = in_array($origin, [AnchorOrigin::TopRight, AnchorOrigin::BottomRight], true) ? $x + $width : $x;
+        $cornerY = in_array($origin, [AnchorOrigin::BottomLeft, AnchorOrigin::BottomRight], true) ? $y + $height : $y;
+
+        $receipt = ResolvedAnchorRecord::fromArray([
+            'document_sha256' => self::DIGEST,
+            'page' => 1,
+            'occurrence_index' => 1,
+            'anchor_rect' => ['x' => $x, 'y' => $y, 'width' => $width, 'height' => $height],
+            'rect' => ['x' => $cornerX - 100, 'y' => $cornerY - 100, 'width' => 170, 'height' => 36],
+        ]);
+
+        $field = FieldDefinition::fromArray([
+            'id' => 'signature',
+            'recipient_id' => 'signer',
+            'type' => 'signature',
+            'page' => 1,
+            'rect' => $receipt->rect->toArray(),
+            'required' => true,
+            'read_only' => false,
+        ])->withAnchor($request);
+
+        $this->assertSame(
+            [],
+            (new ReceiptVerifier)->problems($field, $request, $receipt),
+            'A receipt whose components round one way and whose sum rounds the other was rejected.',
+        );
+    }
+
+    /**
      * @return array{FieldDefinition, AnchorPlacement, ResolvedAnchorRecord}
      */
     private function resolve(

@@ -80,7 +80,26 @@ final readonly class SchemaAnchorResolver
         private AnchorResolver $anchors,
         private float $defaultCrossCheckTolerance = self::DEFAULT_CROSS_CHECK_TOLERANCE,
         private ReceiptVerifier $receipts = new ReceiptVerifier,
-    ) {}
+    ) {
+        // A deployment's tolerance is held to the same range a document's is, and refused here
+        // rather than where it is used. Unvalidated, a negative setting reports every exact match
+        // to the caller as `anchor_cross_check_failed` — a 422 blaming a document that is right —
+        // and one above the maximum reaches `AnchorPlacement::withTolerance()` when a *successful*
+        // match records what it was checked against, throwing at request time. A configuration
+        // mistake should fail as a configuration mistake, at the point the object is built.
+        if (! is_finite($this->defaultCrossCheckTolerance)
+            || $this->defaultCrossCheckTolerance < 0.0
+            || $this->defaultCrossCheckTolerance > AnchorPlacement::MAX_TOLERANCE
+        ) {
+            throw new InvalidArgumentException(
+                'esign.preparation.anchor_cross_check_tolerance must be a finite number of points between 0 and '
+                    .AnchorPlacement::MAX_TOLERANCE.'; got '.var_export($this->defaultCrossCheckTolerance, true)
+                    .'. A cross-check tolerance is a distance on one page, and a negative one refuses every '
+                    .'document while a larger one cannot be recorded in the receipt that says what was applied.',
+            );
+        }
+
+    }
 
     /**
      * @param  array<int, TextRun>  $runs  Positioned text from the document `$documentSha256` names.
@@ -353,11 +372,22 @@ final readonly class SchemaAnchorResolver
             return null;
         }
 
-        $tolerance = $this->toleranceFor($anchor);
-        $dx = abs($found->resolvedRect->x - $field->rect->x);
-        $dy = abs($found->resolvedRect->y - $field->rect->y);
+        // Compared on the numbers the document will hold, and on a *rounded distance*. Both
+        // matter, and they are different mistakes. Comparing raw coordinates judges a value the
+        // document never carries — extraction produces sub-thousandth positions that
+        // canonicalisation removes — so a receipt could be refused for a disagreement that does
+        // not exist once stored, with the message reporting it as "off by 0". And subtracting two
+        // already-canonical values can land a few ulps above a bound they sit exactly on, which
+        // refuses a cross-check that is precisely at its stated tolerance.
+        //
+        // This is the rule the field-schema validator arrived at over several review rounds
+        // (`checkCrossCheckReceiptAgrees`), and it is the same rule here: compare what will be
+        // stored, and round the comparison itself.
+        $tolerance = CanonicalNumber::round($this->toleranceFor($anchor));
+        $dx = self::canonicalDistance($found->resolvedRect->x, $field->rect->x);
+        $dy = self::canonicalDistance($found->resolvedRect->y, $field->rect->y);
 
-        if ($dx <= $tolerance + self::PAGE_TOLERANCE && $dy <= $tolerance + self::PAGE_TOLERANCE) {
+        if ($dx <= $tolerance && $dy <= $tolerance) {
             return null;
         }
 
@@ -378,10 +408,21 @@ final readonly class SchemaAnchorResolver
         );
     }
 
-    /** The tolerance a cross-check is judged against: the document's, else the deployment's. */
+    /** The gap between two coordinates, as the stored document would measure it. */
+    private static function canonicalDistance(float $a, float $b): float
+    {
+        return CanonicalNumber::round(abs(CanonicalNumber::round($a) - CanonicalNumber::round($b)));
+    }
+
+    /**
+     * The tolerance a cross-check is judged against: the document's, else the deployment's.
+     *
+     * Canonical, because it is compared against canonical distances and, when the deployment's is
+     * used, recorded in the receipt as the number the check was actually made with.
+     */
     private function toleranceFor(AnchorPlacement $anchor): float
     {
-        return $anchor->tolerance ?? $this->defaultCrossCheckTolerance;
+        return CanonicalNumber::round($anchor->tolerance ?? $this->defaultCrossCheckTolerance);
     }
 
     private function number(float $value): string

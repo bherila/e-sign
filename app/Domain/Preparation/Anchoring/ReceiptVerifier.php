@@ -147,8 +147,21 @@ final readonly class ReceiptVerifier
         };
     }
 
+    /**
+     * Equal once both sides are canonical, and once the *difference* is too.
+     *
+     * Rounding both operands is not enough on its own: two canonical values one step apart can
+     * subtract to a few ulps above `0.001`, and two that should be identical can differ by a few
+     * ulps below it. Here that matters more than it usually would, because the receipt's
+     * `anchor_rect` components are each rounded before storage while `rect` is rounded *after* the
+     * corner and the offset are added — so the reconstruction below legitimately lands one
+     * canonical step from the recorded value, and comparing raw would reject the resolver's own
+     * correct output.
+     */
     private static function same(float $expected, float $actual): bool
     {
-        return abs(CanonicalNumber::round($expected) - CanonicalNumber::round($actual)) <= CanonicalNumber::TOLERANCE;
+        $delta = CanonicalNumber::round(abs(CanonicalNumber::round($expected) - CanonicalNumber::round($actual)));
+
+        return $delta <= CanonicalNumber::TOLERANCE;
     }
 }
