@@ -1,5 +1,5 @@
 /**
- * Native field definition schema 1.0 — the editor's half of the contract.
+ * Native field definition schema — the editor's half of the contract.
  *
  * The contract itself is `resources/schema/field-schema-1.0.json`; the server half is
  * `app/Domain/Preparation/Schema`. The three are kept in step by tests, not by convention:
@@ -16,8 +16,21 @@
  * Never infer points versus percent from a number's magnitude.
  */
 
-/** The schema version this build implements and writes. */
-export const FIELD_SCHEMA_VERSION = "1.0";
+/**
+ * The schema version this build implements and writes.
+ *
+ * 1.1 adds the optional anchor members `placement`, `required` and `tolerance`, and the
+ * service-written `resolved` receipt. They are additive and optional, which is the case the
+ * version policy says bumps the minor: a 1.0 reader validating with `additionalProperties: false`
+ * must not be handed a document that still calls itself 1.0 and carries members its contract does
+ * not declare.
+ */
+export const FIELD_SCHEMA_VERSION = "1.1";
+
+/** Every minor this build can read, oldest first. Each has its own published contract file. */
+export const SUPPORTED_FIELD_SCHEMA_VERSIONS = ["1.0", "1.1"] as const;
+
+export type FieldSchemaVersion = (typeof SUPPORTED_FIELD_SCHEMA_VERSIONS)[number];
 
 /**
  * Field types version 1.0 implements, in schema declaration order.
@@ -89,11 +102,61 @@ export type AnchorOrigin = (typeof ANCHOR_ORIGINS)[number];
 
 export const DEFAULT_ANCHOR_ORIGIN: AnchorOrigin = "top_left";
 
+/**
+ * Which of a field's two statements about position wins.
+ *
+ * Every field carries a rect, so a field that also carries an anchor holds two of them.
+ * `"replace"` makes the anchor authoritative for x and y and keeps only the rect's size;
+ * `"cross_check"` keeps the declared rect and requires the anchor to resolve within
+ * `tolerance` points of it.
+ *
+ * Omitted means `"replace"`, which is not the kind of default `occurrence` refuses: it is the
+ * only behaviour an anchor has ever had here, so it is what an already-written document meant.
+ * Both defaults are omitted from the canonical form for the same reason — an anchor written
+ * before these properties existed must still canonicalise to exactly its old bytes, because the
+ * field-schema digest is what every attestation on an anchored agreement is bound to.
+ */
+export const ANCHOR_PLACEMENTS = ["replace", "cross_check"] as const;
+
+export type AnchorPlacement = (typeof ANCHOR_PLACEMENTS)[number];
+
+/** Whether an anchor's text must be present. Omitted means true; false needs an optional field. */
+export const DEFAULT_ANCHOR_REQUIRED = true;
+
+export const DEFAULT_ANCHOR_PLACEMENT: AnchorPlacement = "replace";
+
+/**
+ * A rectangle recording where something *was*, rather than where something goes.
+ *
+ * `x` and `y` may be negative and nothing is checked against the page: a run's nominal box is its
+ * advance by the font's ascent plus descent, so a heading near the top of the page legitimately
+ * starts above the CropBox edge.
+ */
+export interface MeasuredRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** What resolution found, written by the service and never authored in the editor. */
+export interface ResolvedAnchor {
+  document_sha256: string;
+  page: number;
+  occurrence_index: number;
+  anchor_rect: MeasuredRect;
+  rect: Rect;
+}
+
 export interface Anchor {
   text: string;
   occurrence: AnchorOccurrence;
+  placement?: AnchorPlacement;
   origin?: AnchorOrigin;
   offset?: AnchorOffset;
+  required?: boolean;
+  tolerance?: number;
+  resolved?: ResolvedAnchor;
 }
 
 export interface Recipient {
@@ -118,7 +181,7 @@ export interface FieldDefinition {
 }
 
 export interface FieldSchemaDocument {
-  schema_version: typeof FIELD_SCHEMA_VERSION;
+  schema_version: FieldSchemaVersion;
   document_id: string;
   coordinate_space: CoordinateSpace;
   recipients: Recipient[];
@@ -157,6 +220,8 @@ export const VALIDATION_CODES = [
   "dimension_not_positive",
   "rect_out_of_page",
   "unresolved_prefill_variable",
+  "anchor_optional_on_required_field",
+  "anchor_cross_check_failed",
 ] as const;
 
 export type ValidationCode = (typeof VALIDATION_CODES)[number];
@@ -226,7 +291,20 @@ export const FIELD_REQUIRED = ["id", "recipient_id", "type", "page", "rect"] as 
 export const FIELD_OPTIONAL = ["required", "read_only", "label", "alias", "prefill", "anchor"] as const;
 export const RECT_REQUIRED = ["x", "y", "width", "height"] as const;
 export const ANCHOR_REQUIRED = ["text", "occurrence"] as const;
-export const ANCHOR_OPTIONAL = ["origin", "offset"] as const;
+export const ANCHOR_OPTIONAL = ["placement", "origin", "offset", "required", "tolerance", "resolved"] as const;
+/** Anchor members that arrived after 1.0, and the minor that declares them. */
+export const ANCHOR_MEMBERS_SINCE_1_1 = ["placement", "required", "tolerance", "resolved"] as const;
+
+export const ANCHOR_MEMBERS_MINOR = 1;
+
+export const RESOLVED_ANCHOR_REQUIRED = [
+  "document_sha256",
+  "page",
+  "occurrence_index",
+  "anchor_rect",
+  "rect",
+] as const;
+const DOCUMENT_SHA256_PATTERN = /^[0-9a-f]{64}$/;
 
 /**
  * Round to the canonical precision, half away from zero.
@@ -328,7 +406,10 @@ export function serializeFieldSchema(document: FieldSchemaDocument): string {
 /** The canonical object form: property order fixed, defaults stated, coordinates rounded. */
 export function canonicaliseDocument(document: FieldSchemaDocument): FieldSchemaDocument {
   return {
-    schema_version: FIELD_SCHEMA_VERSION,
+    // The version the document arrived with, not the one this build writes: a 1.0 document that
+    // uses none of the 1.1 members stays a 1.0 document, byte for byte, and so does its digest.
+    // Only the server rewrites a document's version, and only when it rewrites its fields.
+    schema_version: document.schema_version ?? FIELD_SCHEMA_VERSION,
     document_id: document.document_id,
     coordinate_space: {
       unit: NATIVE_COORDINATE_SPACE.unit,
@@ -363,12 +444,7 @@ function canonicaliseField(field: FieldDefinition): FieldDefinition {
     recipient_id: field.recipient_id,
     type: field.type,
     page: field.page,
-    rect: {
-      x: roundCoordinate(field.rect.x),
-      y: roundCoordinate(field.rect.y),
-      width: roundCoordinate(field.rect.width),
-      height: roundCoordinate(field.rect.height),
-    },
+    rect: canonicaliseRect(field.rect),
     required: field.required ?? true,
     read_only: field.read_only ?? false,
   };
@@ -386,23 +462,64 @@ function canonicaliseField(field: FieldDefinition): FieldDefinition {
   }
 
   if (field.anchor !== undefined) {
-    const anchor: Anchor = {
-      text: field.anchor.text,
-      occurrence: field.anchor.occurrence,
+    canonical.anchor = canonicaliseAnchor(field.anchor);
+  }
+
+  return canonical;
+}
+
+function canonicaliseRect(rect: Rect): Rect {
+  return {
+    x: roundCoordinate(rect.x),
+    y: roundCoordinate(rect.y),
+    width: roundCoordinate(rect.width),
+    height: roundCoordinate(rect.height),
+  };
+}
+
+/**
+ * Canonical anchor order: the declared properties in schema order, with anything that equals its
+ * default omitted — the anchor object's own long-standing convention, and here load-bearing: an
+ * anchor written before `placement` and `required` existed must canonicalise to exactly its old
+ * bytes, or the field-schema digest every attestation is bound to would move.
+ */
+function canonicaliseAnchor(anchor: Anchor): Anchor {
+  const canonical: Anchor = {
+    text: anchor.text,
+    occurrence: anchor.occurrence,
+  };
+
+  if (anchor.placement !== undefined && anchor.placement !== DEFAULT_ANCHOR_PLACEMENT) {
+    canonical.placement = anchor.placement;
+  }
+
+  if (anchor.origin !== undefined) {
+    canonical.origin = anchor.origin;
+  }
+
+  if (anchor.offset !== undefined) {
+    canonical.offset = {
+      dx: roundCoordinate(anchor.offset.dx),
+      dy: roundCoordinate(anchor.offset.dy),
     };
+  }
 
-    if (field.anchor.origin !== undefined) {
-      anchor.origin = field.anchor.origin;
-    }
+  if (anchor.required !== undefined && anchor.required !== DEFAULT_ANCHOR_REQUIRED) {
+    canonical.required = anchor.required;
+  }
 
-    if (field.anchor.offset !== undefined) {
-      anchor.offset = {
-        dx: roundCoordinate(field.anchor.offset.dx),
-        dy: roundCoordinate(field.anchor.offset.dy),
-      };
-    }
+  if (anchor.tolerance !== undefined) {
+    canonical.tolerance = roundCoordinate(anchor.tolerance);
+  }
 
-    canonical.anchor = anchor;
+  if (anchor.resolved !== undefined) {
+    canonical.resolved = {
+      document_sha256: anchor.resolved.document_sha256,
+      page: anchor.resolved.page,
+      occurrence_index: anchor.resolved.occurrence_index,
+      anchor_rect: canonicaliseRect(anchor.resolved.anchor_rect),
+      rect: canonicaliseRect(anchor.resolved.rect),
+    };
   }
 
   return canonical;
@@ -793,7 +910,16 @@ function checkFields(
     }
 
     if ("anchor" in field) {
-      checkAnchor(`${path}/anchor`, field["anchor"], issues);
+      const fieldRequired = typeof field["required"] === "boolean" ? field["required"] : true;
+      checkAnchor(
+        `${path}/anchor`,
+        field["anchor"],
+        fieldRequired,
+        field["rect"],
+        field["page"],
+        declaredMinor(document),
+        issues,
+      );
     }
   });
 }
@@ -984,7 +1110,33 @@ function checkPrefill(
   }
 }
 
-function checkAnchor(path: string, anchor: unknown, issues: ValidationIssue[]): void {
+/**
+ * The minor version a document declares, or null when it does not declare a usable one.
+ *
+ * Only used to decide which members a document may contain; every other check is
+ * version-independent, and a document with no readable version has already been reported.
+ */
+function declaredMinor(document: Record<string, unknown>): number | null {
+  const declared = document["schema_version"];
+
+  if (typeof declared !== "string") {
+    return null;
+  }
+
+  const match = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.exec(declared);
+
+  return match ? Number(match[2]) : null;
+}
+
+function checkAnchor(
+  path: string,
+  anchor: unknown,
+  fieldRequired: boolean,
+  fieldRect: unknown,
+  fieldPage: unknown,
+  minor: number | null,
+  issues: ValidationIssue[],
+): void {
   if (!isObject(anchor)) {
     issues.push(issue(path, "invalid_type", "anchor must be an object with the text to locate."));
 
@@ -993,12 +1145,49 @@ function checkAnchor(path: string, anchor: unknown, issues: ValidationIssue[]): 
 
   checkObjectShape(path, anchor, ANCHOR_REQUIRED, ANCHOR_OPTIONAL, issues);
 
+  // The version string has to be a contract, not a label: a document declaring 1.0 is read
+  // against a file that forbids undeclared properties, so a 1.1 member in it is refused with the
+  // code that consumer would use.
+  if (minor !== null && minor < ANCHOR_MEMBERS_MINOR) {
+    for (const member of ANCHOR_MEMBERS_SINCE_1_1) {
+      if (member in anchor) {
+        issues.push(
+          issue(
+            `${path}/${member}`,
+            "unknown_property",
+            `anchor.${member} arrived in schema 1.1, and this document declares 1.${minor}. Declare 1.1 to ` +
+              `use it: a document that says 1.${minor} is read against a contract that does not have it, and ` +
+              "refusing an undeclared property is what that contract does.",
+          ),
+        );
+      }
+    }
+  }
+
   if ("text" in anchor) {
     checkNonEmptyString(`${path}/text`, "anchor.text", anchor["text"], ANCHOR_TEXT_MAX_LENGTH, issues);
   }
 
   if ("occurrence" in anchor) {
     checkAnchorOccurrence(`${path}/occurrence`, anchor["occurrence"], issues);
+  }
+
+  const placement = checkAnchorPlacement(`${path}/placement`, anchor, issues) ?? DEFAULT_ANCHOR_PLACEMENT;
+  checkAnchorRequired(path, anchor, fieldRequired, placement, issues);
+  checkAnchorTolerance(`${path}/tolerance`, anchor, placement, issues);
+
+  if ("resolved" in anchor) {
+    const tolerance = typeof anchor["tolerance"] === "number" ? anchor["tolerance"] : null;
+    checkResolvedAnchor(
+      `${path}/resolved`,
+      anchor["resolved"],
+      placement,
+      tolerance,
+      fieldRect,
+      fieldPage,
+      anchor["occurrence"],
+      issues,
+    );
   }
 
   if ("origin" in anchor) {
@@ -1060,6 +1249,382 @@ function checkAnchor(path: string, anchor: unknown, issues: ValidationIssue[]): 
 /**
  * `"sole"` or a 1-based index, and nothing else. See {@link AnchorOccurrence}.
  */
+function checkAnchorPlacement(
+  path: string,
+  anchor: Record<string, unknown>,
+  issues: ValidationIssue[],
+): AnchorPlacement | null {
+  if (!("placement" in anchor)) {
+    return null;
+  }
+
+  const placement = anchor["placement"];
+
+  if (typeof placement !== "string") {
+    issues.push(issue(path, "invalid_type", "anchor.placement must be a string."));
+
+    return null;
+  }
+
+  if (!(ANCHOR_PLACEMENTS as readonly string[]).includes(placement)) {
+    issues.push(
+      issue(
+        path,
+        "invalid_format",
+        `anchor.placement must be one of ${ANCHOR_PLACEMENTS.join(", ")}; got "${placement}". ` +
+          '"replace" lets the anchor decide where the field goes and keeps only the rectangle\'s size; ' +
+          '"cross_check" keeps the declared rectangle and requires the anchor to agree with it. There is ' +
+          "no default: a field with a rectangle and an anchor that does not say which one governs is refused.",
+      ),
+    );
+
+    return null;
+  }
+
+  return placement as AnchorPlacement;
+}
+
+function checkAnchorRequired(
+  path: string,
+  anchor: Record<string, unknown>,
+  fieldRequired: boolean,
+  placement: AnchorPlacement,
+  issues: ValidationIssue[],
+): void {
+  if (!("required" in anchor)) {
+    return;
+  }
+
+  const required = anchor["required"];
+
+  if (typeof required !== "boolean") {
+    issues.push(issue(`${path}/required`, "invalid_type", "anchor.required must be a boolean."));
+
+    return;
+  }
+
+  if (required) {
+    return;
+  }
+
+  if (fieldRequired) {
+    issues.push(
+      issue(
+        `${path}/required`,
+        "anchor_optional_on_required_field",
+        'anchor.required is false on a field whose own "required" is true. An absent anchor omits the field, ' +
+          "and a required field that is never placed can never be completed. Make the field optional, or " +
+          "require the anchor.",
+      ),
+    );
+
+    return;
+  }
+
+  if (placement === "cross_check") {
+    issues.push(
+      issue(
+        `${path}/required`,
+        "invalid_format",
+        'anchor.required false means an absent anchor omits the field, which contradicts anchor.placement ' +
+          '"cross_check": there the declared rectangle is authoritative and the anchor only checks it, so an ' +
+          'absent anchor has nothing to omit. Use "replace", or require the anchor.',
+      ),
+    );
+  }
+}
+
+function checkAnchorTolerance(
+  path: string,
+  anchor: Record<string, unknown>,
+  placement: AnchorPlacement,
+  issues: ValidationIssue[],
+): void {
+  if (!("tolerance" in anchor)) {
+    return;
+  }
+
+  const tolerance = anchor["tolerance"];
+
+  if (typeof tolerance !== "number") {
+    issues.push(issue(path, "invalid_type", "anchor.tolerance must be a number of points."));
+
+    return;
+  }
+
+  if (!Number.isFinite(tolerance)) {
+    issues.push(issue(path, "coordinate_not_finite", `anchor.tolerance must be a finite number; got ${tolerance}.`));
+
+    return;
+  }
+
+  if (tolerance < 0) {
+    issues.push(
+      issue(path, "invalid_format", `anchor.tolerance is a distance in points and must not be negative; got ${tolerance}.`),
+    );
+
+    return;
+  }
+
+  if (placement === "replace") {
+    issues.push(
+      issue(
+        path,
+        "invalid_format",
+        'anchor.tolerance only means something with anchor.placement "cross_check". In "replace" mode the ' +
+          "anchor decides the position outright, so there is no declared rectangle to be within a tolerance of.",
+      ),
+    );
+  }
+}
+
+/**
+ * A receipt answers one question, and it has to be the question the field is asking now.
+ *
+ * The mirror of `FieldSchemaValidator::checkReceiptAnswersTheRequest()`. Move an anchored field to
+ * another page, or point its anchor at a different occurrence, and the receipt kept alongside
+ * describes a match nobody asked for any more. The server refuses that; refusing it here too is
+ * what stops the editor from discovering it as a 422 after the save.
+ */
+function checkReceiptAnswersTheRequest(
+  path: string,
+  recorded: { page?: number; occurrence_index?: number },
+  fieldPage: unknown,
+  requestedOccurrence: unknown,
+  issues: ValidationIssue[],
+): void {
+  if (typeof fieldPage === "number" && Number.isInteger(fieldPage) && recorded.page !== undefined && recorded.page !== fieldPage) {
+    issues.push(
+      issue(
+        `${path}/page`,
+        "page_out_of_range",
+        `anchor.resolved.page is ${recorded.page} and the field is on page ${fieldPage}. An anchor is searched ` +
+          "on the page its field declares, so a receipt for another page answers a question this field is no " +
+          "longer asking; move the field back or drop the receipt so it resolves again.",
+      ),
+    );
+  }
+
+  if (recorded.occurrence_index === undefined) {
+    return;
+  }
+
+  // "sole" means the text occurs once, so the match taken is always the first.
+  const expected =
+    requestedOccurrence === ANCHOR_OCCURRENCE_SOLE
+      ? 1
+      : typeof requestedOccurrence === "number" && Number.isInteger(requestedOccurrence)
+        ? requestedOccurrence
+        : null;
+
+  if (expected === null || recorded.occurrence_index === expected) {
+    return;
+  }
+
+  issues.push(
+    issue(
+      `${path}/occurrence_index`,
+      "invalid_format",
+      `anchor.resolved.occurrence_index is ${recorded.occurrence_index} and the anchor asks for ` +
+        `${requestedOccurrence === ANCHOR_OCCURRENCE_SOLE ? "the sole occurrence" : `occurrence ${expected}`}. ` +
+        "A receipt records which match was taken, so one for a different match is not an answer to this " +
+        "anchor; drop it so the anchor resolves again.",
+    ),
+  );
+}
+
+function checkResolvedAnchor(
+  path: string,
+  resolved: unknown,
+  placement: AnchorPlacement,
+  anchorTolerance: number | null,
+  fieldRect: unknown,
+  fieldPage: unknown,
+  requestedOccurrence: unknown,
+  issues: ValidationIssue[],
+): void {
+  if (!isObject(resolved)) {
+    issues.push(issue(path, "invalid_type", "anchor.resolved must be an object recording what resolution found."));
+
+    return;
+  }
+
+  checkObjectShape(path, resolved, RESOLVED_ANCHOR_REQUIRED, [], issues);
+
+  if ("document_sha256" in resolved) {
+    const digest = resolved["document_sha256"];
+
+    if (typeof digest !== "string" || !DOCUMENT_SHA256_PATTERN.test(digest)) {
+      issues.push(
+        issue(
+          `${path}/document_sha256`,
+          "invalid_format",
+          "anchor.resolved.document_sha256 must be 64 lowercase hexadecimal characters: the digest of the " +
+            "exact bytes the text was located in.",
+        ),
+      );
+    }
+  }
+
+  const recorded: { page?: number; occurrence_index?: number } = {};
+
+  for (const name of ["page", "occurrence_index"] as const) {
+    if (!(name in resolved)) {
+      continue;
+    }
+
+    const value = resolved[name];
+
+    if (typeof value !== "number" || !Number.isInteger(value)) {
+      issues.push(issue(`${path}/${name}`, "invalid_type", `anchor.resolved.${name} must be an integer.`));
+
+      continue;
+    }
+
+    if (value < 1) {
+      issues.push(
+        issue(
+          `${path}/${name}`,
+          name === "page" ? "page_out_of_range" : "invalid_format",
+          `anchor.resolved.${name} is 1-based; got ${value}.`,
+        ),
+      );
+
+      continue;
+    }
+
+    recorded[name] = value;
+  }
+
+  checkReceiptAnswersTheRequest(path, recorded, fieldPage, requestedOccurrence, issues);
+
+  // `anchor_rect` records where the text was, not where anything goes: a heading's ascender
+  // legitimately starts above the CropBox edge, so it is never checked as a placement.
+  if ("anchor_rect" in resolved) {
+    checkMeasuredRect(`${path}/anchor_rect`, resolved["anchor_rect"], issues);
+  }
+
+  if (!("rect" in resolved)) {
+    return;
+  }
+
+  checkRect(`${path}/rect`, resolved["rect"], null, undefined, issues);
+
+  const recordedRect = resolved["rect"];
+
+  if (!isObject(fieldRect) || !isObject(recordedRect)) {
+    return;
+  }
+
+  if (placement === "replace") {
+    // In `replace` mode the receipt's rectangle is where the field went, so the two must agree.
+    for (const name of RECT_REQUIRED) {
+      const declared = fieldRect[name];
+      const actual = recordedRect[name];
+
+      if (typeof declared !== "number" || typeof actual !== "number") {
+        return;
+      }
+
+      if (Math.abs(declared - actual) > CANONICAL_TOLERANCE) {
+        issues.push(
+          issue(
+            `${path}/rect/${name}`,
+            "invalid_format",
+            `anchor.resolved.rect must be the field's own rect when anchor.placement is "replace": the receipt ` +
+              `records where the field was placed, and this one says ${actual} where the field says ${declared}.`,
+          ),
+        );
+
+        return;
+      }
+    }
+
+    return;
+  }
+
+  // A cross-check receipt is the record that the check passed, so it has to survive the check —
+  // and against the tolerance the anchor itself states, because a receipt whose standard has to
+  // be looked up elsewhere proves nothing about what was applied.
+  if (anchorTolerance === null) {
+    issues.push(
+      issue(
+        path,
+        "missing_property",
+        'A "cross_check" anchor carrying anchor.resolved must also state anchor.tolerance: the receipt is the ' +
+          "record that the check passed, and without the distance it passed by there is nothing to check it against.",
+      ),
+    );
+
+    return;
+  }
+
+  for (const name of ["x", "y"] as const) {
+    const declared = fieldRect[name];
+    const actual = recordedRect[name];
+
+    if (typeof declared !== "number" || typeof actual !== "number") {
+      return;
+    }
+
+    const distance = Math.abs(declared - actual);
+
+    if (distance > anchorTolerance + CANONICAL_TOLERANCE) {
+      issues.push(
+        issue(
+          `${path}/rect/${name}`,
+          "anchor_cross_check_failed",
+          `anchor.resolved records a ${name} of ${actual} against a declared ${name} of ${declared}, which is ` +
+            `${distance} pt apart and outside the ${anchorTolerance} pt tolerance the anchor states. A receipt ` +
+            "that records a failed check is not a record that the check passed.",
+        ),
+      );
+
+      return;
+    }
+  }
+}
+
+/**
+ * A rectangle that records where something was, rather than where something goes: finite, with
+ * non-negative extents, and never checked against the page.
+ */
+function checkMeasuredRect(path: string, rect: unknown, issues: ValidationIssue[]): void {
+  if (!isObject(rect)) {
+    issues.push(issue(path, "invalid_type", "rect must be an object with x, y, width, and height."));
+
+    return;
+  }
+
+  checkObjectShape(path, rect, RECT_REQUIRED, [], issues);
+
+  for (const name of RECT_REQUIRED) {
+    if (!(name in rect)) {
+      continue;
+    }
+
+    const value = rect[name];
+
+    if (typeof value !== "number") {
+      issues.push(issue(`${path}/${name}`, "invalid_type", `rect.${name} must be a number.`));
+
+      continue;
+    }
+
+    if (!Number.isFinite(value)) {
+      issues.push(issue(`${path}/${name}`, "coordinate_not_finite", `rect.${name} must be a finite number; got ${value}.`));
+
+      continue;
+    }
+
+    if ((name === "width" || name === "height") && value < 0) {
+      issues.push(
+        issue(`${path}/${name}`, "dimension_not_positive", `rect.${name} must not be negative; got ${value}.`),
+      );
+    }
+  }
+}
+
 function checkAnchorOccurrence(path: string, occurrence: unknown, issues: ValidationIssue[]): void {
   if (typeof occurrence === "string") {
     if (occurrence === ANCHOR_OCCURRENCE_SOLE) {

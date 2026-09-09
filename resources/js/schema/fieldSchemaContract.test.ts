@@ -1,7 +1,8 @@
 import Ajv2020, { type ValidateFunction } from "ajv/dist/2020";
 
 import fixtureJson from "../../../tests/Fixtures/schema/nda-two-signers.json";
-import schemaJson from "../../schema/field-schema-1.0.json";
+import legacySchemaJson from "../../schema/field-schema-1.0.json";
+import schemaJson from "../../schema/field-schema-1.1.json";
 import {
   ANCHOR_OPTIONAL,
   ANCHOR_ORIGINS,
@@ -18,11 +19,12 @@ import {
   RECIPIENT_REQUIRED,
   RECT_REQUIRED,
   serializeFieldSchema,
+  validateFieldSchema,
   VALIDATION_CODES,
 } from "./fieldSchema";
 
 /**
- * `resources/schema/field-schema-1.0.json` is the published contract; these types are one
+ * `resources/schema/field-schema-1.1.json` is the published contract; these types are one
  * implementation of it and `app/Domain/Preparation/Schema` is the other. This file enforces the
  * contract directly with ajv and pins the TypeScript mirror against it. The PHP suite
  * (`tests/Unit/Preparation/Schema/FieldSchemaContractTest.php`) pins the same file from the
@@ -68,6 +70,32 @@ describe("the published JSON Schema", () => {
     expect(errorsFor(canonical)).toEqual([]);
   });
 
+  /**
+   * The reason 1.1 is a separate file rather than an edit to 1.0.
+   *
+   * A document written before the new anchor members existed says `"1.0"`, and a consumer holding
+   * the 1.0 contract validates it with `additionalProperties: false`. That contract is unchanged
+   * here, the document still satisfies it, and this build still reads the document — and hands
+   * back exactly the bytes it was given, version included, so the field-schema digest every
+   * attestation binds is untouched.
+   */
+  it("keeps a 1.0 document valid against the unchanged 1.0 contract, and round trips it", () => {
+    const legacy = JSON.parse(JSON.stringify(fixtureJson)) as Record<string, any>;
+    legacy.schema_version = "1.0";
+    delete legacy.fields[9].anchor.required;
+
+    const validateLegacy = new Ajv2020({ strict: false, allErrors: true }).compile(legacySchemaJson);
+
+    expect(validateLegacy(legacy)).toBe(true);
+    expect((validateLegacy.errors ?? []).map((error) => error.message)).toEqual([]);
+
+    const round = JSON.parse(serializeFieldSchema(parseFieldSchema(legacy))) as Record<string, any>;
+
+    expect(round.schema_version).toBe("1.0");
+    expect(round).toEqual(legacy);
+    expect(validateLegacy(round)).toBe(true);
+  });
+
   it.each([
     ["an undeclared document property", (raw: Record<string, any>) => (raw.fields_v2 = [])],
     ["an undeclared field property", (raw: Record<string, any>) => (raw.fields[0].font_size = 12)],
@@ -87,8 +115,71 @@ describe("the published JSON Schema", () => {
     ["an anchor with no occurrence", (raw: Record<string, any>) => delete raw.fields[5].anchor.occurrence],
     ["an anchor occurrence of all", (raw: Record<string, any>) => (raw.fields[5].anchor.occurrence = "all")],
     ["an undeclared anchor origin", (raw: Record<string, any>) => (raw.fields[5].anchor.origin = "centre")],
+    [
+      "an optional anchor on a required field",
+      (raw: Record<string, any>) => (raw.fields[9].required = true),
+    ],
+    [
+      "an optional anchor on a field that does not state required at all",
+      (raw: Record<string, any>) => delete raw.fields[9].required,
+    ],
+    [
+      "a tolerance with no cross-check to be the tolerance of",
+      (raw: Record<string, any>) => (raw.fields[5].anchor.tolerance = 2),
+    ],
+    [
+      "an optional anchor that only cross-checks a rectangle it cannot omit",
+      (raw: Record<string, any>) => (raw.fields[9].anchor.placement = "cross_check"),
+    ],
+    [
+      "a cross-check receipt with no tolerance to have passed by",
+      (raw: Record<string, any>) => {
+        raw.fields[5].anchor.placement = "cross_check";
+        raw.fields[5].anchor.resolved = {
+          document_sha256: "d".repeat(64),
+          page: 2,
+          occurrence_index: 1,
+          anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
+          rect: raw.fields[5].rect,
+        };
+      },
+    ],
   ])("rejects %s", (_name, mutate) => {
     expect(errorsFor(brokenFixture(mutate)).length).toBeGreaterThan(0);
+  });
+
+  /**
+   * The published file and the importers have to give a client the same answer.
+   *
+   * A relationship between two properties is the easiest kind of rule for a contract file and an
+   * importer to disagree about, because the file can only express it with a conditional and it is
+   * tempting not to write one. The cost of the disagreement falls on an integration: it validates
+   * against the published schema, is told the document conforms, and gets a 422 from the service.
+   * These are the relationships 1.1 encodes, each asserted in both projections at once.
+   */
+  it.each([
+    [
+      "anchor_optional_on_required_field",
+      (raw: Record<string, any>) => (raw.fields[9].required = true),
+      "/fields/9/anchor/required",
+    ],
+    [
+      "invalid_format",
+      (raw: Record<string, any>) => (raw.fields[5].anchor.tolerance = 2),
+      "/fields/5/anchor/tolerance",
+    ],
+    [
+      "invalid_format",
+      (raw: Record<string, any>) => (raw.fields[9].anchor.placement = "cross_check"),
+      "/fields/9/anchor/required",
+    ],
+  ])("refuses %s in the contract file and in the importer alike", (code, mutate, path) => {
+    const document = brokenFixture(mutate);
+
+    expect(errorsFor(document).length).toBeGreaterThan(0);
+    expect(
+      validateFieldSchema(document).filter((issue) => issue.code === code && issue.path === path),
+    ).toHaveLength(1);
   });
 });
 
@@ -161,6 +252,6 @@ describe("the TypeScript mirror", () => {
 
   it("keeps the validation code list unique and stable", () => {
     expect(new Set(VALIDATION_CODES).size).toBe(VALIDATION_CODES.length);
-    expect(VALIDATION_CODES).toHaveLength(20);
+    expect(VALIDATION_CODES).toHaveLength(22);
   });
 });

@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { ValidationIssue } from "@/schema/fieldSchema";
+import { FIELD_SCHEMA_VERSION, type ValidationIssue } from "@/schema/fieldSchema";
 
 import type { ServerIssue } from "./api";
 
@@ -57,7 +57,7 @@ export function ValidationPanel({
         className={cn("text-sm", total === 0 ? "text-muted-foreground" : "text-destructive")}
       >
         {total === 0
-          ? "The field set is valid against schema 1.0."
+          ? `The field set is valid against schema ${FIELD_SCHEMA_VERSION}.`
           : `${total} ${total === 1 ? "problem" : "problems"} in the field set.`}
       </p>
 

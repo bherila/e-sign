@@ -73,4 +73,16 @@ enum ValidationCode: string
 
     /** A `prefill.variable` that the supplied variable set cannot resolve. */
     case UnresolvedPrefillVariable = 'unresolved_prefill_variable';
+
+    /**
+     * `anchor.required: false` on a field that is itself required.
+     *
+     * The compatibility option for an absent anchor is narrow on purpose: it says "this box may
+     * legitimately not exist in this document", which can only be true of a box nobody has to
+     * fill in. See docs/preparation/field-schema.md.
+     */
+    case AnchorOptionalOnRequiredField = 'anchor_optional_on_required_field';
+
+    /** A `cross_check` anchor resolved further than its tolerance from the declared rectangle. */
+    case AnchorCrossCheckFailed = 'anchor_cross_check_failed';
 }

@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   describeIssue,
+  FIELD_SCHEMA_VERSION,
   type FieldSchemaDocument,
   FieldSchemaError,
   type PageSize,
@@ -139,7 +140,7 @@ export function ImportExportPanel({
           spellCheck={false}
           rows={5}
           className="font-mono text-xs"
-          placeholder='{"schema_version":"1.0", …}'
+          placeholder={`{"schema_version":"${FIELD_SCHEMA_VERSION}", …}`}
           onChange={(event) => setText(event.target.value)}
         />
         <Button

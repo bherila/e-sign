@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Preparation\Schema;
 
 use App\Domain\Preparation\Schema\CoordinateSpaceDeclaration;
+use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\FieldSchemaValidator;
 use App\Domain\Preparation\Schema\PageSizes;
 use App\Domain\Preparation\Schema\ValidationCode;
@@ -87,6 +88,220 @@ class FieldSchemaValidatorTest extends TestCase
     /**
      * @return iterable<string, array{0: callable(array<string, mixed>): array<string, mixed>, 1: ValidationCode, 2: string}>
      */
+    /**
+     * The version string has to be a contract, not a label.
+     *
+     * A generator that stamped `1.0` and emitted a `resolved` receipt would produce a document
+     * every consumer holding `field-schema-1.0.json` rejects — that file forbids undeclared
+     * properties — while this service called it valid. So the members are refused in a document
+     * that does not declare the version which declares them, with the code such a consumer would
+     * use.
+     */
+    public function test_a_1_0_document_may_not_use_the_anchor_members_1_1_introduced(): void
+    {
+        foreach (FieldSchemaValidator::ANCHOR_MEMBERS_SINCE_1_1 as $member) {
+            $document = FieldSchemaFixture::asArray();
+            $document['schema_version'] = '1.0';
+            unset($document['fields'][9]['anchor']['required']);
+            $document['fields'][5]['anchor'][$member] = self::sampleAnchorMember($member);
+
+            $result = (new FieldSchemaValidator)->validate($document);
+            $undeclared = array_values(array_filter(
+                $result->at('/fields/5/anchor/'.$member),
+                static fn ($error): bool => $error->code === ValidationCode::UnknownProperty,
+            ));
+
+            // `tolerance` also draws the "only with cross_check" error here, which is a separate
+            // and equally correct complaint; what matters is that the version refusal is one of
+            // them.
+            $this->assertCount(1, $undeclared, 'anchor.'.$member.' should be refused in a 1.0 document.');
+            $this->assertStringContainsString('1.1', $undeclared[0]->message);
+        }
+    }
+
+    public function test_the_same_members_are_accepted_once_the_document_declares_1_1(): void
+    {
+        $document = FieldSchemaFixture::asArray();
+        $document['fields'][5]['anchor']['placement'] = 'replace';
+
+        $this->assertTrue((new FieldSchemaValidator)->validate($document)->isValid());
+    }
+
+    /**
+     * A cross-check receipt is the record that the check passed, so it has to survive the check.
+     *
+     * Without this the mode is worse than absent: a receipt naming the document's own digest
+     * stops resolution running again, so a stored disagreement of any size would never be looked
+     * at, and the document would carry a record saying it had been verified.
+     */
+    public function test_a_cross_check_receipt_that_disagrees_with_the_rect_is_refused(): void
+    {
+        $document = FieldSchemaFixture::asArray();
+        $document['fields'][5]['anchor']['placement'] = 'cross_check';
+        $document['fields'][5]['anchor']['tolerance'] = 1;
+        $document['fields'][5]['anchor']['resolved'] = self::receipt([
+            // The field's rect is at x 330; this says the anchor resolved 60 pt away.
+            'rect' => ['x' => 390, 'y' => 650, 'width' => 170, 'height' => 36],
+        ]);
+
+        $result = (new FieldSchemaValidator)->validate($document);
+
+        $this->assertTrue($result->hasCode(ValidationCode::AnchorCrossCheckFailed));
+        $this->assertSame('/fields/5/anchor/resolved/rect/x', $result->at('/fields/5/anchor/resolved/rect/x')[0]->path);
+    }
+
+    public function test_a_cross_check_receipt_within_the_stated_tolerance_is_accepted(): void
+    {
+        $document = FieldSchemaFixture::asArray();
+        $document['fields'][5]['anchor']['placement'] = 'cross_check';
+        $document['fields'][5]['anchor']['tolerance'] = 2;
+        $document['fields'][5]['anchor']['resolved'] = self::receipt([
+            'rect' => ['x' => 331.5, 'y' => 650, 'width' => 170, 'height' => 36],
+        ]);
+
+        $this->assertTrue((new FieldSchemaValidator)->validate($document)->isValid());
+    }
+
+    public function test_a_cross_check_receipt_without_a_tolerance_has_nothing_to_prove(): void
+    {
+        $document = FieldSchemaFixture::asArray();
+        $document['fields'][5]['anchor']['placement'] = 'cross_check';
+        $document['fields'][5]['anchor']['resolved'] = self::receipt();
+
+        $result = (new FieldSchemaValidator)->validate($document);
+
+        $this->assertSame(
+            [ValidationCode::MissingProperty],
+            array_map(static fn ($error) => $error->code, $result->at('/fields/5/anchor/resolved')),
+        );
+    }
+
+    /**
+     * A receipt answers one question, and it has to be the one the field is asking now.
+     *
+     * The receipt is what lets resolution be skipped, so moving the field to another page or
+     * asking for a different occurrence while keeping a service-issued receipt would publish and
+     * send at coordinates resolved for something else — with a receipt that looks well-formed.
+     */
+    public function test_a_receipt_for_another_page_is_refused(): void
+    {
+        $document = FieldSchemaFixture::asArray();
+        $document['fields'][5]['anchor']['resolved'] = self::receipt(['page' => 1]);
+
+        $result = (new FieldSchemaValidator)->validate($document);
+        $errors = $result->at('/fields/5/anchor/resolved/page');
+
+        $this->assertCount(1, $errors);
+        $this->assertSame(ValidationCode::PageOutOfRange, $errors[0]->code);
+    }
+
+    public function test_a_receipt_for_another_occurrence_is_refused(): void
+    {
+        $document = FieldSchemaFixture::asArray();
+        // The anchor asks for the sole occurrence, so the match taken is always the first.
+        $document['fields'][5]['anchor']['resolved'] = self::receipt(['occurrence_index' => 3]);
+
+        $errors = (new FieldSchemaValidator)->validate($document)->at('/fields/5/anchor/resolved/occurrence_index');
+
+        $this->assertCount(1, $errors);
+        $this->assertSame(ValidationCode::InvalidFormat, $errors[0]->code);
+        $this->assertStringContainsString('the sole occurrence', $errors[0]->message);
+    }
+
+    public function test_a_receipt_matching_an_indexed_occurrence_is_accepted(): void
+    {
+        $document = FieldSchemaFixture::asArray();
+        $document['fields'][9]['anchor']['resolved'] = self::receipt([
+            'occurrence_index' => 2,
+            'rect' => $document['fields'][9]['rect'],
+        ]);
+
+        // Field 9 asks for occurrence 2 of "Notes:" and the receipt records exactly that.
+        $this->assertTrue((new FieldSchemaValidator)->validate($document)->isValid());
+    }
+
+    private static function sampleAnchorMember(string $member): mixed
+    {
+        return match ($member) {
+            'placement' => 'replace',
+            'required' => true,
+            'tolerance' => 2,
+            default => self::receipt(),
+        };
+    }
+
+    /**
+     * The reason 1.1 is a new contract file rather than an edit to 1.0.
+     *
+     * A document written before the anchor members existed says `"1.0"`, and this build still
+     * reads it — and canonicalises it to exactly the bytes it arrived as, version included. That
+     * is not a nicety: an envelope's `field_schema_sha256` is what every attestation on it binds,
+     * so a canonical form that grew a property, or a version string that moved on its own, would
+     * invalidate the evidence for every anchored agreement already signed.
+     */
+    public function test_a_1_0_document_still_imports_and_keeps_its_exact_bytes(): void
+    {
+        $legacy = FieldSchemaFixture::asArray();
+        $legacy['schema_version'] = '1.0';
+        unset($legacy['fields'][9]['anchor']['required']);
+
+        $this->assertTrue((new FieldSchemaValidator)->validate($legacy)->isValid());
+
+        $document = FieldSchemaDocument::fromArray($legacy);
+
+        $this->assertSame('1.0', $document->schemaVersion->toString());
+        $this->assertSame($legacy, $document->toArray());
+        $this->assertSame(
+            hash('sha256', $document->canonicalJson()),
+            hash('sha256', FieldSchemaDocument::fromArray($document->toArray())->canonicalJson()),
+        );
+    }
+
+    /**
+     * A run's box is its advance by the font's ascent plus descent, so a heading near the top of
+     * the page starts above the CropBox edge and a run at the margin ends on it. Both are
+     * ordinary documents, and a receipt measuring one has to import — otherwise the service
+     * writes receipts it cannot read back, and an anchored request that worked yesterday fails.
+     */
+    public function test_a_receipt_may_measure_text_that_overhangs_the_page(): void
+    {
+        $document = FieldSchemaFixture::asArray();
+        $document['fields'][5]['anchor']['resolved'] = self::receipt([
+            'anchor_rect' => ['x' => -4, 'y' => -2.5, 'width' => 620, 'height' => 12],
+        ]);
+
+        $result = (new FieldSchemaValidator)->validate(
+            $document,
+            PageSizes::uniform(2, FieldSchemaFixture::LETTER_WIDTH, FieldSchemaFixture::LETTER_HEIGHT),
+        );
+
+        $this->assertTrue($result->isValid(), $result->describe());
+
+        // The same numbers in a *placement* are still refused: the distinction is the point.
+        $placed = FieldSchemaFixture::asArray();
+        $placed['fields'][5]['rect'] = ['x' => -4, 'y' => -2.5, 'width' => 620, 'height' => 12];
+
+        $this->assertTrue((new FieldSchemaValidator)->validate($placed)->hasCode(ValidationCode::CoordinateNegative));
+    }
+
+    /**
+     * A well-formed resolution receipt for the fixture's anchored counterparty signature, with
+     * one part swapped out. Its `rect` is the field's own, which `replace` mode requires.
+     *
+     * @param  array<string, mixed>  $overrides
+     * @return array<string, mixed>
+     */
+    private static function receipt(array $overrides = []): array
+    {
+        return array_replace([
+            'document_sha256' => str_repeat('a', 64),
+            'page' => 2,
+            'occurrence_index' => 1,
+            'anchor_rect' => ['x' => 330, 'y' => 622.4, 'width' => 165.6, 'height' => 12],
+            'rect' => ['x' => 330, 'y' => 650, 'width' => 170, 'height' => 36],
+        ], $overrides);
+    }
+
     public static function rejectionCases(): iterable
     {
         yield 'a partial document missing whole sections' => [
@@ -638,6 +853,87 @@ class FieldSchemaValidatorTest extends TestCase
             },
             ValidationCode::InvalidType,
             '/fields/5/anchor/occurrence',
+        ];
+
+        yield 'an optional anchor on a required field' => [
+            static function (array $document): array {
+                $document['fields'][5]['anchor']['required'] = false;
+
+                return $document;
+            },
+            ValidationCode::AnchorOptionalOnRequiredField,
+            '/fields/5/anchor/required',
+        ];
+
+        // In cross-check mode the rectangle is authoritative and the anchor only confirms it, so
+        // "the text may be absent" has nothing to omit — honouring it would delete a field the
+        // document positioned itself.
+        yield 'an optional anchor that only cross-checks a rectangle it cannot omit' => [
+            static function (array $document): array {
+                $document['fields'][9]['anchor']['placement'] = 'cross_check';
+                $document['fields'][9]['anchor']['required'] = false;
+
+                return $document;
+            },
+            ValidationCode::InvalidFormat,
+            '/fields/9/anchor/required',
+        ];
+
+        yield 'a tolerance on an anchor that decides the position outright' => [
+            static function (array $document): array {
+                $document['fields'][5]['anchor']['tolerance'] = 2;
+
+                return $document;
+            },
+            ValidationCode::InvalidFormat,
+            '/fields/5/anchor/tolerance',
+        ];
+
+        yield 'an undeclared anchor placement' => [
+            static function (array $document): array {
+                $document['fields'][5]['anchor']['placement'] = 'nudge';
+
+                return $document;
+            },
+            ValidationCode::InvalidFormat,
+            '/fields/5/anchor/placement',
+        ];
+
+        yield 'a resolution receipt whose digest is not one' => [
+            static function (array $document): array {
+                $document['fields'][5]['anchor']['resolved'] = self::receipt(['document_sha256' => 'not-a-digest']);
+
+                return $document;
+            },
+            ValidationCode::InvalidFormat,
+            '/fields/5/anchor/resolved/document_sha256',
+        ];
+
+        // The receipt records where the field went, so in `replace` mode it has to be the
+        // field's own rectangle. A document whose field sits somewhere its own receipt does not
+        // describe is a document nobody can check.
+        yield 'a receipt describing a rectangle the field is not at' => [
+            static function (array $document): array {
+                $document['fields'][5]['anchor']['resolved'] = self::receipt([
+                    'rect' => ['x' => 999, 'y' => 650, 'width' => 170, 'height' => 36],
+                ]);
+
+                return $document;
+            },
+            ValidationCode::InvalidFormat,
+            '/fields/5/anchor/resolved/rect/x',
+        ];
+
+        yield 'a measured anchor rect with a negative extent' => [
+            static function (array $document): array {
+                $document['fields'][5]['anchor']['resolved'] = self::receipt([
+                    'anchor_rect' => ['x' => 330, 'y' => 622.4, 'width' => -1, 'height' => 12],
+                ]);
+
+                return $document;
+            },
+            ValidationCode::DimensionNotPositive,
+            '/fields/5/anchor/resolved/anchor_rect/width',
         ];
 
         yield 'an anchor origin that is not a declared corner' => [
