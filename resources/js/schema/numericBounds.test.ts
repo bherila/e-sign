@@ -1,6 +1,6 @@
 import fixtureJson from "../../../tests/Fixtures/schema/nda-two-signers.json";
 import schemaJson from "../../schema/field-schema-1.1.json";
-import { validateFieldSchema } from "./fieldSchema";
+import { parseFieldSchema, serializeFieldSchema, validateFieldSchema } from "./fieldSchema";
 
 /**
  * Every numeric member the published contract admits, probed at its boundary, in this projection.
@@ -136,6 +136,32 @@ function refuses(path: string, value: number): boolean {
 
   return validateFieldSchema(documentWith(path, value)).some((problem) => problem.path === pointer);
 }
+
+/**
+ * A value the importer accepts must still be acceptable once it has been stored.
+ *
+ * The other half of the same idea as the bounds sweep, and the half it structurally cannot reach:
+ * bounds probe the *upper* edge, and this defect lives at the lower one. Import canonicalises to
+ * three decimals, so `0.0004` is a positive width as written and a zero one as stored — accepted
+ * once, then refused by its own next import. The probe is one canonical step below the smallest
+ * legal value, which is where a disagreement between a constraint and the rounding must show.
+ */
+describe("the numeric round-trip sweep", () => {
+  it.each(Object.keys(EXPECTATIONS))("%s survives its own round trip", (path) => {
+    const document = documentWith(path, 0.0004);
+    const index = path.startsWith("fields[].anchor") ? ANCHORED_FIELD : PLAIN_FIELD;
+    const pointer = `/fields/${index}/${path.replace("fields[].", "").split(".").join("/")}`;
+    const at = (candidate: Json) => validateFieldSchema(candidate).filter((problem) => problem.path === pointer);
+
+    if (at(document).length > 0) {
+      return;
+    }
+
+    const stored = JSON.parse(serializeFieldSchema(parseFieldSchema(document))) as Json;
+
+    expect(at(stored)).toEqual([]);
+  });
+});
 
 describe("the numeric bounds sweep", () => {
   it("covers every numeric member the contract declares", () => {

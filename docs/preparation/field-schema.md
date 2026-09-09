@@ -262,6 +262,18 @@ with that expectation written down, so the set cannot quietly change. Those are 
 documents that were already valid, so it is a version-policy decision rather than a repair
 (issue #105).
 
+**Validate what will be stored, not what was typed.** Import canonicalises to three decimals, so
+a constraint checked against the submitted value is checking a number the document will not hold:
+a `width` of `0.0004` is positive as written and zero as stored, and a document accepted on those
+terms failed its own next import with `dimension_not_positive` — accepted into a state that cannot
+be read back, which is a latent corruption wearing the shape of a success. Every rectangle
+constraint is now applied to the canonical value. This is the same rule as the receipt comparisons
+(`checkCrossCheckReceiptAgrees`, `checkReplaceReceiptMatchesRect`) one level down: there it is two
+values compared with each other, here it is one value against its own constraint. A **round-trip
+sweep** beside the bounds one asserts it for every numeric member the contract declares, probing
+one canonical step below the smallest legal value — the lower edge, where the bounds sweep
+structurally cannot look.
+
 **Probe at the boundary, not at a large number.** The sweep originally tested `1e20` alone, which
 looks like the stronger case and is strictly weaker. `1e20` is a float; the bound it was meant to
 guard sits at 2^53, where PHP still has an *integer* — so the probe took a different code path

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Preparation\Schema;
 
+use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\FieldSchemaValidator;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -134,6 +135,43 @@ final class NumericBoundsSweepTest extends TestCase
         $this->assertFalse(self::refuses($path, $maximum), $path.' must accept its own maximum, '.$maximum.'.');
         $this->assertTrue(self::refuses($path, $maximum + $step), $path.' must refuse one step past its maximum.');
         $this->assertTrue(self::refuses($path, 1e20), $path.' must refuse a value past the canonical-form range.');
+    }
+
+    /**
+     * A value the importer accepts must still be acceptable once it has been stored.
+     *
+     * The other half of the same idea as the bounds sweep, and the half the bounds sweep
+     * structurally cannot reach: it probes the *upper* edge, and this defect lives at the lower
+     * one. Import canonicalises to three decimals, so `0.0004` is a positive width as written and
+     * a zero one as stored — accepted once, then refused by its own next import with
+     * `dimension_not_positive`. A document in that state is a latent corruption dressed as a
+     * success, and the digest of a document is what an attestation binds.
+     *
+     * The probe is one canonical step below the smallest legal value, which is where any
+     * disagreement between a constraint and the rounding must show itself. Every numeric member
+     * is swept, so a member added later is covered without anyone deciding it needs to be.
+     */
+    #[DataProvider('members')]
+    public function test_the_member_survives_its_own_round_trip(string $path): void
+    {
+        // One canonical step below the smallest positive value: zero after rounding.
+        $document = self::documentWith($path, 0.0004);
+
+        if ((new FieldSchemaValidator)->validate($document)->at(self::pointer($path)) !== []) {
+            $this->addToAssertionCount(1);
+
+            return;
+        }
+
+        $stored = FieldSchemaDocument::fromArray($document)->toArray();
+
+        $this->assertSame(
+            [],
+            (new FieldSchemaValidator)->validate($stored)->at(self::pointer($path)),
+            $path.' accepts a value it cannot read back: import rounds to three decimals, so what '
+                .'was validated is not what was stored. Validate the canonical value, never the '
+                .'submitted one.',
+        );
     }
 
     /** True when the validator reports a problem *at this member's own pointer*. */

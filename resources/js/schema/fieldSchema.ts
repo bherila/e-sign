@@ -1068,7 +1068,19 @@ function checkRect(
       continue;
     }
 
-    if ((name === "x" || name === "y") && value < 0) {
+    // Every check below is made on the *canonical* value, because that is the value this document
+    // will hold: import rounds to three decimals, so a width of 0.0004 is positive as written and
+    // zero as stored, and a document accepted on those terms fails its own next import with
+    // `dimension_not_positive`. Accepting a value into a state that cannot be read back is a
+    // latent corruption wearing the shape of a success.
+    //
+    // The same rule as the receipt comparisons above, applied one level down: there it is two
+    // values compared with each other, here it is one value against its own constraint. Meeting
+    // it a third time means the same rule again — validate what will be stored, never what was
+    // typed.
+    const canonical = roundCoordinate(value);
+
+    if ((name === "x" || name === "y") && canonical < 0) {
       issues.push(
         issue(
           `${path}/${name}`,
@@ -1080,7 +1092,7 @@ function checkRect(
       continue;
     }
 
-    if ((name === "width" || name === "height") && value <= 0) {
+    if ((name === "width" || name === "height") && canonical <= 0) {
       issues.push(
         issue(`${path}/${name}`, "dimension_not_positive", `rect.${name} must be greater than zero; got ${value}.`),
       );
@@ -1088,7 +1100,7 @@ function checkRect(
       continue;
     }
 
-    values[name] = roundCoordinate(value);
+    values[name] = canonical;
   }
 
   const x = values.x;
@@ -1654,7 +1666,9 @@ function checkMeasuredRect(path: string, rect: unknown, issues: ValidationIssue[
       continue;
     }
 
-    if ((name === "width" || name === "height") && value < 0) {
+    // Canonical, for the reason given in checkRect(): what is validated has to be what will be
+    // stored, or the document stops importing the moment it is written down.
+    if ((name === "width" || name === "height") && roundCoordinate(value) < 0) {
       issues.push(
         issue(`${path}/${name}`, "dimension_not_positive", `rect.${name} must not be negative; got ${value}.`),
       );

@@ -708,6 +708,21 @@ final class FieldSchemaValidator
                 continue;
             }
 
+            // Every check below is made on the *canonical* value, because that is the value this
+            // document will hold: import rounds to three decimals, so a width of 0.0004 is
+            // positive as written and zero as stored, and a document accepted on those terms
+            // fails its own next import with `dimension_not_positive`. Accepting a value into a
+            // state that cannot be read back is a latent corruption wearing the shape of a
+            // success, and it is worse here than elsewhere because the digest of this document is
+            // what an attestation binds.
+            //
+            // This is the same rule as the receipt comparisons in `checkCrossCheckReceiptAgrees()`
+            // and `checkReplaceReceiptMatchesRect()`, applied one level down: there it is two
+            // values compared with each other, here it is one value against its own constraint.
+            // If you meet it a third time, it is the same rule again — validate what will be
+            // stored, never what was typed.
+            $value = CanonicalNumber::round($value);
+
             if (($name === 'x' || $name === 'y') && $value < 0.0) {
                 $errors[] = new ValidationError(
                     $path.'/'.$name,
@@ -728,7 +743,7 @@ final class FieldSchemaValidator
                 continue;
             }
 
-            $values[$name] = CanonicalNumber::round($value);
+            $values[$name] = $value;
         }
 
         if (count($values) !== count(self::RECT_REQUIRED)) {
@@ -1441,7 +1456,11 @@ final class FieldSchemaValidator
                 continue;
             }
 
-            if (($name === 'width' || $name === 'height') && (float) $value < 0.0) {
+            // Canonical, for the reason given in checkRect(): what is validated has to be what
+            // will be stored, or the document stops importing the moment it is written down.
+            $value = CanonicalNumber::round((float) $value);
+
+            if (($name === 'width' || $name === 'height') && $value < 0.0) {
                 $errors[] = new ValidationError(
                     $path.'/'.$name,
                     ValidationCode::DimensionNotPositive,
