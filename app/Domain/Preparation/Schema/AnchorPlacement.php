@@ -36,7 +36,7 @@ use InvalidArgumentException;
  * the resolved rectangle into the field's `rect`. It happens when a template version is
  * published and again when an envelope is sent — every time, for every anchored field, whether or
  * not one already carries a receipt — and a missing or ambiguous required anchor is an error at
- * both, not a guess (docs/HANDOFF.md section 7, docs/preparation/field-schema.md).
+ * both, not a guess (docs/HANDOFF.md section 7, docs/preparation/anchors.md).
  */
 final readonly class AnchorPlacement
 {
@@ -58,7 +58,7 @@ final readonly class AnchorPlacement
      * orders of magnitude below where the encoders start to disagree. Bounding the property was
      * chosen over trying to canonicalise across encoders because the second has no bottom: it
      * would mean owning a number-to-string routine in two languages forever
-     * (docs/preparation/field-schema.md).
+     * (docs/preparation/anchors.md).
      */
     public const MAX_TOLERANCE = 14400.0;
 

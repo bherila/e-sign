@@ -116,9 +116,9 @@ disagreement larger than the tolerance is a refusal, never a silent move. A miss
 required anchor is an error, never a guess, and matching is an exact case-sensitive match on
 decoded text runs — never a regular expression over PDF bytes.
 
-This section is the **shape**: what a document may say and what the published contract makes of
-it. Resolution itself — when it runs, which failure fires when, what happens to a field whose
-optional anchor is genuinely absent — arrives with the resolver and is documented there.
+This section is the **shape**: what a document may say and what the published contract makes of it.
+Resolution itself — what counts as a match, the exact geometry, what each failure means, and why
+the receipt checks live beside the resolver rather than here — is [anchors.md](anchors.md).
 
 ```json
 {

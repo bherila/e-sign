@@ -31,7 +31,7 @@ use InvalidArgumentException;
  * the digest is for is reading a stored document afterwards: it says which bytes the recorded
  * rectangle was measured in, so a receipt from another revision is recognisable as one rather
  * than mistaken for a measurement of this one. After send nothing re-resolves at all
- * (docs/preparation/field-schema.md).
+ * (docs/preparation/anchors.md).
  *
  * A caller may submit one of these, and the validator checks it as strictly as anything else
  * rather than refusing it: an envelope re-reads its own stored schema through the same importer

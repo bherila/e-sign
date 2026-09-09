@@ -25,7 +25,7 @@ use App\Domain\Preparation\Text\AnchorOccurrence;
  *   resolution must land within `anchor.tolerance` points of the declared corner, and a larger
  *   disagreement is an error rather than a silent move either way. This is the mode for a
  *   document whose layout the consumer generates itself and whose coordinates are therefore
- *   already known — see docs/preparation/field-schema.md.
+ *   already known — see docs/preparation/anchors.md.
  */
 enum AnchorPlacementMode: string
 {

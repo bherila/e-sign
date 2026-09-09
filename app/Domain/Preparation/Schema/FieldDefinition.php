@@ -40,6 +40,58 @@ final readonly class FieldDefinition
         }
     }
 
+    public function isAnchored(): bool
+    {
+        return $this->anchor instanceof AnchorPlacement;
+    }
+
+    /** The same field carrying a different anchor request; nothing else moves. */
+    public function withAnchor(AnchorPlacement $anchor): self
+    {
+        return new self(
+            $this->id,
+            $this->recipientId,
+            $this->type,
+            $this->page,
+            $this->rect,
+            $this->required,
+            $this->readOnly,
+            $this->label,
+            $this->alias,
+            $this->prefill,
+            $anchor,
+        );
+    }
+
+    /**
+     * The same field with a resolved rectangle and the receipt that produced it.
+     *
+     * In `cross_check` mode the declared rectangle is authoritative and is kept; only the receipt
+     * is attached. In `replace` mode the resolved rectangle becomes the field's rectangle, and
+     * from that point the field is indistinguishable from a hand-placed one to everything that
+     * reads `rect` — the editor, assembly, signing, and finalization.
+     */
+    public function withResolvedAnchor(ResolvedAnchorRecord $record): self
+    {
+        if (! $this->anchor instanceof AnchorPlacement) {
+            throw new InvalidArgumentException('Field "'.$this->id.'" has no anchor to resolve.');
+        }
+
+        return new self(
+            $this->id,
+            $this->recipientId,
+            $this->type,
+            $this->page,
+            $this->anchor->replacesRect() ? $record->rect : $this->rect,
+            $this->required,
+            $this->readOnly,
+            $this->label,
+            $this->alias,
+            $this->prefill,
+            $this->anchor->resolvedAs($record),
+        );
+    }
+
     /**
      * @param  array<string, mixed>  $field
      */
