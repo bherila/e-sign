@@ -12,6 +12,7 @@ use App\Domain\Preparation\Schema\InvalidFieldSchemaException;
 use App\Domain\Preparation\Schema\Prefill;
 use App\Domain\Preparation\Schema\ValidationCode;
 use App\Domain\Preparation\Text\AnchorOrigin;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\FieldSchemaFixture;
 
@@ -208,23 +209,53 @@ class FieldSchemaDocumentTest extends TestCase
     }
 
     /**
-     * Rounding can hide a sign problem and create an extent one, so each is checked where it can
-     * go wrong: the sign on the value as submitted, the extent on the value as it will be stored.
+     * Rounding interacts with **two** independent rules, in opposite directions, and the 1.0 path
+     * has to satisfy both at once.
      *
-     * `-0.0004` rounds to `-0.0`, which is not less than zero — so checking the sign after
-     * rounding let a negative coordinate through validation and into `Rect`'s constructor, which
-     * throws: a 500 where a 422 belongs, on the version that was supposed to be left alone.
+     * Rounding always moves a value toward zero. So it can only ever *hide* a sign problem —
+     * `-0.0004` becomes `-0.0`, which is not less than zero, so a negative coordinate passed
+     * validation and then threw from `Rect`'s constructor, a 500 where a 422 belongs. And it can
+     * only ever *create* an extent problem — `0.0004` becomes `0`, which is not greater than
+     * zero, and the document that used to be stored then failed its own next import.
+     *
+     * One value and one rule is not the property: a test of the negative case alone passes while
+     * extents are checked on the wrong basis, and a test of the width case alone passes while
+     * signs are. The matrix is sign against member kind, which is what pins each check to the
+     * value that can go wrong for it.
+     *
+     * @return iterable<string, array{string, float, string}>
      */
-    public function test_a_1_0_document_refuses_a_coordinate_that_rounds_to_negative_zero(): void
+    public static function nearZeroCoordinates(): iterable
     {
+        //                                     member    value      expected code ('' = accepted)
+        yield 'a corner that rounds to -0.0' => ['x', -0.0004, 'coordinate_negative'];
+        yield 'a corner that rounds to 0' => ['x', 0.0004, ''];
+        yield 'an extent that rounds to -0.0' => ['width', -0.0004, 'dimension_not_positive'];
+        yield 'an extent that rounds to 0' => ['width', 0.0004, 'dimension_not_positive'];
+    }
+
+    #[DataProvider('nearZeroCoordinates')]
+    public function test_a_1_0_document_checks_each_rule_on_the_value_that_can_break_it(
+        string $member,
+        float $value,
+        string $expected,
+    ): void {
         $raw = self::minimalDocument();
-        $raw['fields'][0]['rect']['x'] = -0.0004;
+        $raw['fields'][0]['rect'][$member] = $value;
+
+        if ($expected === '') {
+            // Accepted *and* storable: the point is that validation and construction agree.
+            $this->assertInstanceOf(FieldSchemaDocument::class, FieldSchemaDocument::fromArray($raw));
+
+            return;
+        }
 
         try {
             FieldSchemaDocument::fromArray($raw);
-            $this->fail('Expected a structured refusal rather than a constructor failure.');
+            $this->fail('Expected '.$expected.' rather than acceptance or a constructor failure.');
         } catch (InvalidFieldSchemaException $refused) {
-            $this->assertSame('coordinate_negative', $refused->result->errors[0]->code->value);
+            $this->assertSame($expected, $refused->result->errors[0]->code->value);
+            $this->assertSame('/fields/0/rect/'.$member, $refused->result->errors[0]->path);
         }
     }
 
