@@ -40,6 +40,15 @@ final readonly class AnchorResolutionOutcome
         public array $omissions = [],
         public bool $fieldsOmitted = false,
         ?string $sourceSchemaSha256 = null,
+        /**
+         * Fields kept for reporting whose disproved receipt was removed.
+         *
+         * A pass that only cleared a receipt still changed the document, and treating it as
+         * unchanged would leave the old receipt in place — the exact claim the pass disproved.
+         *
+         * @var list<string>
+         */
+        public array $clearedReceipts = [],
     ) {
         $this->sourceSchemaSha256 = $sourceSchemaSha256 ?? hash('sha256', $schema->canonicalJson());
     }
@@ -51,7 +60,7 @@ final readonly class AnchorResolutionOutcome
 
     public function changed(): bool
     {
-        return $this->resolved !== [] || $this->fieldsOmitted;
+        return $this->resolved !== [] || $this->fieldsOmitted || $this->clearedReceipts !== [];
     }
 
     /**

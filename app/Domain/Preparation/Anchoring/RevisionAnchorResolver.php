@@ -10,6 +10,9 @@ use App\Domain\Preparation\Contracts\PdfTextLocator;
 use App\Domain\Preparation\Documents\Models\DocumentRevision;
 use App\Domain\Preparation\Documents\PreflightPageSizes;
 use App\Domain\Preparation\Documents\RevisionBytes;
+use App\Domain\Preparation\Preflight\PreflightBudget;
+use App\Domain\Preparation\Preflight\PreflightBudgetException;
+use App\Domain\Preparation\Preflight\PreflightLimits;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\PageSizes;
 use App\Domain\Preparation\Schema\ValidationCode;
@@ -46,6 +49,7 @@ final readonly class RevisionAnchorResolver
         private RevisionBytes $bytes,
         private SchemaAnchorResolver $resolver,
         private PdfPreflight $preflight,
+        private PreflightLimits $limits = new PreflightLimits,
     ) {}
 
     /**
@@ -140,7 +144,19 @@ final readonly class RevisionAnchorResolver
     private function runs(FieldSchemaDocument $schema, string $bytes, DocumentRevision $revision): array
     {
         try {
-            return $this->text->extract($bytes);
+            // Bounded by the same limits the upload was inspected under. Preflight's ceilings
+            // describe the *document* — its size, its object count, its streams — and a file can
+            // satisfy every one of them while holding millions of small text-showing operators in
+            // a single allowed content stream. That is a document nobody can resolve, and without
+            // a budget the cost lands on whichever request tried.
+            return $this->text->extract($bytes, null, new PreflightBudget($this->limits));
+        } catch (PreflightBudgetException $exhausted) {
+            // Not a bad field set and not a storage failure: a document this build cannot afford
+            // to read. It is reported like an unreadable one, because that is what it is from the
+            // sender's side, and the limit that stopped it goes to the log.
+            $this->log($revision, $exhausted);
+
+            throw new AnchorResolutionFailed($this->unreadableProblems($schema));
         } catch (TextExtractionException $failure) {
             // Read, and not parseable. That *is* something about this document, so it is reported
             // to the sender — but only as the stable code. A parser's message carries engine

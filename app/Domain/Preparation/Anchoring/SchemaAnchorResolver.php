@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Preparation\Anchoring;
 
+use App\Domain\Preparation\Geometry\NativeRect;
 use App\Domain\Preparation\Schema\AnchorPlacement;
 use App\Domain\Preparation\Schema\AnchorPlacementMode;
 use App\Domain\Preparation\Schema\CanonicalNumber;
@@ -126,6 +127,8 @@ final readonly class SchemaAnchorResolver
         $resolved = [];
         /** @var list<AnchorOmission> $omissions */
         $omissions = [];
+        /** @var list<string> $cleared Fields kept for reporting whose stale receipt was removed. */
+        $cleared = [];
 
         foreach ($schema->fields as $index => $field) {
             $anchor = $field->anchor;
@@ -153,7 +156,19 @@ final readonly class SchemaAnchorResolver
                 $omissions[] = $outcome;
 
                 if (! $omitAbsentFields) {
-                    $fields[] = $field;
+                    // Kept, but not with a receipt saying its text was found: this pass looked and
+                    // found nothing, and a stale receipt beside that omission would be the
+                    // document asserting both. The *request* stays, so resolving again can still
+                    // answer it.
+                    $withoutReceipt = $anchor->resolved instanceof ResolvedAnchorRecord
+                        ? $field->withAnchor($anchor->withoutReceipt())
+                        : $field;
+
+                    if ($withoutReceipt !== $field) {
+                        $cleared[] = $field->id;
+                    }
+
+                    $fields[] = $withoutReceipt;
                 }
 
                 continue;
@@ -170,7 +185,10 @@ final readonly class SchemaAnchorResolver
         $fieldsOmitted = $omitAbsentFields && $omissions !== [];
         $source = hash('sha256', $schema->canonicalJson());
 
-        if ($resolved === [] && ! $fieldsOmitted) {
+        // `$cleared` counts: a pass that only removed a stale receipt still changed the document,
+        // and returning `unchanged` would leave the old receipt in place — the exact claim this
+        // pass just disproved.
+        if ($resolved === [] && $cleared === [] && ! $fieldsOmitted) {
             return new AnchorResolutionOutcome($schema, [], $omissions, false, $source);
         }
 
@@ -180,6 +198,7 @@ final readonly class SchemaAnchorResolver
             $omissions,
             $fieldsOmitted,
             $source,
+            $cleared,
         );
     }
 
@@ -194,6 +213,26 @@ final readonly class SchemaAnchorResolver
         string $documentSha256,
         ?PageSizes $pageSizes,
     ): FieldDefinition|AnchorOmission|AnchorResolutionProblem {
+        // Before anything is looked for. The search is scoped to the field's page, so a field
+        // naming a page the document does not have cannot be resolved for a reason that has
+        // nothing to do with its text — and letting it fall through would report a *required*
+        // anchor as "text not found" and an *optional* one as legitimately absent, quietly
+        // dropping the field. Neither describes what is wrong.
+        if ($pageSizes instanceof PageSizes && ! $pageSizes->has($field->page)) {
+            return new AnchorResolutionProblem(
+                $index,
+                $field->id,
+                $field->recipientId,
+                $anchor->text,
+                ValidationCode::PageOutOfRange,
+                'page '.$field->page.' of a '.$pageSizes->pageCount().'-page document',
+                'Field "'.$field->id.'" is anchored to "'.$anchor->text.'" on page '.$field->page
+                    .', and the document has '.$pageSizes->pageCount().' pages. An anchor is searched on the page '
+                    .'its field declares, so this one could not be looked for at all — which is not the same as '
+                    .'its text being absent.',
+            );
+        }
+
         $request = $anchor->toAnchor($field->page, $field->rect->width, $field->rect->height);
 
         try {
@@ -322,14 +361,26 @@ final readonly class SchemaAnchorResolver
         ResolvedAnchor $found,
         ?PageSizes $pageSizes,
     ): ?AnchorResolutionProblem {
-        $rect = $found->resolvedRect;
-        $offPage = $rect->x < -self::PAGE_TOLERANCE || $rect->y < -self::PAGE_TOLERANCE;
+        // Judged on the rectangle as it will be *stored*, not as it was computed. The receipt
+        // canonicalises each component to three decimals, so a field whose raw right edge is
+        // 612.0004 on a 612 pt page is exactly on the edge once written down — refusing it would
+        // block a legitimately edge-aligned field for a difference the document does not contain.
+        // The same rule as the cross-check comparison beside it, and as the field-schema
+        // validator's page-fit check: compare what will be stored.
+        $rect = new NativeRect(
+            CanonicalNumber::round($found->resolvedRect->x),
+            CanonicalNumber::round($found->resolvedRect->y),
+            CanonicalNumber::round($found->resolvedRect->width),
+            CanonicalNumber::round($found->resolvedRect->height),
+        );
+
+        $offPage = $rect->x < -CanonicalNumber::TOLERANCE || $rect->y < -CanonicalNumber::TOLERANCE;
         $size = null;
 
         if (! $offPage && $pageSizes instanceof PageSizes && $pageSizes->has($field->page)) {
             $size = $pageSizes->of($field->page);
-            $offPage = $rect->right() > $size['width'] + self::PAGE_TOLERANCE
-                || $rect->bottom() > $size['height'] + self::PAGE_TOLERANCE;
+            $offPage = $rect->right() > $size['width'] + CanonicalNumber::TOLERANCE
+                || $rect->bottom() > $size['height'] + CanonicalNumber::TOLERANCE;
         }
 
         if (! $offPage) {

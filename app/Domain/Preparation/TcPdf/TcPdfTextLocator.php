@@ -8,6 +8,7 @@ use App\Domain\Preparation\Contracts\PdfTextLocator;
 use App\Domain\Preparation\Geometry\CoordinateTransform;
 use App\Domain\Preparation\Geometry\NativeRect;
 use App\Domain\Preparation\Geometry\UserSpacePoint;
+use App\Domain\Preparation\Preflight\PreflightBudget;
 use App\Domain\Preparation\TcPdf\Parsing\ContentStreamOperation;
 use App\Domain\Preparation\TcPdf\Parsing\ContentStreamTokenizer;
 use App\Domain\Preparation\TcPdf\Parsing\FlattenedPage;
@@ -50,7 +51,7 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
     /**
      * @return array<int, TextRun>
      */
-    public function extract(string $pdfBytes, ?int $page = null): array
+    public function extract(string $pdfBytes, ?int $page = null, ?PreflightBudget $budget = null): array
     {
         try {
             $graph = PdfObjectGraph::parse($pdfBytes);
@@ -69,8 +70,13 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
                 continue;
             }
 
+            // Between pages and between runs: a stream that is slow rather than large shows up
+            // here as elapsed time or resident memory, which is what the backstops are for.
+            $budget?->tick();
+
             foreach ($this->extractPage($graph, $flattened) as $run) {
                 $runs[] = $run;
+                $budget?->tick();
             }
         }
 

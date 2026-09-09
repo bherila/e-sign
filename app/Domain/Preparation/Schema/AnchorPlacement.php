@@ -221,6 +221,31 @@ final readonly class AnchorPlacement
         );
     }
 
+    /**
+     * The same request with its receipt removed.
+     *
+     * Used when a pass looked for this anchor and found nothing but the field is being kept for
+     * reporting: leaving the old receipt would have the document assert both that the text was
+     * found and that it was not. The request survives, so a later pass can still answer it.
+     */
+    public function withoutReceipt(): self
+    {
+        if (! $this->resolved instanceof ResolvedAnchorRecord) {
+            return $this;
+        }
+
+        return new self(
+            $this->text,
+            $this->occurrence,
+            $this->placement,
+            $this->origin,
+            $this->offset,
+            $this->required,
+            $this->tolerance,
+            null,
+        );
+    }
+
     /** The same request with a resolution receipt attached. */
     public function resolvedAs(ResolvedAnchorRecord $record): self
     {

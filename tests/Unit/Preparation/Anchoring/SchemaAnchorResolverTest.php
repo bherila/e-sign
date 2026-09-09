@@ -7,6 +7,9 @@ namespace Tests\Unit\Preparation\Anchoring;
 use App\Domain\Preparation\Anchoring\AnchorResolutionFailed;
 use App\Domain\Preparation\Anchoring\SchemaAnchorResolver;
 use App\Domain\Preparation\Geometry\NativeRect;
+use App\Domain\Preparation\Preflight\PreflightBudget;
+use App\Domain\Preparation\Preflight\PreflightBudgetException;
+use App\Domain\Preparation\Preflight\PreflightLimits;
 use App\Domain\Preparation\Schema\AnchorPlacement;
 use App\Domain\Preparation\Schema\AnchorPlacementMode;
 use App\Domain\Preparation\Schema\CanonicalNumber;
@@ -583,6 +586,188 @@ final class SchemaAnchorResolverTest extends TestCase
         $resolver = new SchemaAnchorResolver(new AnchorResolver, $tolerance);
 
         $this->assertInstanceOf(SchemaAnchorResolver::class, $resolver);
+    }
+
+    /**
+     * A rectangle is judged against the page as it will be *stored*.
+     *
+     * The receipt canonicalises each component, so a field whose raw right edge is a fraction of a
+     * thousandth past the paper is exactly on it once written down. Refusing that blocks a
+     * legitimately edge-aligned field for a difference the document does not contain — the same
+     * mistake as comparing a cross-check raw, at the other end of this class.
+     *
+     * The combination is *which edge* against *how far past it*, because a rectangle can overhang
+     * on one axis and not the other, and a check that rounded only x would pass a test that only
+     * moved x.
+     *
+     * @return iterable<string, array{float, float, bool}>
+     */
+    public static function pageEdges(): iterable
+    {
+        //                                    dx from a right-edge fit, dy from a bottom fit, fits?
+        yield 'flush with both edges' => [0.0, 0.0, true];
+        yield 'a fraction of a thousandth past the right' => [0.0004, 0.0, true];
+        yield 'a fraction of a thousandth past the bottom' => [0.0, 0.0004, true];
+        yield 'a fraction past both' => [0.0004, 0.0004, true];
+        // One canonical unit of slack is deliberate and matches the field-schema validator's
+        // own page-fit rule, so the refusals are unambiguously past the paper.
+        yield 'past the right edge' => [0.01, 0.0, false];
+        yield 'past the bottom edge' => [0.0, 0.01, false];
+    }
+
+    #[DataProvider('pageEdges')]
+    public function test_a_rectangle_is_fitted_to_the_page_as_it_will_be_stored(
+        float $dx,
+        float $dy,
+        bool $fits,
+    ): void {
+        $page = ['width' => 612.0, 'height' => 792.0];
+        $width = 170.0;
+        $height = 36.0;
+
+        // A run positioned so the resolved rectangle lands exactly flush with both far edges,
+        // then nudged by the offset under test.
+        $runs = [new TextRun(
+            page: 1,
+            text: 'Signature:',
+            rect: new NativeRect($page['width'] - $width + $dx, $page['height'] - $height + $dy, 60.0, 12.0),
+            fontSize: 12.0,
+            fontResource: 'F1',
+        )];
+
+        $document = $this->documentWith($this->replacingAnchor(), rect: ['x' => 1, 'y' => 1, 'width' => $width, 'height' => $height]);
+        $sizes = PageSizes::fromList([$page]);
+
+        if ($fits) {
+            $this->assertSame(
+                ['signature'],
+                $this->resolver()->resolve($document, $runs, self::DIGEST, $sizes)->resolved,
+            );
+
+            return;
+        }
+
+        $this->assertSame(
+            ValidationCode::AnchorResolvedOffPage,
+            $this->failureOf($document, $runs, $sizes)->problems[0]->code,
+        );
+    }
+
+    /**
+     * A page the document does not have is not an anchor that is legitimately absent.
+     *
+     * The search is scoped to the field's page, so a field naming page 9 of a three-page document
+     * finds nothing for a reason that has nothing to do with its text. Reporting that as the
+     * narrow optional-absence option would let a malformed placement wear the one label that means
+     * "this was expected" — and, with `required: false`, would silently drop the field instead of
+     * refusing the document.
+     *
+     * The combination is *page validity* against *anchor requiredness*: a check that only ran for
+     * required anchors would leave the optional case silently omitting, which is the damaging half.
+     *
+     * @return iterable<string, array{bool}>
+     */
+    public static function anchorRequiredness(): iterable
+    {
+        yield 'a required anchor' => [true];
+        yield 'an optional anchor' => [false];
+    }
+
+    #[DataProvider('anchorRequiredness')]
+    public function test_a_page_the_document_does_not_have_is_refused_rather_than_omitted(bool $required): void
+    {
+        $runs = (new TcPdfTextLocator)->extract(PdfFixtures::bytes('single-page-letter'));
+        $document = $this->documentWith(
+            $this->replacingAnchor($required ? [] : ['required' => false]),
+            page: 4,
+            required: $required,
+        );
+
+        $problem = $this->failureOf($document, $runs, PageSizes::fromList([['width' => 612, 'height' => 792]]))
+            ->problems[0];
+
+        $this->assertSame(ValidationCode::PageOutOfRange, $problem->code);
+        $this->assertStringContainsString('could not be looked for at all', $problem->message);
+    }
+
+    /**
+     * A field kept for reporting does not keep a receipt saying its text was found.
+     *
+     * Publishing reports an absent optional anchor rather than removing the field, so the field
+     * survives the pass — and with it, unless something intervenes, a receipt from an earlier
+     * resolution. The document would then assert both that the text was found and that this pass
+     * did not find it. The *request* stays, so a later pass can still answer it.
+     *
+     * The combination is *retention* against *a receipt being present*: with `omitAbsentFields`
+     * true the field goes and the receipt goes with it, which is why only the reporting mode
+     * exposes this.
+     */
+    public function test_a_retained_omitted_field_loses_the_receipt_that_contradicts_it(): void
+    {
+        $runs = (new TcPdfTextLocator)->extract(PdfFixtures::bytes('single-page-letter'));
+
+        // A document whose optional anchor already carries a receipt, and whose text is not there.
+        $document = $this->documentWith(
+            $this->replacingAnchor([
+                'text' => 'Nowhere in this document:',
+                'required' => false,
+                'resolved' => [
+                    'document_sha256' => self::DIGEST,
+                    'page' => 1,
+                    'occurrence_index' => 1,
+                    'anchor_rect' => ['x' => 72, 'y' => 200, 'width' => 72, 'height' => 12],
+                    'rect' => ['x' => 1, 'y' => 1, 'width' => 170, 'height' => 36],
+                ],
+            ]),
+            required: false,
+        );
+
+        $outcome = $this->resolver()->resolve($document, $runs, self::DIGEST, null, omitAbsentFields: false);
+
+        $this->assertTrue($outcome->changed(), 'Removing a disproved receipt is a change to the document.');
+        $this->assertNull($outcome->schema->field('signature')?->anchor?->resolved);
+        $this->assertSame('Nowhere in this document:', $outcome->schema->field('signature')?->anchor?->text);
+    }
+
+    /**
+     * Extraction is bounded, and the bound is optional so a caller can still decline it.
+     *
+     * Preflight's ceilings describe the *document* — its size, its object count, its streams — and
+     * a file can satisfy every one of them while holding millions of small text-showing operators
+     * in a single allowed content stream. Nothing about the upload check catches that; the cost
+     * lands on whichever request tried to resolve it.
+     *
+     * The combination is *a budget being supplied* against *the budget being exhausted*, because
+     * a guard that only fired when a budget was present would leave every existing caller
+     * unbounded, and one that fired regardless would refuse tests that pass bytes they control.
+     *
+     * @return iterable<string, array{float|null, bool}>
+     */
+    public static function extractionBudgets(): iterable
+    {
+        yield 'no budget at all' => [null, true];
+        yield 'a budget with room' => [30.0, true];
+        yield 'a budget already spent' => [0.0000001, false];
+    }
+
+    #[DataProvider('extractionBudgets')]
+    public function test_extraction_is_bounded_when_a_budget_is_supplied(?float $seconds, bool $completes): void
+    {
+        $bytes = PdfFixtures::bytes('single-page-letter');
+        $budget = $seconds === null ? null : new PreflightBudget(new PreflightLimits(timeBudgetSeconds: $seconds));
+
+        if ($budget !== null && ! $completes) {
+            // Spend it, so the backstop trips on the first tick rather than on document size.
+            usleep(1000);
+        }
+
+        if (! $completes) {
+            $this->expectException(PreflightBudgetException::class);
+        }
+
+        $runs = (new TcPdfTextLocator)->extract($bytes, null, $budget);
+
+        $this->assertNotSame([], $runs);
     }
 
     private function resolver(): SchemaAnchorResolver

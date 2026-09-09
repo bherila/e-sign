@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Preparation\Contracts;
 
+use App\Domain\Preparation\Preflight\PreflightBudget;
 use App\Domain\Preparation\Text\TextExtractionException;
 use App\Domain\Preparation\Text\TextRun;
 
@@ -25,5 +26,16 @@ interface PdfTextLocator
      *
      * @throws TextExtractionException
      */
-    public function extract(string $pdfBytes, ?int $page = null): array;
+    /**
+     * @param  PreflightBudget|null  $budget  Charged between pages and between text runs, so a
+     *                                        content stream that is pathological rather than
+     *                                        merely large is stopped instead of exhausting the
+     *                                        request. Preflight's ceilings bound the *document* —
+     *                                        its size, object count and streams — and a file can
+     *                                        satisfy all of them while holding millions of small
+     *                                        text-showing operators in one allowed stream. Null
+     *                                        leaves extraction unbounded, which is only safe for
+     *                                        bytes a test controls.
+     */
+    public function extract(string $pdfBytes, ?int $page = null, ?PreflightBudget $budget = null): array;
 }
