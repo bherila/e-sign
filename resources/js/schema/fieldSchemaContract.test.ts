@@ -198,6 +198,45 @@ describe("the published JSON Schema", () => {
   });
 });
 
+/**
+ * The one rule the published file cannot state, pinned with the measurement that decided it.
+ *
+ * A 1.1 document carrying `rect.width: 0.0004` satisfies the contract and is refused by both
+ * importers as `coordinate_too_precise`. That gap is deliberate, and the alternative was measured
+ * rather than assumed: `multipleOf: 0.001` is the only way JSON Schema can express "at most three
+ * decimals", and a default-configured ajv rejects **13.6%** of legal three-decimal values under it,
+ * because the check is a floating-point division. Encoding the rule would therefore break a
+ * conforming client locally — refusing documents the service accepts — which is worse than the gap
+ * it closes, since the gap costs a 422 only for values that are wrong anyway.
+ *
+ * (`ajv`'s `multipleOfPrecision` option makes it exact, and a consumer who sets it gets agreement.
+ * That is a property of one library's configuration, not of the published contract, so the file
+ * cannot rely on it.)
+ *
+ * This case exists so the gap is visible in the suite rather than only in prose, and so it fails
+ * if it ever closes — at which point the rule should go into the file and this test should go.
+ */
+describe("the precision rule the contract cannot express", () => {
+  it("is the only place ajv and the importer disagree about a 1.1 document", () => {
+    const tooPrecise = brokenFixture((raw: Record<string, any>) => {
+      raw.fields[0].rect.width = 0.0004;
+    });
+
+    expect(errorsFor(tooPrecise)).toEqual([]);
+    expect(validateFieldSchema(tooPrecise).map((problem) => problem.code)).toEqual(["coordinate_too_precise"]);
+  });
+
+  it("would cost more to encode than it costs to leave out", () => {
+    const encoded = new Ajv2020({ strict: true }).compile({ type: "number", multipleOf: 0.001 });
+    const legal = Array.from({ length: 40001 }, (_, index) => (index - 20000) / 1000);
+    const wronglyRejected = legal.filter((value) => !encoded(value));
+
+    // The measurement that decided it: encoding the rule refuses one legal value in seven.
+    expect(wronglyRejected.length).toBeGreaterThan(5000);
+    expect(encoded(0.0004)).toBe(false);
+  });
+});
+
 describe("the TypeScript mirror", () => {
   it("declares the same document properties as the schema", () => {
     expect(schema.required).toEqual([...DOCUMENT_REQUIRED]);

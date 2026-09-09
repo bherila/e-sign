@@ -129,14 +129,6 @@ final readonly class EnvelopeSourceSnapshot
             throw InvalidEnvelopeSnapshot::missingProperty('field_schema');
         }
 
-        // Outside the catch below on purpose, and deleted with AnchorResolutionGate when
-        // send-time resolution lands. The gate's refusal names an *option* the deployment cannot
-        // honour, and it carries the pointer and the code a caller branches on; flattening it into
-        // `invalid_field_schema` would leave a sender reading "your snapshot is invalid" with
-        // nothing to act on. A snapshot that genuinely cannot be read is a different failure and
-        // keeps the wrapper.
-        AnchorResolutionGate::assertAvailable($fieldSchema);
-
         try {
             // Re-validated rather than trusted. Whatever produced this array validated it
             // once; an envelope that carries a schema it cannot read back is unsignable, and
@@ -148,6 +140,17 @@ final readonly class EnvelopeSourceSnapshot
                 'invalid_field_schema',
             );
         }
+
+        // Validity first, then availability — the order the template path uses, and the order that
+        // tells the truth. An invalid document is invalid whatever this deployment can do, and
+        // answering "wait for anchor resolution" about a document that will still be malformed
+        // afterwards sends a caller to wait for something that will not help them.
+        //
+        // Outside the catch on purpose, and deleted with AnchorResolutionGate when send-time
+        // resolution lands: the gate refuses an *option*, and its pointer and code are what a
+        // caller branches on. Flattening that into `invalid_field_schema` would leave a sender
+        // reading "your snapshot is invalid" with nothing to act on.
+        AnchorResolutionGate::assertAvailable($fieldSchema);
 
         return new self(
             title: $title,

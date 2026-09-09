@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Preparation\Schema;
 
 use App\Domain\Preparation\Schema\AnchorResolutionGate;
+use App\Domain\Preparation\Schema\FieldSchemaValidator;
 use App\Domain\Preparation\Schema\InvalidFieldSchemaException;
 use App\Domain\Preparation\Schema\ValidationCode;
 use PHPUnit\Framework\TestCase;
@@ -113,6 +114,28 @@ final class AnchorResolutionGateTest extends TestCase
                 ),
             );
         }
+    }
+
+    /**
+     * Validity is decided before availability, at both entry points.
+     *
+     * A document that is malformed *and* uses a gated option is malformed whatever this deployment
+     * can do. Answering "wait for anchor resolution" about it would send a caller to wait for
+     * something that will not help them, and the two entry points would disagree about which
+     * failure a document has — the template path validates first, so this one does too.
+     */
+    public function test_a_malformed_document_is_reported_as_malformed_not_as_gated(): void
+    {
+        $document = FieldSchemaFixture::asArray();
+        $document['schema_version'] = '1.0';
+        $document['fields'][5]['anchor']['placement'] = 'cross_check';
+
+        // The gate would refuse this too, but the document is a 1.0 one carrying a 1.1 member: it
+        // is invalid, and it stays invalid after resolution ships.
+        $errors = (new FieldSchemaValidator)->validate($document)->errors;
+
+        $this->assertNotSame([], $errors);
+        $this->assertSame(ValidationCode::UnknownProperty, $errors[0]->code);
     }
 
     /**
