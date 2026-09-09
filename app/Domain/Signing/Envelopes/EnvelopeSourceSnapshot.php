@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Signing\Envelopes;
 
 use App\Domain\Evidence\Sealing\AssuranceLevel;
+use App\Domain\Preparation\Schema\AnchorResolutionGate;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\InvalidFieldSchemaException;
 use App\Domain\Signing\Exceptions\InvalidEnvelopeSnapshot;
@@ -132,6 +133,9 @@ final readonly class EnvelopeSourceSnapshot
             // Re-validated rather than trusted. Whatever produced this array validated it
             // once; an envelope that carries a schema it cannot read back is unsignable, and
             // the cheapest place to discover that is before the row exists.
+            // Deleted with AnchorResolutionGate when send-time resolution lands.
+            AnchorResolutionGate::assertAvailable($fieldSchema);
+
             $schema = FieldSchemaDocument::fromArray($fieldSchema);
         } catch (InvalidFieldSchemaException $e) {
             throw new InvalidEnvelopeSnapshot(

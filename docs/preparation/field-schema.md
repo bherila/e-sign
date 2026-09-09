@@ -311,8 +311,33 @@ form, so refusing it removes an ambiguity rather than a capability.
 spelling and it is unusable: ajv rejects 5,425 of the 40,001 three-decimal values in ±20, because
 the check is a floating-point division. So the contract states the rule in prose and the importers
 enforce it, which is the same arrangement as every other rule JSON Schema cannot express here (see
-[below](#why-no-json-schema-library-on-the-server)). The consequence is stated plainly: a document
-with a four-decimal coordinate satisfies the published file and is refused by the service.
+[below](#why-no-json-schema-library-on-the-server)).
+
+### The published file describes the schema, not one deployment
+
+One rule, two instances, and they are worth reading together rather than as separate exceptions.
+
+A document with a four-decimal coordinate **satisfies the published file and is refused by the
+service**, because the precision rule cannot be expressed in JSON Schema at all. And a document
+using `placement: "cross_check"` or `anchor.required: false` satisfies the file and is refused by a
+deployment that has no anchor resolution — this one, until `feat/anchor-resolution-at-send` lands.
+Those two members *promise* something: a cross-check promises the anchor will be located and
+compared with the rectangle you declared and that a disagreement will stop the send;
+`required: false` promises an absent anchor leaves its field off the document. Storing either while
+nothing performs it is a successful no-op of an unsupported option, which `AGENTS.md` forbids, and
+on a document people sign a sender told a check is in force is worse off than one told it is
+unavailable. Both members' descriptions in the contract file say so.
+
+The general rule: **the published file is the schema, not an inventory of what a given build will
+accept.** It says what a valid 1.1 document is. A deployment may decline a valid document, and when
+it does it says which option and why — `coordinate_too_precise`, `anchor_resolution_unavailable` —
+rather than reporting it as malformed. The difference matters to the person on the other end: a
+sender told "invalid" changes something that was never wrong.
+
+The gate is one class, `Schema\AnchorResolutionGate`, applied at the two places a caller's schema
+is written — template versions and envelope snapshots — and deliberately not inside the validator,
+so reading a stored document back never trips it. `AnchorResolutionGateTest` names the branch that
+deletes it.
 
 **Probe at the boundary, not at a large number.** The sweep originally tested `1e20` alone, which
 looks like the stronger case and is strictly weaker. `1e20` is a float; the bound it was meant to
@@ -358,6 +383,7 @@ breaking change.
 | `rect_out_of_page` | a rectangle extending past the edge of its page |
 | `unresolved_prefill_variable` | a prefill variable the sending context cannot resolve |
 | `coordinate_too_precise` | a coordinate with more than three decimals, which is refused rather than rounded |
+| `anchor_resolution_unavailable` | a valid 1.1 anchor option this deployment cannot honour yet — `placement: "cross_check"` or `anchor.required: false` — refused rather than stored as a promise nothing keeps |
 | `anchor_optional_on_required_field` | `anchor.required: false` on a field whose own `required` is true |
 | `anchor_cross_check_failed` | a `cross_check` receipt records a rectangle further than its stated tolerance from the declared one |
 

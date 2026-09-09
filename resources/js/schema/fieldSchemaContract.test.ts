@@ -83,7 +83,6 @@ describe("the published JSON Schema", () => {
   it("keeps a 1.0 document valid against the unchanged 1.0 contract, and round trips it", () => {
     const legacy = JSON.parse(JSON.stringify(fixtureJson)) as Record<string, any>;
     legacy.schema_version = "1.0";
-    delete legacy.fields[9].anchor.required;
 
     const validateLegacy = new Ajv2020({ strict: false, allErrors: true }).compile(legacySchemaJson);
 
@@ -118,11 +117,17 @@ describe("the published JSON Schema", () => {
     ["an undeclared anchor origin", (raw: Record<string, any>) => (raw.fields[5].anchor.origin = "centre")],
     [
       "an optional anchor on a required field",
-      (raw: Record<string, any>) => (raw.fields[9].required = true),
+      (raw: Record<string, any>) => {
+        raw.fields[9].anchor.required = false;
+        raw.fields[9].required = true;
+      },
     ],
     [
       "an optional anchor on a field that does not state required at all",
-      (raw: Record<string, any>) => delete raw.fields[9].required,
+      (raw: Record<string, any>) => {
+        raw.fields[9].anchor.required = false;
+        delete raw.fields[9].required;
+      },
     ],
     [
       "a tolerance with no cross-check to be the tolerance of",
@@ -130,7 +135,10 @@ describe("the published JSON Schema", () => {
     ],
     [
       "an optional anchor that only cross-checks a rectangle it cannot omit",
-      (raw: Record<string, any>) => (raw.fields[9].anchor.placement = "cross_check"),
+      (raw: Record<string, any>) => {
+        raw.fields[9].anchor.required = false;
+        raw.fields[9].anchor.placement = "cross_check";
+      },
     ],
     [
       "a cross-check receipt with no tolerance to have passed by",
@@ -161,7 +169,10 @@ describe("the published JSON Schema", () => {
   it.each([
     [
       "anchor_optional_on_required_field",
-      (raw: Record<string, any>) => (raw.fields[9].required = true),
+      (raw: Record<string, any>) => {
+        raw.fields[9].anchor.required = false;
+        raw.fields[9].required = true;
+      },
       "/fields/9/anchor/required",
     ],
     [
@@ -171,7 +182,10 @@ describe("the published JSON Schema", () => {
     ],
     [
       "invalid_format",
-      (raw: Record<string, any>) => (raw.fields[9].anchor.placement = "cross_check"),
+      (raw: Record<string, any>) => {
+        raw.fields[9].anchor.required = false;
+        raw.fields[9].anchor.placement = "cross_check";
+      },
       "/fields/9/anchor/required",
     ],
   ])("refuses %s in the contract file and in the importer alike", (code, mutate, path) => {
@@ -256,6 +270,6 @@ describe("the TypeScript mirror", () => {
 
   it("keeps the validation code list unique and stable", () => {
     expect(new Set(VALIDATION_CODES).size).toBe(VALIDATION_CODES.length);
-    expect(VALIDATION_CODES).toHaveLength(23);
+    expect(VALIDATION_CODES).toHaveLength(24);
   });
 });

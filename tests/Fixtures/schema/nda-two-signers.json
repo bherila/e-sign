@@ -195,8 +195,7 @@
       "label": "Notes",
       "anchor": {
         "text": "Notes:",
-        "occurrence": 2,
-        "required": false
+        "occurrence": 2
       }
     }
   ]

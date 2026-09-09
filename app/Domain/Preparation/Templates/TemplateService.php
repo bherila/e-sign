@@ -9,6 +9,7 @@ use App\Domain\Identity\Audit\AuditRecorder;
 use App\Domain\Identity\Models\Workspace;
 use App\Domain\Preparation\Documents\Models\Document;
 use App\Domain\Preparation\Documents\Models\DocumentRevision;
+use App\Domain\Preparation\Schema\AnchorResolutionGate;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\FieldSchemaValidator;
 use App\Domain\Preparation\Schema\InvalidFieldSchemaException;
@@ -552,6 +553,9 @@ final readonly class TemplateService
         if ($result->hasErrors()) {
             throw new InvalidFieldSchemaException($result);
         }
+
+        // Deleted with AnchorResolutionGate when send-time resolution lands.
+        AnchorResolutionGate::assertAvailable($fieldSchema);
 
         return FieldSchemaDocument::fromArray($fieldSchema);
     }

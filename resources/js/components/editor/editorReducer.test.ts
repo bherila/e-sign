@@ -465,13 +465,21 @@ describe("no editor action can produce an unsavable document", () => {
    * that breaks a pair has to repair it, or the editor can reach a state Save refuses with no
    * control able to undo it.
    */
+  /** A document whose optional field carries the optional-anchor option. */
+  function optionalAnchor(): EditorState {
+    const raw = JSON.parse(JSON.stringify(fixtureJson)) as Record<string, any>;
+    raw.fields[9].anchor.required = false;
+
+    return createEditorState(parseFieldSchema(raw));
+  }
+
   it("keeps the anchor's requiredness coherent when the field becomes required", () => {
     // Field 9 is the optional notes field whose anchor may legitimately be absent.
-    const before = findField(state().document, "counterparty_notes");
+    const before = findField(optionalAnchor().document, "counterparty_notes");
     expect(before?.required).toBe(false);
     expect(before?.anchor?.required).toBe(false);
 
-    const next = editorReducer(state(), {
+    const next = editorReducer(optionalAnchor(), {
       type: "update_field",
       id: "counterparty_notes",
       patch: { required: true },
@@ -485,7 +493,7 @@ describe("no editor action can produce an unsavable document", () => {
   });
 
   it("leaves an optional anchor alone when the field stays optional", () => {
-    const next = editorReducer(state(), {
+    const next = editorReducer(optionalAnchor(), {
       type: "update_field",
       id: "counterparty_notes",
       patch: { label: "Notes" },

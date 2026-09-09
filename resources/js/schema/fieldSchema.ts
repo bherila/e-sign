@@ -261,6 +261,7 @@ export const VALIDATION_CODES = [
   "coordinate_too_precise",
   "anchor_optional_on_required_field",
   "anchor_cross_check_failed",
+  "anchor_resolution_unavailable",
 ] as const;
 
 export type ValidationCode = (typeof VALIDATION_CODES)[number];

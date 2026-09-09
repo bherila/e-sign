@@ -96,4 +96,14 @@ enum ValidationCode: string
 
     /** A `cross_check` anchor resolved further than its tolerance from the declared rectangle. */
     case AnchorCrossCheckFailed = 'anchor_cross_check_failed';
+
+    /**
+     * An anchor option that promises behaviour this deployment does not perform yet.
+     *
+     * A distinct code because the document is *not* wrong: it is a correct 1.1 document using an
+     * option that is unavailable here, and a sender who reads "invalid" will go and change
+     * something that was never the problem. See {@see AnchorResolutionGate}, which this code
+     * disappears with.
+     */
+    case AnchorResolutionUnavailable = 'anchor_resolution_unavailable';
 }

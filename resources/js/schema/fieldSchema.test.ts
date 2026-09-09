@@ -100,12 +100,13 @@ describe("parseFieldSchema", () => {
       origin: "bottom_left",
       offset: { dx: 0, dy: 12.5 },
     });
-    // The optional notes field carries the narrow compatibility option: its anchor may be
-    // absent, and then the field is omitted rather than placed anywhere.
+    // The optional notes field's anchor, as a caller can send it today. `required: false` — the
+    // narrow compatibility option for an anchor that may be absent — is a 1.1 member the importer
+    // reads but `AnchorResolutionGate` refuses to store until resolution ships, so the shared
+    // fixture does not carry it and the cases that exercise it add it themselves.
     expect(document.fields[9]!.anchor).toEqual({
       text: "Notes:",
       occurrence: 2,
-      required: false,
     });
   });
 });
@@ -197,6 +198,7 @@ describe("serializeFieldSchema", () => {
         brokenFixture((raw) => {
           raw.fields[5].anchor.placement = "cross_check";
           raw.fields[5].anchor.tolerance = 2;
+          raw.fields[9].anchor.required = false;
         }),
       ),
     );
@@ -547,7 +549,6 @@ describe("validateFieldSchema", () => {
       "a 1.1 anchor member in a document that declares 1.0",
       (raw) => {
         raw.schema_version = "1.0";
-        delete raw.fields[9].anchor.required;
         raw.fields[5].anchor.placement = "replace";
       },
       "unknown_property",
@@ -587,8 +588,8 @@ describe("validateFieldSchema", () => {
     [
       "an optional anchor that only cross-checks a rectangle it cannot omit",
       (raw) => {
-        raw.fields[9].anchor.placement = "cross_check";
         raw.fields[9].anchor.required = false;
+        raw.fields[9].anchor.placement = "cross_check";
       },
       "invalid_format",
       "/fields/9/anchor/required",
