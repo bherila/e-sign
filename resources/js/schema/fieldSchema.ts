@@ -323,7 +323,18 @@ export function roundCoordinate(value: number): number {
   if (repr.includes("e") || repr.includes("E")) {
     // Exponential notation: far outside anything a page rectangle can hold, and the string
     // exponent trick below does not compose with an exponent already in the text.
-    return Math.round(value * 10 ** CANONICAL_DECIMALS) / 10 ** CANONICAL_DECIMALS;
+    const scaled = value * 10 ** CANONICAL_DECIMALS;
+
+    // A value large enough that scaling it overflows has no fractional part to round in the
+    // first place, so rounding is the identity — which is also what PHP's `round()` returns for
+    // it. Returning `Infinity` instead would serialise as `null` through `JSON.stringify`, so a
+    // document the validator accepted would be exported as one its own importer refuses, and the
+    // two projections would disagree about the same input.
+    if (!Number.isFinite(scaled)) {
+      return value;
+    }
+
+    return Math.round(scaled) / 10 ** CANONICAL_DECIMALS;
   }
 
   const shifted = Number(`${repr}e${CANONICAL_DECIMALS}`);

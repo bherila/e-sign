@@ -151,6 +151,27 @@ describe("serializeFieldSchema", () => {
     expect(serializeFieldSchema(parseFieldSchema(json))).toBe(json);
   });
 
+  /**
+   * A finite number stays finite through canonicalisation, however it was written.
+   *
+   * `tolerance` is the first schema number with no page to bound it, so exponential notation is
+   * reachable for the first time. Scaling by 1000 to round it overflows `1e308` to `Infinity`,
+   * which `JSON.stringify` writes as `null` — so a document the validator accepted would be
+   * exported as one its own importer refuses, and the two projections would disagree about the
+   * same input: PHP's `round()` returns `1e308` unchanged.
+   */
+  it("keeps a finite tolerance finite, however large", () => {
+    const raw = JSON.parse(JSON.stringify(fixtureJson)) as Record<string, any>;
+    raw.fields[5].anchor.placement = "cross_check";
+    raw.fields[5].anchor.tolerance = 1e308;
+
+    const json = serializeFieldSchema(parseFieldSchema(raw));
+
+    expect(json).toContain('"tolerance":1e+308');
+    expect(json).not.toContain('"tolerance":null');
+    expect(validateFieldSchema(JSON.parse(json))).toEqual([]);
+  });
+
   it("omits a defaulted anchor property so an older document keeps its bytes", () => {
     const json = serializeFieldSchema(
       parseFieldSchema(

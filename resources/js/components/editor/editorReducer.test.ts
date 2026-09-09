@@ -356,6 +356,70 @@ describe("patching a field", () => {
   });
 });
 
+describe("a resolution receipt", () => {
+  /**
+   * A receipt is bound to the field's page and, in `replace` mode, to its exact rectangle, so
+   * editing either makes it a record of resolving something else. The importer refuses that, and
+   * the editor offers no way to delete a receipt by hand — so keeping one through a drag would
+   * make Save a 422 with no way out. The anchor *request* is kept: publishing resolves it again.
+   */
+  function resolved(): EditorState {
+    const raw = JSON.parse(JSON.stringify(fixtureJson)) as Record<string, any>;
+    raw.fields[5].anchor.resolved = {
+      document_sha256: "d".repeat(64),
+      page: 2,
+      occurrence_index: 1,
+      anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
+      rect: raw.fields[5].rect,
+    };
+
+    return createEditorState(parseFieldSchema(raw));
+  }
+
+  it("survives a document that is only read", () => {
+    expect(findField(resolved().document, "counterparty_signature")?.anchor?.resolved).toBeDefined();
+  });
+
+  it.each([
+    [
+      "moving the field",
+      { type: "move_field", id: "counterparty_signature", rect: { x: 340, y: 650, width: 170, height: 36 } },
+    ],
+    [
+      "patching its rectangle",
+      { type: "update_field", id: "counterparty_signature", patch: { rect: { x: 340 } } },
+    ],
+    [
+      "patching its page",
+      { type: "update_field", id: "counterparty_signature", patch: { page: 1 } },
+    ],
+  ] as const)("is dropped by %s, and the request is kept", (_name, action) => {
+    const next = editorReducer(resolved(), action as Parameters<typeof editorReducer>[1]);
+    const field = findField(next.document, "counterparty_signature");
+
+    expect(field?.anchor?.resolved).toBeUndefined();
+    expect(field?.anchor?.text).toBe("Counterparty signature:");
+  });
+
+  it("is not copied onto a duplicate, which sits somewhere else entirely", () => {
+    const next = editorReducer(resolved(), { type: "duplicate_field", id: "counterparty_signature" });
+    const copy = findField(next.document, "counterparty_signature_copy");
+
+    expect(copy?.anchor?.resolved).toBeUndefined();
+    expect(copy?.anchor?.text).toBe("Counterparty signature:");
+  });
+
+  it("survives an edit that cannot invalidate it", () => {
+    const next = editorReducer(resolved(), {
+      type: "update_field",
+      id: "counterparty_signature",
+      patch: { label: "Counterparty" },
+    });
+
+    expect(findField(next.document, "counterparty_signature")?.anchor?.resolved).toBeDefined();
+  });
+});
+
 describe("dirty tracking", () => {
   it("is clean until something changes and clean again once the server acknowledges it", () => {
     const start = state();

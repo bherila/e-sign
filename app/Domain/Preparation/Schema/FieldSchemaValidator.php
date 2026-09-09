@@ -1210,12 +1210,18 @@ final class FieldSchemaValidator
     /**
      * A receipt answers one question, and it has to be the question the field is asking now.
      *
-     * The receipt is what lets resolution be skipped, so nothing re-reads the document once one
-     * is present for its digest. Change `field.page` or `anchor.occurrence` afterwards and the
-     * old answer would be kept: the field would publish and send at coordinates resolved for a
-     * different page, or for a different occurrence of the same text, with a receipt that looks
-     * entirely well-formed. Requiring the receipt to restate the request is what makes editing
-     * the request invalidate it.
+     * A stored receipt is read back on every request — an envelope re-imports its own schema —
+     * and in `replace` mode the field's own rectangle is required to be the one the receipt
+     * records. Move the field to another page, or point the anchor at a different occurrence, and
+     * the document would carry a well-formed record of resolving something else: a rectangle
+     * measured for page 2 sitting on a field that now says page 3. Requiring the receipt to
+     * restate the request is what makes editing the request invalidate the answer to it, so a
+     * document at rest is either self-consistent or refused.
+     *
+     * This is not what decides whether the resolver runs again. It always runs again, at publish
+     * and at send alike (`$defs/resolved_anchor` in the published contract): a receipt is a record
+     * of what was found, never permission to stop looking, because it binds a document, a page
+     * and an occurrence but not the anchor text, the origin corner, or the offset.
      *
      * @param  array<string, int>  $recorded
      * @param  list<ValidationError>  $errors

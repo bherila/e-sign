@@ -343,7 +343,29 @@ function mapField(
 }
 
 function withRect(field: FieldDefinition, rect: Rect): FieldDefinition {
-  return { ...field, rect: roundRect(rect) };
+  return withoutStaleReceipt({ ...field, rect: roundRect(rect) });
+}
+
+/**
+ * Drop a resolution receipt whose field has moved out from under it.
+ *
+ * `anchor.resolved` records what resolution found *for this field on this page*: the importer
+ * requires its `page` to be the field's and, in `replace` mode, its rectangle to be the field's
+ * own. Dragging a field, resizing it, or moving it to another page therefore invalidates the
+ * receipt immediately, and keeping it would make the next Save a 422 with nothing in the editor
+ * offering a way to clear it.
+ *
+ * Dropping the receipt is not losing anything: the anchor *request* is kept, so publishing
+ * resolves it again against the document. What is thrown away is a stale answer.
+ */
+function withoutStaleReceipt(field: FieldDefinition): FieldDefinition {
+  if (field.anchor?.resolved === undefined) {
+    return field;
+  }
+
+  const { resolved: _resolved, ...anchor } = field.anchor;
+
+  return { ...field, anchor };
 }
 
 function roundRect(rect: Rect): Rect {
@@ -413,6 +435,12 @@ function applyPatch(field: FieldDefinition, patch: FieldPatch): FieldDefinition 
     }
   }
 
+  // The page and the rectangle are the two properties a receipt is bound to, so editing either
+  // is what makes the stored answer stale.
+  if (patch.page !== undefined || patch.rect !== undefined) {
+    return withoutStaleReceipt(next);
+  }
+
   return next;
 }
 
@@ -453,5 +481,7 @@ function duplicateField(source: FieldDefinition, document: FieldSchemaDocument):
   // answer to a name an integration uses to patch exactly one.
   delete copy.alias;
 
-  return copy;
+  // The copy is offset from the original, so a receipt describing the original's rectangle
+  // describes nothing about this one. The anchor request is kept and resolves again.
+  return withoutStaleReceipt(copy);
 }
