@@ -207,6 +207,27 @@ class FieldSchemaDocumentTest extends TestCase
         $this->assertStringContainsString('"x":60,"y":650,"width":170.457,"height":36', $canonical);
     }
 
+    /**
+     * Rounding can hide a sign problem and create an extent one, so each is checked where it can
+     * go wrong: the sign on the value as submitted, the extent on the value as it will be stored.
+     *
+     * `-0.0004` rounds to `-0.0`, which is not less than zero — so checking the sign after
+     * rounding let a negative coordinate through validation and into `Rect`'s constructor, which
+     * throws: a 500 where a 422 belongs, on the version that was supposed to be left alone.
+     */
+    public function test_a_1_0_document_refuses_a_coordinate_that_rounds_to_negative_zero(): void
+    {
+        $raw = self::minimalDocument();
+        $raw['fields'][0]['rect']['x'] = -0.0004;
+
+        try {
+            FieldSchemaDocument::fromArray($raw);
+            $this->fail('Expected a structured refusal rather than a constructor failure.');
+        } catch (InvalidFieldSchemaException $refused) {
+            $this->assertSame('coordinate_negative', $refused->result->errors[0]->code->value);
+        }
+    }
+
     public function test_a_document_built_in_code_exports_canonically(): void
     {
         $document = FieldSchemaDocument::fromArray(self::minimalDocument());

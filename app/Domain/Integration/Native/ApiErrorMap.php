@@ -82,10 +82,21 @@ final class ApiErrorMap
                 ['field' => $exception->fieldId, 'reason' => $exception->reason],
             ),
 
+            // The structured errors when the snapshot carried any — a schema that does not import
+            // brings the importer's own list. Without them a caller reading
+            // `reason: invalid_field_schema` has to guess which of a dozen rules it broke, and the
+            // codes that say something specific — `coordinate_too_precise`,
+            // `anchor_resolution_unavailable` — would survive only inside a sentence.
             $exception instanceof InvalidEnvelopeSnapshot => ApiException::of(
                 ErrorCode::InvalidSnapshot,
                 $exception->getMessage(),
-                ['reason' => $exception->reason],
+                array_filter([
+                    'reason' => $exception->reason,
+                    'problems' => array_map(
+                        static fn (ValidationError $error): array => $error->toArray(),
+                        $exception->problems,
+                    ),
+                ], static fn (mixed $value): bool => $value !== []),
             ),
 
             // Every structured error, not only the first one flattened into a sentence. Codes

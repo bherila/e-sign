@@ -138,6 +138,7 @@ final readonly class EnvelopeSourceSnapshot
             throw new InvalidEnvelopeSnapshot(
                 'The snapshot\'s field schema is not a valid native field schema document: '.$e->getMessage(),
                 'invalid_field_schema',
+                $e->errors(),
             );
         }
 

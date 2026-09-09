@@ -178,6 +178,9 @@ class EnvelopeSourceSnapshotTest extends TestCase
             $this->fail('Expected '.$expected.'.');
         } catch (InvalidEnvelopeSnapshot $refused) {
             $this->assertSame($expected, $refused->code());
+            // Flattening the importer's list into one reason would leave a caller reading
+            // "invalid_field_schema" with a dozen rules to guess between. Codes are API surface.
+            $this->assertNotSame([], $refused->problems);
         } catch (InvalidFieldSchemaException $refused) {
             $this->assertSame(
                 $expected,
@@ -185,6 +188,34 @@ class EnvelopeSourceSnapshotTest extends TestCase
                 'The gate\'s refusal must keep its own code and pointer rather than being flattened.',
             );
             $this->assertSame('/fields/0/anchor/placement', $refused->errors()[0]->path);
+        }
+    }
+
+    /**
+     * An ordinary schema error keeps its code through the snapshot wrapper.
+     *
+     * The gate's refusal was given its own code and pointer, and then the *other* refusal at this
+     * boundary — a schema that simply does not import — was still being flattened into
+     * `invalid_field_schema` on the way out. Two refusals, one of them structured, is not a
+     * contract a client can branch on: `coordinate_too_precise` says which value to fix, and
+     * "invalid" says go and look.
+     */
+    public function test_an_ordinary_schema_error_keeps_its_code_and_pointer(): void
+    {
+        $schema = SigningFixtures::sequentialTwoSigners();
+        $schema['fields'][0]['rect']['x'] = 60.00049;
+        $schema['schema_version'] = SchemaVersion::CURRENT;
+
+        try {
+            EnvelopeSourceSnapshot::fromArray($this->snapshot(['field_schema' => $schema]));
+            $this->fail('An over-precise coordinate was accepted.');
+        } catch (InvalidEnvelopeSnapshot $refused) {
+            $this->assertSame('invalid_field_schema', $refused->code());
+            $this->assertSame(
+                ['coordinate_too_precise'],
+                array_map(static fn ($problem): string => $problem->code->value, $refused->problems),
+            );
+            $this->assertSame('/fields/0/rect/x', $refused->problems[0]->path);
         }
     }
 

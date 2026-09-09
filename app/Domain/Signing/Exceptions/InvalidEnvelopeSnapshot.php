@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Domain\Signing\Exceptions;
 
+use App\Domain\Preparation\Schema\ValidationError;
+
 /**
  * The snapshot handed to the envelope factory does not describe a sendable agreement.
  *
@@ -14,8 +16,20 @@ namespace App\Domain\Signing\Exceptions;
  */
 final class InvalidEnvelopeSnapshot extends SigningException
 {
-    public function __construct(string $message, public readonly string $reason)
-    {
+    /**
+     * @param  list<ValidationError>  $problems  The structured errors behind this refusal, when
+     *                                           there are any. A snapshot whose field schema does
+     *                                           not import carries the importer's own list rather
+     *                                           than flattening it into one sentence: codes are API
+     *                                           surface and a caller branches on them, so a client
+     *                                           told only "invalid_field_schema" has to guess which
+     *                                           of a dozen rules it broke.
+     */
+    public function __construct(
+        string $message,
+        public readonly string $reason,
+        public readonly array $problems = [],
+    ) {
         parent::__construct($message);
     }
 

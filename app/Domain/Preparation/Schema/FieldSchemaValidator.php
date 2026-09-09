@@ -750,16 +750,20 @@ final class FieldSchemaValidator
             //
             // 1.0 rounds, because refusing would be a semantic tightening of a published version
             // and this schema's policy reserves those for a major bump
-            // ({@see PRECISION_REFUSED_SINCE_MINOR}). Rounding *before* the checks below rather
-            // than after is the one change 1.0 does get, and it takes nothing away: it refuses
-            // only values that rounded into an invalid state, like a width of 0.0004 becoming
-            // zero — documents that were accepted and then failed their own next import.
-            if ($refuseImprecise) {
-                if (! $this->checkPrecision($path.'/'.$name, 'rect.'.$name, $value, $errors)) {
-                    continue;
-                }
-            } else {
-                $value = CanonicalNumber::round($value);
+            // ({@see PRECISION_REFUSED_SINCE_MINOR}).
+            //
+            // The sign is checked on the value **as submitted** and the extent on the value **as
+            // it will be stored**, and the asymmetry is not fussiness. Rounding moves a value
+            // toward zero, which can only ever *hide* a sign problem — `-0.0004` rounds to `-0.0`,
+            // which is not less than zero, so a negative coordinate would pass validation and then
+            // throw from `Rect`'s constructor as a 500 where a 422 belongs. It can only ever
+            // *create* an extent problem, by collapsing a positive width to zero, which is the
+            // document that used to be stored and then failed its own next import. So each check
+            // is made on the value that can go wrong for it.
+            $canonical = $refuseImprecise ? $value : CanonicalNumber::round($value);
+
+            if ($refuseImprecise && ! $this->checkPrecision($path.'/'.$name, 'rect.'.$name, $value, $errors)) {
+                continue;
             }
 
             if (($name === 'x' || $name === 'y') && $value < 0.0) {
@@ -772,7 +776,7 @@ final class FieldSchemaValidator
                 continue;
             }
 
-            if (($name === 'width' || $name === 'height') && $value <= 0.0) {
+            if (($name === 'width' || $name === 'height') && $canonical <= 0.0) {
                 $errors[] = new ValidationError(
                     $path.'/'.$name,
                     ValidationCode::DimensionNotPositive,
@@ -782,7 +786,7 @@ final class FieldSchemaValidator
                 continue;
             }
 
-            $values[$name] = $value;
+            $values[$name] = $canonical;
         }
 
         if (count($values) !== count(self::RECT_REQUIRED)) {
