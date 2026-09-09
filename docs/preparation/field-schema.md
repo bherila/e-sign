@@ -6,7 +6,7 @@ facade converts its own convention into it. It is the only field vocabulary in t
 
 | | |
 |---|---|
-| Contract | [`resources/schema/field-schema-1.0.json`](../../resources/schema/field-schema-1.0.json) (JSON Schema draft 2020-12) |
+| Contract | [`resources/schema/field-schema-1.1.json`](../../resources/schema/field-schema-1.1.json) — current (JSON Schema draft 2020-12). [`field-schema-1.0.json`](../../resources/schema/field-schema-1.0.json) is retained, unchanged, and still read; validate a 1.0 document against that one |
 | Server | `app/Domain/Preparation/Schema` (`FieldSchemaDocument`, `FieldSchemaValidator`) |
 | Editor | [`resources/js/schema/fieldSchema.ts`](../../resources/js/schema/fieldSchema.ts) (`parseFieldSchema`, `serializeFieldSchema`); the editor itself is [editor.md](editor.md) |
 | Fixture | [`tests/Fixtures/schema/nda-two-signers.json`](../../tests/Fixtures/schema/nda-two-signers.json), synthetic, shared by both suites |
@@ -47,7 +47,10 @@ facade converts its own convention into it. It is the only field vocabulary in t
 
 ## Sections
 
-**`schema_version`** — exactly `"1.0"` in this version. See [versioning](#versioning) below.
+**`schema_version`** — `"1.1"`, the version this build writes, or `"1.0"`, which is still read and
+still published. A document keeps the version it arrived with, and each version has its own
+contract file: validate against the one the document declares, not against the newest. See
+[versioning](#versioning) below.
 
 **`document_id`** — the prepared document this field set belongs to. Preserved verbatim.
 
@@ -86,7 +89,7 @@ address recorded here.
 | `recipient_id` | yes | must resolve to a declared recipient |
 | `type` | yes | one of the [field types](#field-types) |
 | `page` | yes | 1-based |
-| `rect` | yes | `x`, `y`, `width`, `height` in the declared space, top-left anchored |
+| `rect` | yes | `x`, `y`, `width`, `height` in the declared space, top-left anchored. With a `replace` anchor, `x` and `y` are a placeholder resolution overwrites; the size is always the field's own |
 | `required` | no, default `true` | an unstated requirement fails closed |
 | `read_only` | no, default `false` | |
 | `label` | no | shown in the editor and to the signer |
@@ -104,17 +107,27 @@ mapping. Neither is ever rewritten by the importer.
 ### Anchor placement
 
 `anchor` is a placement *request*: find this text, then place the field's rectangle relative to
-it. Version 1.0 stores the request; resolution is deterministic positioned-text extraction
-(`app/Domain/Preparation/Text`) that writes the resolved rectangle into `rect` before send. A
-missing or ambiguous required anchor is an error, never a guess, and matching is an exact
-case-sensitive match on decoded text runs — never a regular expression over PDF bytes.
+it, or check the rectangle that is already there. Resolution is deterministic positioned-text
+extraction (`app/Domain/Preparation/Text`) that writes a receipt into `anchor.resolved` — when a
+template version is published, and again when an envelope is sent, and never after that. Whether
+it also writes the resolved rectangle into `rect` is exactly what `placement` decides: `replace`
+does, and `cross_check` does **not** — there the declared rectangle is authoritative and a
+disagreement larger than the tolerance is a refusal, never a silent move. A missing or ambiguous
+required anchor is an error, never a guess, and matching is an exact case-sensitive match on
+decoded text runs — never a regular expression over PDF bytes.
+
+This section is the **shape**: what a document may say and what the published contract makes of
+it. Resolution itself — when it runs, which failure fires when, what happens to a field whose
+optional anchor is genuinely absent — arrives with the resolver and is documented there.
 
 ```json
 {
   "text": "Counterparty signature:",
   "occurrence": "sole",
+  "placement": "replace",
   "origin": "bottom_left",
-  "offset": {"dx": 0, "dy": 12.5}
+  "offset": {"dx": 0, "dy": 12.5},
+  "required": true
 }
 ```
 
@@ -122,19 +135,55 @@ case-sensitive match on decoded text runs — never a regular expression over PD
 |---|---|---|
 | `text` | yes | exact string to locate |
 | `occurrence` | yes | `"sole"`, or a 1-based index in document order |
+| `placement` | no, default `replace` | `"replace"` (the anchor decides x and y) or `"cross_check"` (the rect decides, and the anchor must agree) |
 | `origin` | no, default `top_left` | corner of the matched text the offset is measured from; one of `top_left`, `top_right`, `bottom_left`, `bottom_right` |
 | `offset` | no | `dx`, `dy` in the declared unit, `dy` downwards, either may be negative |
+| `required` | no, default `true` | false says the text may legitimately be absent; only accepted on a field that is itself optional and whose placement is `replace` |
+| `tolerance` | no | how far, in points, a `cross_check` anchor may resolve from the declared rect; at most 14400 (see [why every number is bounded](#why-every-number-in-this-schema-is-bounded)); meaningless with `replace` |
+| `resolved` | written by the service | the receipt: the digest of the bytes the text was found in, the page, the occurrence taken, and both rectangles. `anchor_rect` is a `measured_rect` — an observation of where the text was, which may overhang the page — while `rect` is a placement and, in `replace` mode, must be the field's own |
 
-`occurrence` is **required and has no default.** The resolver refuses a "first match wins"
+`occurrence` is **required and has no default**: the resolver refuses a "first match wins"
 fallback, because silently taking the first match moves a signature box the moment the contract
-text changes; an anchor that matches twice without saying which one it means is under-specified.
-The resolver's third mode, `all`, places one box per match, which a single field with a single id
-cannot represent, so it is not a document value: a document that wants several boxes says so with
-several fields.
+text changes. Its third mode, `all`, places one box per match, which a single field with a single
+id cannot represent, so it is not a document value: a document that wants several boxes says so
+with several fields.
+
+`placement` is defaulted rather than required, and the two are treated differently on purpose:
+`replace` is not a guess between two readings but the only behaviour an anchor has ever had here,
+so defaulting it is what an already-stored document *said*. That is what keeps an anchor written
+before `placement` existed byte-identical — and with it the field-schema digest every attestation
+is bound to.
+
+`placement`, `required`, `tolerance` and `resolved` are additive optional members and therefore
+arrive in **schema 1.1**. `resources/schema/field-schema-1.0.json` is unchanged and still
+published; a 1.0 document keeps its version and its bytes, and this build reads both. Using one of
+those members in a document that declares 1.0 is `unknown_property` — exactly what a consumer
+holding the 1.0 contract would say — so the version string is enforced rather than merely
+written.
 
 `occurrence` and `origin` are the serialised form of `Text\AnchorOccurrence` and
 `Text\AnchorOrigin`, so the document cannot express a placement the resolver does not implement,
 and there is one definition of what each mode means.
+
+**1.1 also states the relationships between these properties, and 1.0 did not.** Four rules tie
+one property to another, and each is now an `if`/`then` in the contract file rather than only a
+rule in the importers:
+
+| Rule | Where |
+|---|---|
+| `anchor.required: false` requires the field's own `required` to be `false` | `$defs/field` |
+| `anchor.tolerance` requires `placement: "cross_check"` | `$defs/anchor` |
+| `anchor.required: false` requires `placement: "replace"` | `$defs/anchor` |
+| a `cross_check` `resolved` receipt requires `anchor.tolerance` | `$defs/anchor` |
+
+A relationship between two properties is the easiest kind of rule for a contract file and an
+importer to disagree about, because the file can only say it with a conditional and it is tempting
+not to write one. The cost of that disagreement falls entirely on an integration: it validates
+against the published file, is told its document conforms, and then gets a 422 from the service.
+`fieldSchemaContract.test.ts` runs `ajv` and the TypeScript importer over the same document for
+each rule and asserts both refuse it; `FieldSchemaContractTest` pins the conditionals' shape so
+they cannot be dropped from the file. 1.0 stays exactly as published — these are not backported,
+because the file is frozen and its consumers are entitled to the bytes they have.
 
 ## Field types
 
@@ -156,10 +205,13 @@ bytes on both the server and the client:
 
 1. Properties in the order above, at every level. Fixed, not alphabetical, so the emitted document
    reads like the schema file and the specification example.
-2. `required` and `read_only` always stated. (`anchor.occurrence` is required by the schema
-   itself, so it is always present.)
-3. Coordinates rounded once to **three decimals**, half away from zero (0.001 pt is roughly a
-   third of a micron; no drag can express less). Integral values are written `60`, never `60.0`.
+2. `required` and `read_only` always stated. Inside `anchor` the opposite rule applies: `placement`
+   and `required` are written only when they differ from their defaults, which is what keeps an
+   anchor written before those properties existed byte-identical. (`anchor.occurrence` is required
+   by the schema itself, so it is always present.)
+3. Coordinates carry at most **three decimals** (0.001 pt is roughly a third of a micron; no drag
+   can express less). A finer value is **refused, not rounded** — see below. Integral values are
+   written `60`, never `60.0`.
 4. No insignificant whitespace; slashes and non-ASCII characters unescaped.
 
 `FieldSchemaDocument::canonicalJson()` and `serializeFieldSchema()` produce identical bytes for
@@ -169,6 +221,152 @@ validates (defaults omitted, `60.0` for `60`, coordinates finer than a thousandt
 canonicalised on first import, and every round trip after that is byte-identical. The property
 tests generate a thousand documents on each side and assert exactly that, with strict identity
 rather than a float tolerance.
+
+### Why every number in this schema is bounded
+
+Identical bytes on both sides is a claim about *every* value the importer accepts, and it stops
+being true at the top of the double range. Above roughly 1e17, PHP's `json_encode()` and
+JavaScript's `JSON.stringify()` spell the same number differently — `1.0e+20` against
+`100000000000000000000` — so a document containing one would canonicalise to two different byte
+strings and therefore two different `field_schema_sha256`, which is the digest every attestation
+binds. That is not a rounding disagreement to be tightened away; in that range **the canonical
+form is undefined**, and no amount of care in the rounding helper changes it.
+
+Every number this schema had until 1.1 was a coordinate, and a coordinate describes a position on
+a page, so the values that break canonicalisation never arose in a document anyone would write.
+`anchor.tolerance` was the first number with no page behind it — a distance, not a position — and
+it made the range reachable for the first time.
+
+The schema's answer is to **bound the property rather than to canonicalise across encoders**. A
+tolerance is a distance between two positions on one page, so the bound is PDF's own maximum page
+side, 14400 pt (200 inches): the largest distance that can mean anything here, and five orders of
+magnitude below where the encoders start to disagree. The alternative — defining a shared
+number-to-string encoding — would mean owning a float formatter in two languages forever, for
+values no document will ever hold.
+
+Which numbers are bounded, and by what, is **not written down here** — it is derived from the
+contract file and asserted on both sides by
+`tests/Unit/Preparation/Schema/NumericBoundsSweepTest.php` and
+`resources/js/schema/numericBounds.test.ts`. Read those for the current answer.
+
+That is deliberate, and it is the second thing this section is about. A table here was a second
+source of the same truth, maintained by hand, and it drifted in exactly the way a hand-kept list
+drifts: it filed `anchor.resolved.rect` under "legacy, see #105" because the property *is* a
+`rect` by type, when `resolved` arrived in 1.1 and the property is this schema's own. The contract
+file already knows where every number lives and what bounds it, so nobody should have to remember.
+
+The sweep walks `field-schema-1.1.json` for every numeric member, fails if one has no probe, and
+for each bounded member checks that its `maximum` is accepted and `maximum + 1` refused — in both
+implementations, with the same verdict. The members deliberately left unbounded are swept too,
+with that expectation written down, so the set cannot quietly change. Those are `rect.*` and
+`anchor.offset.*`, both 1.0 properties: tightening them changes what this build accepts for
+documents that were already valid, so it is a version-policy decision rather than a repair
+(issue #105).
+
+**Three derived sweeps, and between them the whole property.** A contract validated by two
+independent implementations has to hold three things, and each has its own sweep, each derived from
+`field-schema-1.1.json` and each failing if a member has no probe:
+
+| Sweep | Property |
+|---|---|
+| `NumericBoundsSweepTest` / `numericBounds.test.ts` | a value is inside the bound the contract states — `maximum` accepted, `maximum + 1` refused |
+| the round-trip cases in the same files | a value the importer accepts survives being stored: accepted, canonicalised, still acceptable |
+| `RefusalAgreementSweepTest` / `refusalAgreement.test.ts` | a refusal means the same thing on both sides — same code, same message, for every stated constraint |
+
+The third exists because only *verdicts* had ever been compared between the projections. Codes are
+API surface, an integration branches on them, and a message is what a person reads when their
+document is refused; two implementations that agree a document is invalid and disagree about why
+are one contract in name only. Agreement across two runtimes is checked through a generated
+artifact, `tests/Fixtures/schema/numeric-refusals.json`: each side computes its own refusals and
+asserts they match the file, so neither can drift silently and the file is regenerated deliberately
+rather than edited.
+
+### Precision is refused from 1.1, and rounded in 1.0
+
+A **1.1** document refuses a coordinate finer than three decimals, with `coordinate_too_precise`,
+rather than rounding it. A **1.0** document rounds it, exactly as it always has. That difference is
+deliberate and it is a version difference, not an inconsistency.
+
+Rounding is a *transformation*, and two implementations that both transform can disagree about the
+result. They did: `1.6484999999999999` rounds to `1.648` in PHP and `1.649` in the TypeScript
+editor, because one rounds the parsed double and the other shifts a decimal string. The same
+submitted document therefore had **two canonical forms and two `field_schema_sha256`** — the digest
+every attestation binds. No amount of care in either rounder fixes that; only not rounding does.
+
+Refusing collapses three defects at once. There is no rounding to differ on. There is no `0.0004`
+that is positive as written and zero as stored, so nothing is accepted into a state that fails its
+own next import. And there is no `-0.0004` that rounds to `-0.0`, slips past a sign check, and then
+throws from `Rect`'s constructor as a 500 where a 422 belongs.
+
+**Producers still round; consumers never do.** The editor rounds what a drag produced, and anchor
+resolution rounds what it measured. That is safe precisely because it happens once, on one side,
+before the value is part of a document — a producer's rounding is its own business, and what it
+sends is then taken literally. Two producers rounding differently is harmless; two *readers*
+rounding differently is a document with two digests.
+
+**Why 1.0 keeps rounding.** Refusing is a *semantic tightening*: a document 1.0 accepted stops
+being accepted. This schema's own policy says anything but an additive change bumps the **major**
+version, and applying a new restriction to a published minor because it makes a tidier invariant
+would be exactly the kind of quiet contract violation the rest of this document exists to refuse.
+It would also take away documents that worked — a four-decimal coordinate is ordinary output from
+an integration that calculates positions, and one that posts to the API and never opens the editor
+had a single canonical form for it, deterministically.
+
+The cost is that a 1.0 document can still canonicalise two ways across the two implementations.
+That is real, it is [issue #105](https://github.com/bherila/e-sign/issues/105), and it is a 2.0
+question rather than something a minor version fixes underneath its consumers. The same gate covers
+the integer range: 1.1 refuses a whole number past 2^53, and 1.0 does not, for the same reason.
+
+1.0 does get one change, and it takes nothing away: rounding happens *before* the sign and
+dimension checks rather than after, so a width of `0.0004` — which rounded to zero and produced a
+document that failed its own next import — is refused instead of stored broken. A document that
+was accepted into an unreadable state was never a document that worked.
+
+**The rule is not expressible in the published contract.** `multipleOf: 0.001` is the obvious
+spelling and it is unusable: ajv rejects 5,425 of the 40,001 three-decimal values in ±20, because
+the check is a floating-point division. So the contract states the rule in prose and the importers
+enforce it, which is the same arrangement as every other rule JSON Schema cannot express here (see
+[below](#why-no-json-schema-library-on-the-server)).
+
+### The published file describes the schema, not one deployment
+
+One rule, two instances, and they are worth reading together rather than as separate exceptions.
+
+A document with a four-decimal coordinate **satisfies the published file and is refused by the
+service**, because the precision rule cannot be expressed in JSON Schema at all. And a document
+using `placement: "cross_check"` or `anchor.required: false` satisfies the file and is refused by a
+deployment that has no anchor resolution — this one, until `feat/anchor-resolution-at-send` lands.
+Those two members *promise* something: a cross-check promises the anchor will be located and
+compared with the rectangle you declared and that a disagreement will stop the send;
+`required: false` promises an absent anchor leaves its field off the document. Storing either while
+nothing performs it is a successful no-op of an unsupported option, which `AGENTS.md` forbids, and
+on a document people sign a sender told a check is in force is worse off than one told it is
+unavailable. Both members' descriptions in the contract file say so.
+
+The general rule: **the published file is the schema, not an inventory of what a given build will
+accept.** It says what a valid 1.1 document is. A deployment may decline a valid document, and when
+it does it says which option and why — `coordinate_too_precise`, `anchor_resolution_unavailable` —
+rather than reporting it as malformed. The difference matters to the person on the other end: a
+sender told "invalid" changes something that was never wrong.
+
+The gate is one class, `Schema\AnchorResolutionGate`, applied at the two places a caller's schema
+is written — template versions and envelope snapshots — and deliberately not inside the validator,
+so reading a stored document back never trips it. `AnchorResolutionGateTest` names the branch that
+deletes it.
+
+**Probe at the boundary, not at a large number.** The sweep originally tested `1e20` alone, which
+looks like the stronger case and is strictly weaker. `1e20` is a float; the bound it was meant to
+guard sits at 2^53, where PHP still has an *integer* — so the probe took a different code path
+from the one under test, and PHP accepted 2^53 for three properties while TypeScript refused it. A
+bound is distinguished from its absence by exactly two values: the largest accepted and the
+smallest refused.
+
+**The rule for the next unbounded property.** A canonicaliser that reaches its result by scaling
+has a range where it stops being total, and a schema whose numbers were all bounded never
+exercised it. When adding a number that is not a coordinate, give it a bound with a stated reason,
+and check the canonical form at the extremes of the *type* rather than the extremes of the
+documents you happen to have. The sweep is the checklist, and it enforces itself: a member added
+to the contract without a probe fails the coverage assertion before anyone has to notice.
 
 ## Rejection rules
 
@@ -199,6 +397,15 @@ breaking change.
 | `dimension_not_positive` | a zero or negative `width` or `height` |
 | `rect_out_of_page` | a rectangle extending past the edge of its page |
 | `unresolved_prefill_variable` | a prefill variable the sending context cannot resolve |
+| `coordinate_too_precise` | a coordinate with more than three decimals, which is refused rather than rounded |
+| `anchor_resolution_unavailable` | a valid 1.1 anchor option this deployment cannot honour yet — `placement: "cross_check"` or `anchor.required: false` — refused rather than stored as a promise nothing keeps |
+| `anchor_optional_on_required_field` | `anchor.required: false` on a field whose own `required` is true |
+| `anchor_cross_check_failed` | a `cross_check` receipt records a rectangle further than its stated tolerance from the declared one |
+
+Both are checked without a document, like every other rule here: the first is a relationship
+between two declared properties, and the second re-checks a receipt the document already carries.
+The failures that need the PDF itself — a text that is not there, a match that is ambiguous, an
+offset that walks off the page — belong to resolution and arrive with it.
 
 Every rule has a test on both sides, from the same fixture:
 `tests/Unit/Preparation/Schema/FieldSchemaValidatorTest.php` and

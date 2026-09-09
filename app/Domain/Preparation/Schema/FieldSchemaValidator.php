@@ -99,7 +99,36 @@ final class FieldSchemaValidator
     public const ANCHOR_REQUIRED = ['text', 'occurrence'];
 
     /** @var list<string> */
-    public const ANCHOR_OPTIONAL = ['origin', 'offset'];
+    public const ANCHOR_OPTIONAL = ['placement', 'origin', 'offset', 'required', 'tolerance', 'resolved'];
+
+    /** @var list<string> */
+    public const RESOLVED_ANCHOR_REQUIRED = ['document_sha256', 'page', 'occurrence_index', 'anchor_rect', 'rect'];
+
+    /**
+     * Anchor members that arrived after 1.0, and the minor that declares them.
+     *
+     * @var list<string>
+     */
+    public const ANCHOR_MEMBERS_SINCE_1_1 = ['placement', 'required', 'tolerance', 'resolved'];
+
+    public const ANCHOR_MEMBERS_MINOR = 1;
+
+    /**
+     * The first minor version that refuses an over-precise coordinate instead of rounding it.
+     *
+     * 1.0 rounds, as it always has. Refusing is a *semantic tightening* — a document 1.0 accepted
+     * stops being accepted — and this schema's own policy says anything but an additive change
+     * bumps the **major** version. Applying the new rule to 1.0 because it makes a tidier
+     * invariant would be the quiet contract violation this schema exists to refuse; the price of
+     * that discipline is that a 1.0 document can still canonicalise two ways across the two
+     * implementations, which is issue #105 and is a 2.0 question rather than a bug fix.
+     *
+     * 1.1 refuses, which is a rule of the version rather than of this build, so it is expressed
+     * here and not in a deployment gate.
+     */
+    public const PRECISION_REFUSED_SINCE_MINOR = 1;
+
+    private const MAJOR_MINOR_1_1 = '1.1';
 
     /**
      * @param  array<string, mixed>  $document  A decoded document (`json_decode(..., true)`).
@@ -118,7 +147,14 @@ final class FieldSchemaValidator
 
         $recipientIds = $this->checkRecipients($document, $errors);
         $this->checkSigningOrder($document, $recipientIds, $errors);
-        $this->checkFields($document, $recipientIds, $pageSizes, $variables, $errors);
+        $this->checkFields(
+            $document,
+            $recipientIds,
+            $pageSizes,
+            $variables,
+            $this->declaredVersion($document),
+            $errors,
+        );
 
         return new ValidationResult($errors);
     }
@@ -455,6 +491,7 @@ final class FieldSchemaValidator
         ?array $recipientIds,
         ?PageSizes $pageSizes,
         ?array $variables,
+        ?SchemaVersion $version,
         array &$errors,
     ): void {
         if (! array_key_exists('fields', $document)) {
@@ -532,11 +569,18 @@ final class FieldSchemaValidator
             }
 
             if (array_key_exists('page', $field)) {
-                $this->checkPage($path.'/page', $field['page'], $pageSizes, $errors);
+                $this->checkPage($path.'/page', $field['page'], $pageSizes, $this->refusesImprecision($version), $errors);
             }
 
             if (array_key_exists('rect', $field)) {
-                $this->checkRect($path.'/rect', $field['rect'], $field['page'] ?? null, $pageSizes, $errors);
+                $this->checkRect(
+                    $path.'/rect',
+                    $field['rect'],
+                    $field['page'] ?? null,
+                    $pageSizes,
+                    $this->refusesImprecision($version),
+                    $errors,
+                );
             }
 
             foreach (['required', 'read_only'] as $flag) {
@@ -558,7 +602,16 @@ final class FieldSchemaValidator
             }
 
             if (array_key_exists('anchor', $field)) {
-                $this->checkAnchor($path.'/anchor', $field['anchor'], $errors);
+                $this->checkAnchor(
+                    $path.'/anchor',
+                    $field['anchor'],
+                    array_key_exists('required', $field) && is_bool($field['required'])
+                        ? $field['required']
+                        : FieldDefinition::DEFAULT_REQUIRED,
+                    $field['rect'] ?? null,
+                    $version,
+                    $errors,
+                );
             }
         }
     }
@@ -590,12 +643,35 @@ final class FieldSchemaValidator
     /**
      * @param  list<ValidationError>  $errors
      */
-    private function checkPage(string $path, mixed $page, ?PageSizes $pageSizes, array &$errors): void
-    {
+    private function checkPage(
+        string $path,
+        mixed $page,
+        ?PageSizes $pageSizes,
+        bool $refuseImprecise,
+        array &$errors,
+    ): void {
+        if ($refuseImprecise && $this->isWholeNumberBeyondRange($page)) {
+            $errors[] = new ValidationError($path, ValidationCode::PageOutOfRange, 'page'.' is at most '.CanonicalNumber::MAX_INTEGER.', the largest integer this schema\'s two '
+                    .'implementations agree on: PHP counts to 2^63 and JavaScript stops being exact at 2^53, '
+                    .'so a larger value means one thing in the editor and another in the API.',
+            );
+
+            return;
+        }
+
         $number = $this->asInteger($page);
 
         if ($number === null) {
             $errors[] = new ValidationError($path, ValidationCode::InvalidType, 'page must be an integer.');
+
+            return;
+        }
+
+        if ($refuseImprecise && $this->isOutsideIntegerRange($number)) {
+            $errors[] = new ValidationError($path, ValidationCode::PageOutOfRange, 'page'.' is at most '.CanonicalNumber::MAX_INTEGER.', the largest integer this schema\'s two '
+                    .'implementations agree on: PHP counts to 2^63 and JavaScript stops being exact at 2^53, '
+                    .'so a larger value means one thing in the editor and another in the API.',
+            );
 
             return;
         }
@@ -622,8 +698,14 @@ final class FieldSchemaValidator
     /**
      * @param  list<ValidationError>  $errors
      */
-    private function checkRect(string $path, mixed $rect, mixed $page, ?PageSizes $pageSizes, array &$errors): void
-    {
+    private function checkRect(
+        string $path,
+        mixed $rect,
+        mixed $page,
+        ?PageSizes $pageSizes,
+        bool $refuseImprecise,
+        array &$errors,
+    ): void {
         if (! $this->isObject($rect)) {
             $errors[] = new ValidationError($path, ValidationCode::InvalidType, 'rect must be an object with x, y, width, and height.');
 
@@ -659,6 +741,31 @@ final class FieldSchemaValidator
                 continue;
             }
 
+            // From 1.1, a document carries canonical numbers and a finer value is refused rather
+            // than rounded: rounding would make the validator's answer depend on a
+            // *transformation*, and the two implementations do not agree about every one —
+            // `round(1.6484999999999999, 3)` is 1.648 in PHP and 1.649 in the editor. Refusing
+            // means every accepted value already *is* the stored value, so validation and
+            // canonicalisation cannot come apart.
+            //
+            // 1.0 rounds, because refusing would be a semantic tightening of a published version
+            // and this schema's policy reserves those for a major bump
+            // ({@see PRECISION_REFUSED_SINCE_MINOR}).
+            //
+            // The sign is checked on the value **as submitted** and the extent on the value **as
+            // it will be stored**, and the asymmetry is not fussiness. Rounding moves a value
+            // toward zero, which can only ever *hide* a sign problem — `-0.0004` rounds to `-0.0`,
+            // which is not less than zero, so a negative coordinate would pass validation and then
+            // throw from `Rect`'s constructor as a 500 where a 422 belongs. It can only ever
+            // *create* an extent problem, by collapsing a positive width to zero, which is the
+            // document that used to be stored and then failed its own next import. So each check
+            // is made on the value that can go wrong for it.
+            $canonical = $refuseImprecise ? $value : CanonicalNumber::round($value);
+
+            if ($refuseImprecise && ! $this->checkPrecision($path.'/'.$name, 'rect.'.$name, $value, $errors)) {
+                continue;
+            }
+
             if (($name === 'x' || $name === 'y') && $value < 0.0) {
                 $errors[] = new ValidationError(
                     $path.'/'.$name,
@@ -669,7 +776,7 @@ final class FieldSchemaValidator
                 continue;
             }
 
-            if (($name === 'width' || $name === 'height') && $value <= 0.0) {
+            if (($name === 'width' || $name === 'height') && $canonical <= 0.0) {
                 $errors[] = new ValidationError(
                     $path.'/'.$name,
                     ValidationCode::DimensionNotPositive,
@@ -679,7 +786,7 @@ final class FieldSchemaValidator
                 continue;
             }
 
-            $values[$name] = CanonicalNumber::round($value);
+            $values[$name] = $canonical;
         }
 
         if (count($values) !== count(self::RECT_REQUIRED)) {
@@ -752,10 +859,18 @@ final class FieldSchemaValidator
     }
 
     /**
+     * @param  bool  $fieldRequired  The field's own `required` flag, which bounds `anchor.required`.
+     * @param  mixed  $fieldRect  The field's own rectangle, which a `replace` receipt must reproduce.
      * @param  list<ValidationError>  $errors
      */
-    private function checkAnchor(string $path, mixed $anchor, array &$errors): void
-    {
+    private function checkAnchor(
+        string $path,
+        mixed $anchor,
+        bool $fieldRequired,
+        mixed $fieldRect,
+        ?SchemaVersion $version,
+        array &$errors,
+    ): void {
         if (! $this->isObject($anchor)) {
             $errors[] = new ValidationError($path, ValidationCode::InvalidType, 'anchor must be an object with the text to locate.');
 
@@ -763,13 +878,32 @@ final class FieldSchemaValidator
         }
 
         $this->checkObjectShape($path, $anchor, self::ANCHOR_REQUIRED, self::ANCHOR_OPTIONAL, $errors);
+        $this->checkAnchorMembersAreDeclared($path, $anchor, $version, $errors);
 
         if (array_key_exists('text', $anchor)) {
             $this->checkNonEmptyString($path.'/text', 'anchor.text', $anchor['text'], self::ANCHOR_TEXT_MAX_LENGTH, $errors);
         }
 
         if (array_key_exists('occurrence', $anchor)) {
-            $this->checkAnchorOccurrence($path.'/occurrence', $anchor['occurrence'], $errors);
+            $this->checkAnchorOccurrence($path.'/occurrence', $anchor['occurrence'], $this->refusesImprecision($version), $errors);
+        }
+
+        $mode = $this->checkAnchorPlacement($path.'/placement', $anchor, $errors)
+            ?? AnchorPlacement::DEFAULT_PLACEMENT;
+        $this->checkAnchorRequired($path, $anchor, $fieldRequired, $mode, $errors);
+        $this->checkAnchorTolerance($path.'/tolerance', $anchor, $mode, $errors);
+
+        if (array_key_exists('resolved', $anchor)) {
+            $declaredTolerance = $anchor['tolerance'] ?? null;
+
+            $this->checkResolvedAnchor(
+                $path.'/resolved',
+                $anchor['resolved'],
+                $mode,
+                is_int($declaredTolerance) || is_float($declaredTolerance) ? (float) $declaredTolerance : null,
+                $fieldRect,
+                $errors,
+            );
         }
 
         if (array_key_exists('origin', $anchor)) {
@@ -822,8 +956,580 @@ final class FieldSchemaValidator
                     ValidationCode::CoordinateNotFinite,
                     'anchor.offset.'.$name.' must be a finite number; got '.var_export($value, true).'.',
                 );
+
+                continue;
+            }
+
+            // `offset` is a 1.0 member, so it follows the version's rule like `rect` does.
+            if ($this->refusesImprecision($version)) {
+                $this->checkPrecision($path.'/offset/'.$name, 'anchor.offset.'.$name, (float) $value, $errors);
             }
         }
+    }
+
+    /**
+     * The version a document declares, or null when it does not declare a usable one.
+     *
+     * Only used to decide which members a document is allowed to contain; every other check is
+     * version-independent, and a document with no readable version has already been reported.
+     *
+     * @param  array<string, mixed>  $document
+     */
+    private function declaredVersion(array $document): ?SchemaVersion
+    {
+        $declared = $document['schema_version'] ?? null;
+
+        return is_string($declared) ? SchemaVersion::parse($declared) : null;
+    }
+
+    /**
+     * An anchor may only use members the version it declares actually declares.
+     *
+     * Without this the version string is a label rather than a contract: a generator could stamp
+     * `1.0` and emit a `resolved` receipt, and every consumer holding `field-schema-1.0.json` —
+     * which forbids undeclared properties — would reject a document this service called valid.
+     * The error is `unknown_property` because that is exactly what such a consumer would say.
+     *
+     * @param  array<string, mixed>  $anchor
+     * @param  list<ValidationError>  $errors
+     */
+    private function checkAnchorMembersAreDeclared(
+        string $path,
+        array $anchor,
+        ?SchemaVersion $version,
+        array &$errors,
+    ): void {
+        if (! $version instanceof SchemaVersion || $version->minor >= self::ANCHOR_MEMBERS_MINOR) {
+            return;
+        }
+
+        foreach (self::ANCHOR_MEMBERS_SINCE_1_1 as $member) {
+            if (! array_key_exists($member, $anchor)) {
+                continue;
+            }
+
+            $errors[] = new ValidationError(
+                $path.'/'.$member,
+                ValidationCode::UnknownProperty,
+                'anchor.'.$member.' arrived in schema '.self::MAJOR_MINOR_1_1.', and this document declares '
+                    .$version->toString().'. Declare '.self::MAJOR_MINOR_1_1.' to use it: a document that says '
+                    .$version->toString().' is read against a contract that does not have it, and refusing an '
+                    .'undeclared property is what that contract does.',
+            );
+        }
+    }
+
+    /**
+     * Which of the field's two statements about position wins.
+     *
+     * Omitted means `replace`, and that is not the kind of default `anchor.occurrence` refuses.
+     * There, two readings are equally plausible and picking one silently moves a box. Here there
+     * is one reading with any history behind it: before `cross_check` existed, an anchor wrote
+     * its resolved rectangle into the field and that was all an anchor could do. So the default
+     * is what an already-written document meant, which is also why it must stay the default —
+     * see {@see AnchorPlacement::DEFAULT_PLACEMENT} for the digest that depends on it.
+     *
+     * @param  array<string, mixed>  $anchor
+     * @param  list<ValidationError>  $errors
+     */
+    private function checkAnchorPlacement(string $path, array $anchor, array &$errors): ?AnchorPlacementMode
+    {
+        if (! array_key_exists('placement', $anchor)) {
+            return null;
+        }
+
+        $placement = $anchor['placement'];
+
+        if (! is_string($placement)) {
+            $errors[] = new ValidationError($path, ValidationCode::InvalidType, 'anchor.placement must be a string.');
+
+            return null;
+        }
+
+        $mode = AnchorPlacementMode::tryFrom($placement);
+
+        if (! $mode instanceof AnchorPlacementMode) {
+            $errors[] = new ValidationError(
+                $path,
+                ValidationCode::InvalidFormat,
+                'anchor.placement must be one of '.implode(', ', AnchorPlacementMode::values()).'; got "'.$placement
+                    .'". "'.AnchorPlacementMode::Replace->value.'" lets the anchor decide where the field goes and '
+                    .'keeps only the rectangle\'s size; "'.AnchorPlacementMode::CrossCheck->value.'" keeps the '
+                    .'declared rectangle and requires the anchor to agree with it. Omitting the property is '
+                    .'"'.AnchorPlacementMode::Replace->value.'", which is what an anchor has always meant here; '
+                    .'"'.AnchorPlacementMode::CrossCheck->value.'" is the narrower mode and has to be stated.',
+            );
+
+            return null;
+        }
+
+        return $mode;
+    }
+
+    /**
+     * The narrow compatibility option for an anchor that is allowed not to be there.
+     *
+     * `anchor.required: false` says "this text may legitimately be absent from this document, and
+     * if it is, do not place the field at all". That can only be true of a field nobody has to
+     * fill in, so it is refused on a required field rather than quietly making a required field
+     * unfillable. Ambiguity is never acceptable either way: an absent anchor is a decision the
+     * document can express, and two matches where one was asked for is always an error.
+     *
+     * @param  array<string, mixed>  $anchor
+     * @param  list<ValidationError>  $errors
+     */
+    private function checkAnchorRequired(
+        string $path,
+        array $anchor,
+        bool $fieldRequired,
+        AnchorPlacementMode $mode,
+        array &$errors,
+    ): void {
+        if (! array_key_exists('required', $anchor)) {
+            return;
+        }
+
+        $required = $anchor['required'];
+
+        if (! is_bool($required)) {
+            $errors[] = new ValidationError($path.'/required', ValidationCode::InvalidType, 'anchor.required must be a boolean.');
+
+            return;
+        }
+
+        if ($required) {
+            return;
+        }
+
+        if ($fieldRequired) {
+            $errors[] = new ValidationError(
+                $path.'/required',
+                ValidationCode::AnchorOptionalOnRequiredField,
+                'anchor.required is false on a field whose own "required" is true. An absent anchor omits the field, '
+                    .'and a required field that is never placed can never be completed. Make the field optional, or '
+                    .'require the anchor.',
+            );
+
+            return;
+        }
+
+        // In cross-check mode the rectangle is authoritative and the anchor only confirms it, so
+        // "the text may be absent" has nothing to say: there is no placement waiting on the
+        // anchor to omit. Honouring it would delete a field the document positioned itself.
+        if ($mode === AnchorPlacementMode::CrossCheck) {
+            $errors[] = new ValidationError(
+                $path.'/required',
+                ValidationCode::InvalidFormat,
+                'anchor.required false means an absent anchor omits the field, which contradicts anchor.placement "'
+                    .AnchorPlacementMode::CrossCheck->value.'": there the declared rectangle is authoritative and the '
+                    .'anchor only checks it, so an absent anchor has nothing to omit. Use "'
+                    .AnchorPlacementMode::Replace->value.'", or require the anchor.',
+            );
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $anchor
+     * @param  list<ValidationError>  $errors
+     */
+    private function checkAnchorTolerance(string $path, array $anchor, AnchorPlacementMode $mode, array &$errors): void
+    {
+        if (! array_key_exists('tolerance', $anchor)) {
+            return;
+        }
+
+        $tolerance = $anchor['tolerance'];
+
+        if (! is_int($tolerance) && ! is_float($tolerance)) {
+            $errors[] = new ValidationError($path, ValidationCode::InvalidType, 'anchor.tolerance must be a number of points.');
+
+            return;
+        }
+
+        if (! is_finite((float) $tolerance)) {
+            $errors[] = new ValidationError(
+                $path,
+                ValidationCode::CoordinateNotFinite,
+                'anchor.tolerance must be a finite number; got '.var_export($tolerance, true).'.',
+            );
+
+            return;
+        }
+
+        if (! $this->checkPrecision($path, 'anchor.tolerance', (float) $tolerance, $errors)) {
+            return;
+        }
+
+        if ((float) $tolerance < 0.0) {
+            $errors[] = new ValidationError(
+                $path,
+                ValidationCode::InvalidFormat,
+                'anchor.tolerance is a distance in points and must not be negative; got '.$this->describeNumber((float) $tolerance).'.',
+            );
+
+            return;
+        }
+
+        // Bounded so the canonical form stays total, not because a larger number is unreasonable:
+        // above roughly 1e17 PHP and JavaScript spell the same value differently
+        // (`1.0e+20` against `100000000000000000000`), so the two projections would canonicalise
+        // one document to two different digests. See AnchorPlacement::MAX_TOLERANCE.
+        if ((float) $tolerance > AnchorPlacement::MAX_TOLERANCE) {
+            $errors[] = new ValidationError(
+                $path,
+                ValidationCode::InvalidFormat,
+                'anchor.tolerance is a distance on one page and must be at most '
+                    .$this->describeNumber(AnchorPlacement::MAX_TOLERANCE).' pt, PDF\'s largest page side; got '
+                    .$this->describeNumber((float) $tolerance).'. The bound keeps the canonical form total: past '
+                    .'about 1e17 this schema\'s two implementations spell the same number differently, and a '
+                    .'document with two spellings has two digests.',
+            );
+
+            return;
+        }
+
+        if ($mode === AnchorPlacementMode::Replace) {
+            $errors[] = new ValidationError(
+                $path,
+                ValidationCode::InvalidFormat,
+                'anchor.tolerance only means something with anchor.placement "'.AnchorPlacementMode::CrossCheck->value
+                    .'". In "'.AnchorPlacementMode::Replace->value.'" mode the anchor decides the position outright, '
+                    .'so there is no declared rectangle to be within a tolerance of.',
+            );
+        }
+    }
+
+    /**
+     * The resolution receipt, which resolution writes and a round trip must be able to read back.
+     *
+     * It is validated as strictly as anything a caller sends. An envelope re-reads its own stored
+     * schema through this validator on every request, so a receipt this importer would refuse is a
+     * receipt that must never be written.
+     *
+     * @param  list<ValidationError>  $errors
+     */
+    private function checkResolvedAnchor(
+        string $path,
+        mixed $resolved,
+        AnchorPlacementMode $mode,
+        ?float $anchorTolerance,
+        mixed $fieldRect,
+        array &$errors,
+    ): void {
+        if (! $this->isObject($resolved)) {
+            $errors[] = new ValidationError(
+                $path,
+                ValidationCode::InvalidType,
+                'anchor.resolved must be an object recording what resolution found.',
+            );
+
+            return;
+        }
+
+        $this->checkObjectShape($path, $resolved, self::RESOLVED_ANCHOR_REQUIRED, [], $errors);
+
+        if (array_key_exists('document_sha256', $resolved)) {
+            $digest = $resolved['document_sha256'];
+
+            if (! is_string($digest) || preg_match('/^[0-9a-f]{64}$/', $digest) !== 1) {
+                $errors[] = new ValidationError(
+                    $path.'/document_sha256',
+                    ValidationCode::InvalidFormat,
+                    'anchor.resolved.document_sha256 must be 64 lowercase hexadecimal characters: the digest of the '
+                        .'exact bytes the text was located in.',
+                );
+            }
+        }
+
+        foreach (['page', 'occurrence_index'] as $name) {
+            if (! array_key_exists($name, $resolved)) {
+                continue;
+            }
+
+            if ($this->isWholeNumberBeyondRange($resolved[$name])) {
+                $errors[] = new ValidationError(
+                    $path.'/'.$name,
+                    $name === 'page' ? ValidationCode::PageOutOfRange : ValidationCode::InvalidFormat,
+                    'anchor.resolved.'.$name.' is at most '.CanonicalNumber::MAX_INTEGER.', the largest integer this schema\'s two '
+                    .'implementations agree on: PHP counts to 2^63 and JavaScript stops being exact at 2^53, '
+                    .'so a larger value means one thing in the editor and another in the API.',
+                );
+
+                continue;
+            }
+
+            $value = $this->asInteger($resolved[$name]);
+
+            if ($value === null) {
+                $errors[] = new ValidationError(
+                    $path.'/'.$name,
+                    ValidationCode::InvalidType,
+                    'anchor.resolved.'.$name.' must be an integer.',
+                );
+
+                continue;
+            }
+
+            if ($value < 1) {
+                $errors[] = new ValidationError(
+                    $path.'/'.$name,
+                    $name === 'page' ? ValidationCode::PageOutOfRange : ValidationCode::InvalidFormat,
+                    'anchor.resolved.'.$name.' is 1-based; got '.$value.'.',
+                );
+
+                continue;
+            }
+        }
+
+        // `anchor_rect` records where the text was, not where anything goes. A run's nominal box
+        // is its advance by the font's ascent plus descent, so a heading near the top of the page
+        // legitimately starts above the CropBox edge, and a run touching the right margin
+        // legitimately ends on it. Checking it as a placement — non-negative, inside the page —
+        // would refuse ordinary documents, and would refuse receipts this service itself writes.
+        if (array_key_exists('anchor_rect', $resolved)) {
+            $this->checkMeasuredRect($path.'/anchor_rect', $resolved['anchor_rect'], $errors);
+        }
+
+        if (! array_key_exists('rect', $resolved)) {
+            return;
+        }
+
+        // The resolved rectangle *is* a placement, so it is checked like one. The page-fit check
+        // is deliberately not run here: it belongs to the field's own rect, which in `replace`
+        // mode is required to be this same rectangle.
+        $this->checkRect($path.'/rect', $resolved['rect'], null, null, true, $errors);
+
+        // And bounded, which the field's own rect is not. `$defs/resolved_rect` exists to carry
+        // that bound: it arrived in 1.1, so it can have one, while `rect` is 1.0's and tightening
+        // it would change what this build accepts for documents already valid (#105).
+        $this->checkCoordinateMagnitude($path.'/rect', $resolved['rect'], $errors);
+
+        if (! $this->isObject($fieldRect) || ! $this->isObject($resolved['rect'])) {
+            return;
+        }
+
+        if ($mode === AnchorPlacementMode::Replace) {
+            $this->checkReplaceReceiptMatchesRect($path, $resolved['rect'], $fieldRect, $errors);
+
+            return;
+        }
+
+        $this->checkCrossCheckReceiptAgrees($path, $anchorTolerance, $resolved['rect'], $fieldRect, $errors);
+    }
+
+    /**
+     * In `replace` mode the receipt's rectangle is where the field went, so the two must agree
+     * exactly. A document whose field sits somewhere its own receipt does not describe is a
+     * document nobody can check.
+     *
+     * @param  array<string, mixed>  $recorded
+     * @param  array<string, mixed>  $declared
+     * @param  list<ValidationError>  $errors
+     */
+    private function checkReplaceReceiptMatchesRect(
+        string $path,
+        array $recorded,
+        array $declared,
+        array &$errors,
+    ): void {
+        // Canonical values, because canonical values are what will be stored: comparing what the
+        // caller wrote would accept a document that stops importing the moment it is written down.
+        // And exact, because in `replace` mode the receipt's rectangle *is* the field's — there is
+        // no disagreement a tolerance could be measuring, in any of the four numbers.
+        foreach (self::RECT_REQUIRED as $name) {
+            $pair = $this->canonicalPair($declared[$name] ?? null, $recorded[$name] ?? null);
+
+            if ($pair === null) {
+                return;
+            }
+
+            if ($pair[0] !== $pair[1]) {
+                $errors[] = new ValidationError(
+                    $path.'/rect/'.$name,
+                    ValidationCode::InvalidFormat,
+                    'anchor.resolved.rect must be the field\'s own rect when anchor.placement is "'
+                        .AnchorPlacementMode::Replace->value.'": the receipt records where the field was placed, and '
+                        .'this one says '.$this->describeNumber($pair[1]).' where the field says '
+                        .$this->describeNumber($pair[0]).'.',
+                );
+
+                return;
+            }
+        }
+    }
+
+    /**
+     * A `cross_check` receipt has to prove the check it claims to be.
+     *
+     * This is the whole feature. A stored receipt is read back on every request — the envelope
+     * re-imports its own schema — and it is the only account of the check anyone reading the
+     * document afterwards has. If nothing here compared the resolved corner against the declared
+     * one, a receipt could record any disagreement at all and still be read back as valid. That
+     * is worse than not having the mode: the document would carry a record saying it had been
+     * checked when nothing ever checked it.
+     *
+     * The comparison uses the anchor's *own* `tolerance`, which is why one is required alongside
+     * a cross-check receipt: the deployment default can change, and a receipt whose standard has
+     * to be looked up elsewhere proves nothing about what was actually applied.
+     *
+     * @param  array<string, mixed>  $recorded
+     * @param  array<string, mixed>  $declared
+     * @param  list<ValidationError>  $errors
+     */
+    private function checkCrossCheckReceiptAgrees(
+        string $path,
+        ?float $tolerance,
+        array $recorded,
+        array $declared,
+        array &$errors,
+    ): void {
+        if ($tolerance === null) {
+            $errors[] = new ValidationError(
+                $path,
+                ValidationCode::MissingProperty,
+                'A "'.AnchorPlacementMode::CrossCheck->value.'" anchor carrying anchor.resolved must also state '
+                    .'anchor.tolerance: the receipt is the record that the check passed, and without the distance '
+                    .'it passed by there is nothing to check it against.',
+            );
+
+            return;
+        }
+
+        // Rounded first, and the tolerance with them. Import canonicalises every coordinate to
+        // three decimals independently, so comparing the raw values would let a document pass on
+        // numbers it will not have once it is stored: a declared 330.0004 and a resolved
+        // 331.00179 are 1.00139 apart and inside a stated 1.0004, and they canonicalise to 330,
+        // 331.002 and 1 — 1.002 apart and outside. The document would be accepted once and
+        // refused by its own next import, which is the one thing a coordinate-stable round trip
+        // must not do.
+        $slack = CanonicalNumber::round($tolerance);
+
+        foreach (['x', 'y'] as $name) {
+            $pair = $this->canonicalPair($declared[$name] ?? null, $recorded[$name] ?? null);
+
+            if ($pair === null) {
+                return;
+            }
+
+            // The stated bound, enforced exactly. Both sides and the tolerance are already
+            // canonical, so the page-edge epsilon has nothing left to absorb here and would only
+            // widen what the document says: a receipt 0.001 pt outside a stated `tolerance: 0`
+            // would pass and then be stored, unchanged, saying it had been checked to zero. The
+            // distance is rounded rather than compared raw because subtracting two three-decimal
+            // values can land a few ulps above the bound they are exactly on.
+            $distance = CanonicalNumber::round(abs($pair[0] - $pair[1]));
+
+            if ($distance > $slack) {
+                $errors[] = new ValidationError(
+                    $path.'/rect/'.$name,
+                    ValidationCode::AnchorCrossCheckFailed,
+                    'anchor.resolved records a '.$name.' of '.$this->describeNumber($pair[1]).' against a declared '
+                        .$name.' of '.$this->describeNumber($pair[0]).', which is '.$this->describeNumber($distance)
+                        .' pt apart and outside the '.$this->describeNumber($slack).' pt tolerance the anchor '
+                        .'states. A receipt that records a failed check is not a record that the check passed.',
+                );
+
+                return;
+            }
+        }
+    }
+
+    /**
+     * The same pair as {@see numericPair()}, rounded the way import will round it.
+     *
+     * Every comparison a stored document has to survive is made on canonical values, because
+     * canonical values are what will be stored. Comparing what the caller wrote instead accepts
+     * documents that stop importing the moment they are written down.
+     *
+     * @return array{float, float}|null
+     */
+    private function canonicalPair(mixed $declared, mixed $recorded): ?array
+    {
+        $pair = $this->numericPair($declared, $recorded);
+
+        if ($pair === null || ! is_finite($pair[0]) || ! is_finite($pair[1])) {
+            return null;
+        }
+
+        return [CanonicalNumber::round($pair[0]), CanonicalNumber::round($pair[1])];
+    }
+
+    /**
+     * Two numbers to compare, or null when either is not a number — in which case the type error
+     * has already been reported and there is nothing useful to say about the difference.
+     *
+     * @return array{float, float}|null
+     */
+    private function numericPair(mixed $declared, mixed $recorded): ?array
+    {
+        if ((! is_int($declared) && ! is_float($declared)) || (! is_int($recorded) && ! is_float($recorded))) {
+            return null;
+        }
+
+        return [(float) $declared, (float) $recorded];
+    }
+
+    /**
+     * A rectangle that records where something was, rather than where something goes.
+     *
+     * Finite, with non-negative extents, and nothing else: see {@see MeasuredRect} for why a
+     * negative coordinate and an overhanging edge are both ordinary here.
+     *
+     * @param  list<ValidationError>  $errors
+     */
+    private function checkMeasuredRect(string $path, mixed $rect, array &$errors): void
+    {
+        if (! $this->isObject($rect)) {
+            $errors[] = new ValidationError($path, ValidationCode::InvalidType, 'rect must be an object with x, y, width, and height.');
+
+            return;
+        }
+
+        $this->checkObjectShape($path, $rect, self::RECT_REQUIRED, [], $errors);
+
+        foreach (self::RECT_REQUIRED as $name) {
+            if (! array_key_exists($name, $rect)) {
+                continue;
+            }
+
+            $value = $rect[$name];
+
+            if (! is_int($value) && ! is_float($value)) {
+                $errors[] = new ValidationError($path.'/'.$name, ValidationCode::InvalidType, 'rect.'.$name.' must be a number.');
+
+                continue;
+            }
+
+            if (! is_finite((float) $value)) {
+                $errors[] = new ValidationError(
+                    $path.'/'.$name,
+                    ValidationCode::CoordinateNotFinite,
+                    'rect.'.$name.' must be a finite number; got '.var_export($value, true).'.',
+                );
+
+                continue;
+            }
+
+            $value = (float) $value;
+
+            // Refused rather than rounded, for the reason given in checkRect().
+            if (! $this->checkPrecision($path.'/'.$name, 'rect.'.$name, $value, $errors)) {
+                continue;
+            }
+
+            if (($name === 'width' || $name === 'height') && $value < 0.0) {
+                $errors[] = new ValidationError(
+                    $path.'/'.$name,
+                    ValidationCode::DimensionNotPositive,
+                    'rect.'.$name.' must not be negative; got '.$this->describeNumber((float) $value).'.',
+                );
+
+                continue;
+            }
+
+        }
+
+        $this->checkCoordinateMagnitude($path, $rect, $errors);
     }
 
     /**
@@ -836,7 +1542,7 @@ final class FieldSchemaValidator
      *
      * @param  list<ValidationError>  $errors
      */
-    private function checkAnchorOccurrence(string $path, mixed $occurrence, array &$errors): void
+    private function checkAnchorOccurrence(string $path, mixed $occurrence, bool $refuseImprecise, array &$errors): void
     {
         if (is_string($occurrence)) {
             if ($occurrence === AnchorPlacement::OCCURRENCE_SOLE) {
@@ -848,6 +1554,15 @@ final class FieldSchemaValidator
                 ValidationCode::InvalidFormat,
                 'anchor.occurrence must be "'.AnchorPlacement::OCCURRENCE_SOLE.'" or a 1-based index; got "'.$occurrence
                     .'". "all" places one box per match, which a single field cannot represent: use one field per box.',
+            );
+
+            return;
+        }
+
+        if ($refuseImprecise && $this->isWholeNumberBeyondRange($occurrence)) {
+            $errors[] = new ValidationError($path, ValidationCode::InvalidFormat, 'anchor.occurrence'.' is at most '.CanonicalNumber::MAX_INTEGER.', the largest integer this schema\'s two '
+                    .'implementations agree on: PHP counts to 2^63 and JavaScript stops being exact at 2^53, '
+                    .'so a larger value means one thing in the editor and another in the API.',
             );
 
             return;
@@ -1002,6 +1717,110 @@ final class FieldSchemaValidator
         }
 
         return null;
+    }
+
+    /**
+     * True when an integer is outside the range both implementations agree on.
+     *
+     * Kept separate from {@see asInteger()} so the *bound* is reported as a bound rather than as
+     * "not an integer": a caller sending 1e20 has sent an integer, and the reason to refuse it is
+     * that this schema does not admit one that large. It is also what makes the two projections
+     * agree — PHP's own limit is 2^63 and JavaScript's is 2^53, so leaving each to its own would
+     * accept in the editor what the API refuses.
+     */
+    private function isOutsideIntegerRange(int|float $value): bool
+    {
+        return abs($value) > CanonicalNumber::MAX_INTEGER;
+    }
+
+    /**
+     * A whole number past the range both implementations agree on, however JSON spelled it.
+     *
+     * **Both representations, deliberately.** `9007199254740992` decodes as a PHP `int` and `1e20`
+     * as a `float`, and checking floats only left a seam exactly where the bound lives: PHP
+     * accepted 2^53 for an occurrence index while TypeScript, which has no such seam, refused it.
+     * A probe far past the bound never finds that — `1e20` is a float and takes the other path —
+     * which is why the sweep now probes at `maximum + 1` (`NumericBoundsSweepTest`).
+     *
+     * It also reports the bound *as* a bound rather than as "not an integer": a caller sending
+     * 1e20 has sent a whole number, and the reason to refuse it is that this schema does not admit
+     * one that large. Same verdict, same code, same message, in both projections.
+     */
+    /**
+     * Every component of a rectangle within the magnitude both implementations agree on.
+     *
+     * Shared by the measured rectangle and the resolved one, because the reason is shared and has
+     * nothing to do with either being a measurement or a placement: past roughly 1e17 PHP and
+     * JavaScript spell the same number differently, so a document holding one canonicalises to two
+     * digests. Nothing on a page is a page-side away from it, so the bound refuses nothing real.
+     *
+     * @param  array<string, mixed>  $rect
+     * @param  list<ValidationError>  $errors
+     */
+    private function checkCoordinateMagnitude(string $path, mixed $rect, array &$errors): void
+    {
+        if (! $this->isObject($rect)) {
+            return;
+        }
+
+        foreach (self::RECT_REQUIRED as $name) {
+            $value = $rect[$name] ?? null;
+
+            if ((! is_int($value) && ! is_float($value)) || ! is_finite((float) $value)) {
+                continue;
+            }
+
+            if (abs((float) $value) > MeasuredRect::MAX_MAGNITUDE) {
+                $errors[] = new ValidationError(
+                    $path.'/'.$name,
+                    ValidationCode::InvalidFormat,
+                    'rect.'.$name.' must be within '.$this->describeNumber(MeasuredRect::MAX_MAGNITUDE)
+                        .' pt of the origin, PDF\'s largest page side; got '.$this->describeNumber((float) $value)
+                        .'. The bound keeps the canonical form total: past about 1e17 this schema\'s two '
+                        .'implementations spell the same number differently, and a document with two spellings '
+                        .'has two digests.',
+                );
+            }
+        }
+    }
+
+    /**
+     * A coordinate must arrive already canonical. Returns false when it did not.
+     *
+     * @param  list<ValidationError>  $errors
+     */
+    /** Whether this document's version refuses an over-precise coordinate rather than rounding it. */
+    private function refusesImprecision(?SchemaVersion $version): bool
+    {
+        return $version instanceof SchemaVersion && $version->minor >= self::PRECISION_REFUSED_SINCE_MINOR;
+    }
+
+    private function checkPrecision(string $path, string $label, float $value, array &$errors): bool
+    {
+        if (! is_finite($value) || CanonicalNumber::isCanonical($value)) {
+            return true;
+        }
+
+        $errors[] = new ValidationError(
+            $path,
+            ValidationCode::CoordinateTooPrecise,
+            $label.' has more than '.CanonicalNumber::DECIMALS.' decimal places. Documents carry canonical '
+                .'numbers, and this one is refused rather than rounded: rounding is a transformation, and two '
+                .'implementations that both transform can disagree about the result — which would be a '
+                .'disagreement about the document\'s digest. Round it yourself and send the result.',
+        );
+
+        return false;
+    }
+
+    private function isWholeNumberBeyondRange(mixed $value): bool
+    {
+        if (is_int($value)) {
+            return abs($value) > CanonicalNumber::MAX_INTEGER;
+        }
+
+        return is_float($value) && is_finite($value) && $value === floor($value)
+            && abs($value) > CanonicalNumber::MAX_INTEGER;
     }
 
     private function describeNumber(float $value): string

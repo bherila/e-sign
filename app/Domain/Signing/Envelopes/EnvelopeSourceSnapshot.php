@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Signing\Envelopes;
 
 use App\Domain\Evidence\Sealing\AssuranceLevel;
+use App\Domain\Preparation\Schema\AnchorResolutionGate;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\InvalidFieldSchemaException;
 use App\Domain\Signing\Exceptions\InvalidEnvelopeSnapshot;
@@ -137,8 +138,20 @@ final readonly class EnvelopeSourceSnapshot
             throw new InvalidEnvelopeSnapshot(
                 'The snapshot\'s field schema is not a valid native field schema document: '.$e->getMessage(),
                 'invalid_field_schema',
+                $e->errors(),
             );
         }
+
+        // Validity first, then availability — the order the template path uses, and the order that
+        // tells the truth. An invalid document is invalid whatever this deployment can do, and
+        // answering "wait for anchor resolution" about a document that will still be malformed
+        // afterwards sends a caller to wait for something that will not help them.
+        //
+        // Outside the catch on purpose, and deleted with AnchorResolutionGate when send-time
+        // resolution lands: the gate refuses an *option*, and its pointer and code are what a
+        // caller branches on. Flattening that into `invalid_field_schema` would leave a sender
+        // reading "your snapshot is invalid" with nothing to act on.
+        AnchorResolutionGate::assertAvailable($fieldSchema);
 
         return new self(
             title: $title,

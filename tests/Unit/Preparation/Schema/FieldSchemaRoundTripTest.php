@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace Tests\Unit\Preparation\Schema;
 
 use App\Domain\Preparation\Schema\AnchorPlacement;
+use App\Domain\Preparation\Schema\AnchorPlacementMode;
 use App\Domain\Preparation\Schema\CanonicalNumber;
 use App\Domain\Preparation\Schema\CoordinateSpaceDeclaration;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\FieldSchemaValidator;
 use App\Domain\Preparation\Schema\FieldType;
 use App\Domain\Preparation\Schema\PageSizes;
+use App\Domain\Preparation\Schema\SchemaVersion;
 use App\Domain\Preparation\Text\AnchorOrigin;
 use PHPUnit\Framework\TestCase;
 
@@ -153,10 +155,19 @@ class FieldSchemaRoundTripTest extends TestCase
             }
 
             if (mt_rand(0, 2) === 0) {
+                $crossCheck = mt_rand(0, 2) === 0;
+
                 $anchor = [
                     'text' => 'Anchor '.$i.':',
                     'occurrence' => mt_rand(0, 3) === 0 ? AnchorPlacement::OCCURRENCE_SOLE : mt_rand(1, 4),
                 ];
+
+                // `replace` is the default and is canonicalised away, so it is deliberately
+                // *not* written here: an anchor that omits it and one that spells it out must
+                // produce the same bytes, which is what keeps a pre-existing document's digest.
+                if ($crossCheck) {
+                    $anchor['placement'] = AnchorPlacementMode::CrossCheck->value;
+                }
 
                 if (mt_rand(0, 1) === 1) {
                     $anchor['origin'] = AnchorOrigin::cases()[mt_rand(0, count(AnchorOrigin::cases()) - 1)]->value;
@@ -169,6 +180,41 @@ class FieldSchemaRoundTripTest extends TestCase
                     ];
                 }
 
+                // Only ever false on a field that is itself optional, and never together with
+                // a cross-check, which has no placement waiting on the anchor to omit. True is
+                // the default and is canonicalised away, so it is left out rather than written.
+                if (! $field['required'] && ! $crossCheck && mt_rand(0, 1) === 1) {
+                    $anchor['required'] = false;
+                }
+
+                // A cross-check that carries a receipt has to state the tolerance the check
+                // passed by, so the receipt is a record of something rather than an assertion.
+                if ($crossCheck) {
+                    $anchor['tolerance'] = self::generateNumber(0.0, 8.0);
+                }
+
+                // A resolution receipt has to survive the round trip too: an envelope re-reads
+                // its own stored schema through the importer on every request, so a receipt that
+                // did not round-trip would be a document the service could write and not read.
+                if (mt_rand(0, 1) === 1) {
+                    $anchor['resolved'] = [
+                        'document_sha256' => str_pad(dechex($index * 31 + $i), 64, '0', STR_PAD_LEFT),
+                        'page' => $field['page'],
+                        // The receipt answers the anchor's own question: "sole" means the text
+                        // occurs once, so the match taken is the first.
+                        'occurrence_index' => $anchor['occurrence'] === AnchorPlacement::OCCURRENCE_SOLE
+                            ? 1
+                            : $anchor['occurrence'],
+                        // A measurement, so it may start above the top of the page the way a
+                        // heading's ascender does; the field's own rect never can.
+                        'anchor_rect' => self::generateMeasuredRect(),
+                        // The receipt records where the field went, which in `replace` mode is
+                        // the field's own rectangle and in `cross_check` mode has to be within
+                        // the stated tolerance of it. Reproducing it exactly satisfies both.
+                        'rect' => $field['rect'],
+                    ];
+                }
+
                 $field['anchor'] = $anchor;
             }
 
@@ -176,7 +222,9 @@ class FieldSchemaRoundTripTest extends TestCase
         }
 
         return [
-            'schema_version' => '1.0',
+            // The anchors below use members that arrived in 1.1, and a document may only use
+            // what the version it declares declares.
+            'schema_version' => SchemaVersion::CURRENT,
             'document_id' => 'doc'.$index,
             'coordinate_space' => CoordinateSpaceDeclaration::expected(),
             'recipients' => $recipients,
@@ -188,6 +236,27 @@ class FieldSchemaRoundTripTest extends TestCase
     /**
      * @return array{x: int|float, y: int|float, width: int|float, height: int|float}
      */
+    /**
+     * A rectangle that records where text *was*, which is a different shape from a placement.
+     *
+     * It is generated with coordinates that may be negative and edges that may hang off the page,
+     * because those are the ordinary cases: a run's nominal box is its advance by the font's
+     * ascent plus descent, so a heading near the top of the page starts above the CropBox edge.
+     * A receipt carrying one of those has to round trip, or the service could write a document it
+     * cannot read back.
+     *
+     * @return array{x: int|float, y: int|float, width: int|float, height: int|float}
+     */
+    private static function generateMeasuredRect(): array
+    {
+        return [
+            'x' => CanonicalNumber::encode(self::generateNumber(-20.0, self::PAGE_WIDTH, false)),
+            'y' => CanonicalNumber::encode(self::generateNumber(-20.0, self::PAGE_HEIGHT, false)),
+            'width' => CanonicalNumber::encode(self::generateNumber(0.0, 200.0, false)),
+            'height' => CanonicalNumber::encode(self::generateNumber(0.0, 60.0, false)),
+        ];
+    }
+
     private static function generateRect(): array
     {
         $width = self::generateNumber(1.0, 200.0, false);

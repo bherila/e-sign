@@ -10,6 +10,7 @@ use App\Domain\Identity\Models\Workspace;
 use App\Domain\Preparation\Documents\DocumentIntake;
 use App\Domain\Preparation\Documents\DocumentStatus;
 use App\Domain\Preparation\Documents\Models\Document;
+use App\Domain\Preparation\Schema\AnchorPlacementMode;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\InvalidFieldSchemaException;
 use App\Domain\Preparation\Templates\Models\Template;
@@ -349,11 +350,14 @@ class TemplateLifecycleTest extends TestCase
     {
         $document = $this->readyDocument();
 
-        // A document that merely validates: defaults omitted and an integral coordinate
-        // spelled as a float. Storage canonicalises it once, and the digest is of that.
+        // A document that merely validates: defaults omitted and an integral coordinate spelled
+        // as a float. Storage canonicalises the *spelling* once, and the digest is of that. It
+        // does not canonicalise precision — a coordinate finer than a thousandth is refused
+        // rather than rounded, because rounding is a transformation the two implementations of
+        // this schema do not agree about.
         $schema = FieldSchemaFixture::asArray();
         unset($schema['fields'][0]['required'], $schema['fields'][0]['read_only']);
-        $schema['fields'][0]['rect']['x'] = 60.0004;
+        $schema['fields'][0]['rect']['x'] = 60.0;
 
         $version = $this->templates->createDraftVersion(
             $this->newTemplate(),
@@ -422,6 +426,63 @@ class TemplateLifecycleTest extends TestCase
             $this->assertContains('dimension_not_positive', $codes);
             $this->assertNotEmpty($e->result->at('/fields/0/recipient_id'));
             $this->assertNotEmpty($e->result->at('/fields/1/rect/width'));
+        }
+
+        $this->assertDatabaseCount('template_versions', 0);
+    }
+
+    /**
+     * Validity before availability, and the same answer the envelope boundary gives.
+     *
+     * `EnvelopeSourceSnapshotTest` pins the full four-cell matrix; this pins the cell the two
+     * entry points once disagreed about, at the other entry point. A document that is malformed
+     * *and* uses an option this deployment cannot honour is reported as malformed: it stays
+     * malformed after anchor resolution ships, so answering "wait for resolution" would send a
+     * sender to wait for something that will not help them.
+     */
+    public function test_a_malformed_document_using_a_gated_option_is_reported_as_malformed(): void
+    {
+        $document = $this->readyDocument();
+        $schema = FieldSchemaFixture::asArray();
+        $schema['fields'][0]['anchor'] = [
+            'text' => 'Signature:',
+            'occurrence' => 'sole',
+            'placement' => AnchorPlacementMode::CrossCheck->value,
+            'tolerance' => 2,
+        ];
+        $schema['fields'][0]['recipient_id'] = 'somebody_else';
+
+        try {
+            $this->templates->createDraftVersion($this->newTemplate(), $this->sender, $document, $schema);
+            $this->fail('An invalid field schema was stored.');
+        } catch (InvalidFieldSchemaException $e) {
+            $codes = $e->result->codes();
+
+            $this->assertContains('unknown_recipient', $codes);
+            $this->assertNotContains('anchor_resolution_unavailable', $codes);
+        }
+
+        $this->assertDatabaseCount('template_versions', 0);
+    }
+
+    /** And a valid document using the gated option is refused as unavailable, with its own pointer. */
+    public function test_a_valid_document_using_a_gated_option_is_refused_as_unavailable(): void
+    {
+        $document = $this->readyDocument();
+        $schema = FieldSchemaFixture::asArray();
+        $schema['fields'][0]['anchor'] = [
+            'text' => 'Signature:',
+            'occurrence' => 'sole',
+            'placement' => AnchorPlacementMode::CrossCheck->value,
+            'tolerance' => 2,
+        ];
+
+        try {
+            $this->templates->createDraftVersion($this->newTemplate(), $this->sender, $document, $schema);
+            $this->fail('A gated option was stored.');
+        } catch (InvalidFieldSchemaException $e) {
+            $this->assertSame(['anchor_resolution_unavailable'], $e->result->codes());
+            $this->assertNotEmpty($e->result->at('/fields/0/anchor/placement'));
         }
 
         $this->assertDatabaseCount('template_versions', 0);

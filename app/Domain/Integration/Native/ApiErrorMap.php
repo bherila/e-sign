@@ -7,6 +7,7 @@ namespace App\Domain\Integration\Native;
 use App\Domain\Delivery\Outbound\Exceptions\DestinationRefusedException;
 use App\Domain\Delivery\Webhooks\Exceptions\UnknownEventNameException;
 use App\Domain\Preparation\Schema\InvalidFieldSchemaException;
+use App\Domain\Preparation\Schema\ValidationError;
 use App\Domain\Preparation\Templates\TemplateStateException;
 use App\Domain\Signing\Exceptions\FieldSubmissionRejected;
 use App\Domain\Signing\Exceptions\IllegalTransition;
@@ -81,16 +82,37 @@ final class ApiErrorMap
                 ['field' => $exception->fieldId, 'reason' => $exception->reason],
             ),
 
+            // The structured errors when the snapshot carried any — a schema that does not import
+            // brings the importer's own list. Without them a caller reading
+            // `reason: invalid_field_schema` has to guess which of a dozen rules it broke, and the
+            // codes that say something specific — `coordinate_too_precise`,
+            // `anchor_resolution_unavailable` — would survive only inside a sentence.
             $exception instanceof InvalidEnvelopeSnapshot => ApiException::of(
                 ErrorCode::InvalidSnapshot,
                 $exception->getMessage(),
-                ['reason' => $exception->reason],
+                array_filter([
+                    'reason' => $exception->reason,
+                    'problems' => array_map(
+                        static fn (ValidationError $error): array => $error->toArray(),
+                        $exception->problems,
+                    ),
+                ], static fn (mixed $value): bool => $value !== []),
             ),
 
+            // Every structured error, not only the first one flattened into a sentence. Codes
+            // are API surface and a client is expected to branch on them — `coordinate_too_precise`
+            // and `anchor_resolution_unavailable` in particular say something a caller can act on
+            // that "invalid_field_schema" does not.
             $exception instanceof InvalidFieldSchemaException => ApiException::of(
                 ErrorCode::InvalidSnapshot,
                 $exception->getMessage(),
-                ['reason' => 'invalid_field_schema'],
+                [
+                    'reason' => 'invalid_field_schema',
+                    'problems' => array_map(
+                        static fn (ValidationError $error): array => $error->toArray(),
+                        $exception->errors(),
+                    ),
+                ],
             ),
 
             // Anything else the signing module refuses. `code()` is documented as a stable

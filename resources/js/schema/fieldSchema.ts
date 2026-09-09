@@ -1,5 +1,5 @@
 /**
- * Native field definition schema 1.0 — the editor's half of the contract.
+ * Native field definition schema — the editor's half of the contract.
  *
  * The contract itself is `resources/schema/field-schema-1.0.json`; the server half is
  * `app/Domain/Preparation/Schema`. The three are kept in step by tests, not by convention:
@@ -16,8 +16,21 @@
  * Never infer points versus percent from a number's magnitude.
  */
 
-/** The schema version this build implements and writes. */
-export const FIELD_SCHEMA_VERSION = "1.0";
+/**
+ * The schema version this build implements and writes.
+ *
+ * 1.1 adds the optional anchor members `placement`, `required` and `tolerance`, and the
+ * service-written `resolved` receipt. They are additive and optional, which is the case the
+ * version policy says bumps the minor: a 1.0 reader validating with `additionalProperties: false`
+ * must not be handed a document that still calls itself 1.0 and carries members its contract does
+ * not declare.
+ */
+export const FIELD_SCHEMA_VERSION = "1.1";
+
+/** Every minor this build can read, oldest first. Each has its own published contract file. */
+export const SUPPORTED_FIELD_SCHEMA_VERSIONS = ["1.0", "1.1"] as const;
+
+export type FieldSchemaVersion = (typeof SUPPORTED_FIELD_SCHEMA_VERSIONS)[number];
 
 /**
  * Field types version 1.0 implements, in schema declaration order.
@@ -54,6 +67,44 @@ export type CoordinateSpace = typeof NATIVE_COORDINATE_SPACE;
 /** Decimal places retained on a coordinate; 0.001 pt is far below what a drag can express. */
 export const CANONICAL_DECIMALS = 3;
 
+/**
+ * Largest `anchor.tolerance` a document may state, in points: PDF's own maximum page side.
+ *
+ * Mirrors `AnchorPlacement::MAX_TOLERANCE`. The bound exists to keep the canonical form **total**,
+ * not because 200 inches of slack would be an unreasonable cross-check. Above roughly 1e17 this
+ * runtime writes `100000000000000000000` where PHP writes `1.0e+20`, so the same document would
+ * canonicalise to two different digests — and `field_schema_sha256` is what every attestation
+ * binds. A tolerance is a distance between two positions on one page, so PDF's 14400 pt limit is
+ * the largest value that can mean anything, and it sits five orders of magnitude below the
+ * disagreement.
+ */
+export const ANCHOR_TOLERANCE_MAX = 14400;
+
+/**
+ * Largest magnitude any `measured_rect` component may have, in points: PDF's maximum page side.
+ *
+ * Mirrors `MeasuredRect::MAX_MAGNITUDE`, and exists for the same reason as
+ * {@link ANCHOR_TOLERANCE_MAX} rather than for any reason about measurement — see
+ * `docs/preparation/field-schema.md`, "Why every number in this schema is bounded". Applied to
+ * `x` and `y` in both directions: a measurement may sit slightly off the page, but not a page
+ * away from it.
+ */
+export const MEASURED_RECT_MAX_MAGNITUDE = 14400;
+
+/**
+ * Largest integer this schema admits: 2^53 - 1, the largest both implementations agree on.
+ *
+ * Mirrors `CanonicalNumber::MAX_INTEGER`. Every integer property — a page number, an occurrence
+ * index — is bounded by it so a document means the same thing on both sides. PHP's integers run
+ * to 2^63 - 1 and this runtime stops being exact at 2^53, so between the two a value is a whole
+ * number here and unrepresentable there: the editor would accept a document the API refuses, and
+ * an integration would meet that as a 422 after being told its document was fine.
+ *
+ * `Number.MAX_SAFE_INTEGER` is the line because it is the largest integer this runtime can hold
+ * *and distinguish from its successor*.
+ */
+export const MAX_SCHEMA_INTEGER = Number.MAX_SAFE_INTEGER;
+
 /** Slack when comparing a rounded coordinate against a page edge: one unit in the last place. */
 export const CANONICAL_TOLERANCE = 0.001;
 
@@ -89,11 +140,61 @@ export type AnchorOrigin = (typeof ANCHOR_ORIGINS)[number];
 
 export const DEFAULT_ANCHOR_ORIGIN: AnchorOrigin = "top_left";
 
+/**
+ * Which of a field's two statements about position wins.
+ *
+ * Every field carries a rect, so a field that also carries an anchor holds two of them.
+ * `"replace"` makes the anchor authoritative for x and y and keeps only the rect's size;
+ * `"cross_check"` keeps the declared rect and requires the anchor to resolve within
+ * `tolerance` points of it.
+ *
+ * Omitted means `"replace"`, which is not the kind of default `occurrence` refuses: it is the
+ * only behaviour an anchor has ever had here, so it is what an already-written document meant.
+ * Both defaults are omitted from the canonical form for the same reason — an anchor written
+ * before these properties existed must still canonicalise to exactly its old bytes, because the
+ * field-schema digest is what every attestation on an anchored agreement is bound to.
+ */
+export const ANCHOR_PLACEMENTS = ["replace", "cross_check"] as const;
+
+export type AnchorPlacement = (typeof ANCHOR_PLACEMENTS)[number];
+
+/** Whether an anchor's text must be present. Omitted means true; false needs an optional field. */
+export const DEFAULT_ANCHOR_REQUIRED = true;
+
+export const DEFAULT_ANCHOR_PLACEMENT: AnchorPlacement = "replace";
+
+/**
+ * A rectangle recording where something *was*, rather than where something goes.
+ *
+ * `x` and `y` may be negative and nothing is checked against the page: a run's nominal box is its
+ * advance by the font's ascent plus descent, so a heading near the top of the page legitimately
+ * starts above the CropBox edge.
+ */
+export interface MeasuredRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** What resolution found, written by the service and never authored in the editor. */
+export interface ResolvedAnchor {
+  document_sha256: string;
+  page: number;
+  occurrence_index: number;
+  anchor_rect: MeasuredRect;
+  rect: Rect;
+}
+
 export interface Anchor {
   text: string;
   occurrence: AnchorOccurrence;
+  placement?: AnchorPlacement;
   origin?: AnchorOrigin;
   offset?: AnchorOffset;
+  required?: boolean;
+  tolerance?: number;
+  resolved?: ResolvedAnchor;
 }
 
 export interface Recipient {
@@ -118,7 +219,7 @@ export interface FieldDefinition {
 }
 
 export interface FieldSchemaDocument {
-  schema_version: typeof FIELD_SCHEMA_VERSION;
+  schema_version: FieldSchemaVersion;
   document_id: string;
   coordinate_space: CoordinateSpace;
   recipients: Recipient[];
@@ -157,6 +258,10 @@ export const VALIDATION_CODES = [
   "dimension_not_positive",
   "rect_out_of_page",
   "unresolved_prefill_variable",
+  "coordinate_too_precise",
+  "anchor_optional_on_required_field",
+  "anchor_cross_check_failed",
+  "anchor_resolution_unavailable",
 ] as const;
 
 export type ValidationCode = (typeof VALIDATION_CODES)[number];
@@ -226,7 +331,30 @@ export const FIELD_REQUIRED = ["id", "recipient_id", "type", "page", "rect"] as 
 export const FIELD_OPTIONAL = ["required", "read_only", "label", "alias", "prefill", "anchor"] as const;
 export const RECT_REQUIRED = ["x", "y", "width", "height"] as const;
 export const ANCHOR_REQUIRED = ["text", "occurrence"] as const;
-export const ANCHOR_OPTIONAL = ["origin", "offset"] as const;
+export const ANCHOR_OPTIONAL = ["placement", "origin", "offset", "required", "tolerance", "resolved"] as const;
+/** Anchor members that arrived after 1.0, and the minor that declares them. */
+export const ANCHOR_MEMBERS_SINCE_1_1 = ["placement", "required", "tolerance", "resolved"] as const;
+
+export const ANCHOR_MEMBERS_MINOR = 1;
+
+/**
+ * The first minor version that refuses an over-precise coordinate instead of rounding it.
+ *
+ * 1.0 rounds, as it always has. Refusing is a semantic tightening — a document 1.0 accepted stops
+ * being accepted — and this schema's policy reserves those for a **major** bump. The price is that
+ * a 1.0 document can still canonicalise two ways across the two implementations (issue #105); that
+ * is a 2.0 question, not something a minor version fixes by tightening underneath its consumers.
+ */
+export const PRECISION_REFUSED_SINCE_MINOR = 1;
+
+export const RESOLVED_ANCHOR_REQUIRED = [
+  "document_sha256",
+  "page",
+  "occurrence_index",
+  "anchor_rect",
+  "rect",
+] as const;
+const DOCUMENT_SHA256_PATTERN = /^[0-9a-f]{64}$/;
 
 /**
  * Round to the canonical precision, half away from zero.
@@ -235,8 +363,32 @@ export const ANCHOR_OPTIONAL = ["origin", "offset"] as const;
  * with PHP's `round($value, 3)`: `60.1235 * 1000` is 60123.499999999993 in binary floating point
  * and would round down, while the string exponent form parses to exactly 60123.5 and rounds up.
  */
+/**
+ * Whether a value is already canonical: at most {@link CANONICAL_DECIMALS} decimal places.
+ *
+ * The importer refuses a finer value rather than rounding it, and the difference matters more than
+ * it looks. Rounding is a *transformation*, and the two implementations of this schema do not
+ * agree about every transformation: `1.6484999999999999` rounds to 1.649 here and to 1.648 in PHP,
+ * so the same submitted document would canonicalise to two byte strings and two
+ * `field_schema_sha256` — the digest every attestation binds. Refusing means no accepted value is
+ * ever transformed, so there is nothing to disagree about.
+ *
+ * Producers still round, and that is safe because it happens once, on one side, before the value
+ * is part of a document: {@link roundCoordinate} is what the editor applies to what a drag
+ * produced. What it then sends is taken literally.
+ */
+export function isCanonical(value: number): boolean {
+  return Number.isFinite(value) && roundCoordinate(value) === value;
+}
+
 export function roundCoordinate(value: number): number {
   if (!Number.isFinite(value)) {
+    return value;
+  }
+
+  // An integral value has no fractional part to round, whatever its magnitude, and shifting it
+  // through a decimal string is where this function used to lose precision or produce NaN.
+  if (Number.isInteger(value)) {
     return value;
   }
 
@@ -245,7 +397,18 @@ export function roundCoordinate(value: number): number {
   if (repr.includes("e") || repr.includes("E")) {
     // Exponential notation: far outside anything a page rectangle can hold, and the string
     // exponent trick below does not compose with an exponent already in the text.
-    return Math.round(value * 10 ** CANONICAL_DECIMALS) / 10 ** CANONICAL_DECIMALS;
+    const scaled = value * 10 ** CANONICAL_DECIMALS;
+
+    // A value large enough that scaling it overflows has no fractional part to round in the
+    // first place, so rounding is the identity — which is also what PHP's `round()` returns for
+    // it. Returning `Infinity` instead would serialise as `null` through `JSON.stringify`, so a
+    // document the validator accepted would be exported as one its own importer refuses, and the
+    // two projections would disagree about the same input.
+    if (!Number.isFinite(scaled)) {
+      return value;
+    }
+
+    return Math.round(scaled) / 10 ** CANONICAL_DECIMALS;
   }
 
   const shifted = Number(`${repr}e${CANONICAL_DECIMALS}`);
@@ -255,8 +418,14 @@ export function roundCoordinate(value: number): number {
   }
 
   const rounded = shifted < 0 ? -Math.round(-shifted) : Math.round(shifted);
+  const shiftedBack = Number(`${rounded}e-${CANONICAL_DECIMALS}`);
 
-  return Number(`${rounded}e-${CANONICAL_DECIMALS}`);
+  // `rounded` can be large enough that *its* own `toString()` is exponential — 1e20 shifts to
+  // 1e23 — and appending another exponent gives "1e+23e-3", which parses as NaN. That NaN then
+  // serialises as `null`, so a value the validator accepted would be exported as a document its
+  // own importer refuses. A value that big has no fractional part to round anyway, so falling
+  // back to plain arithmetic is exact for it.
+  return Number.isFinite(shiftedBack) ? shiftedBack : Math.round(value * 10 ** CANONICAL_DECIMALS) / 10 ** CANONICAL_DECIMALS;
 }
 
 /**
@@ -328,7 +497,10 @@ export function serializeFieldSchema(document: FieldSchemaDocument): string {
 /** The canonical object form: property order fixed, defaults stated, coordinates rounded. */
 export function canonicaliseDocument(document: FieldSchemaDocument): FieldSchemaDocument {
   return {
-    schema_version: FIELD_SCHEMA_VERSION,
+    // The version the document arrived with, not the one this build writes: a 1.0 document that
+    // uses none of the 1.1 members stays a 1.0 document, byte for byte, and so does its digest.
+    // Only the server rewrites a document's version, and only when it rewrites its fields.
+    schema_version: document.schema_version ?? FIELD_SCHEMA_VERSION,
     document_id: document.document_id,
     coordinate_space: {
       unit: NATIVE_COORDINATE_SPACE.unit,
@@ -363,12 +535,7 @@ function canonicaliseField(field: FieldDefinition): FieldDefinition {
     recipient_id: field.recipient_id,
     type: field.type,
     page: field.page,
-    rect: {
-      x: roundCoordinate(field.rect.x),
-      y: roundCoordinate(field.rect.y),
-      width: roundCoordinate(field.rect.width),
-      height: roundCoordinate(field.rect.height),
-    },
+    rect: canonicaliseRect(field.rect),
     required: field.required ?? true,
     read_only: field.read_only ?? false,
   };
@@ -386,23 +553,64 @@ function canonicaliseField(field: FieldDefinition): FieldDefinition {
   }
 
   if (field.anchor !== undefined) {
-    const anchor: Anchor = {
-      text: field.anchor.text,
-      occurrence: field.anchor.occurrence,
+    canonical.anchor = canonicaliseAnchor(field.anchor);
+  }
+
+  return canonical;
+}
+
+function canonicaliseRect(rect: Rect): Rect {
+  return {
+    x: roundCoordinate(rect.x),
+    y: roundCoordinate(rect.y),
+    width: roundCoordinate(rect.width),
+    height: roundCoordinate(rect.height),
+  };
+}
+
+/**
+ * Canonical anchor order: the declared properties in schema order, with anything that equals its
+ * default omitted — the anchor object's own long-standing convention, and here load-bearing: an
+ * anchor written before `placement` and `required` existed must canonicalise to exactly its old
+ * bytes, or the field-schema digest every attestation is bound to would move.
+ */
+function canonicaliseAnchor(anchor: Anchor): Anchor {
+  const canonical: Anchor = {
+    text: anchor.text,
+    occurrence: anchor.occurrence,
+  };
+
+  if (anchor.placement !== undefined && anchor.placement !== DEFAULT_ANCHOR_PLACEMENT) {
+    canonical.placement = anchor.placement;
+  }
+
+  if (anchor.origin !== undefined) {
+    canonical.origin = anchor.origin;
+  }
+
+  if (anchor.offset !== undefined) {
+    canonical.offset = {
+      dx: roundCoordinate(anchor.offset.dx),
+      dy: roundCoordinate(anchor.offset.dy),
     };
+  }
 
-    if (field.anchor.origin !== undefined) {
-      anchor.origin = field.anchor.origin;
-    }
+  if (anchor.required !== undefined && anchor.required !== DEFAULT_ANCHOR_REQUIRED) {
+    canonical.required = anchor.required;
+  }
 
-    if (field.anchor.offset !== undefined) {
-      anchor.offset = {
-        dx: roundCoordinate(field.anchor.offset.dx),
-        dy: roundCoordinate(field.anchor.offset.dy),
-      };
-    }
+  if (anchor.tolerance !== undefined) {
+    canonical.tolerance = roundCoordinate(anchor.tolerance);
+  }
 
-    canonical.anchor = anchor;
+  if (anchor.resolved !== undefined) {
+    canonical.resolved = {
+      document_sha256: anchor.resolved.document_sha256,
+      page: anchor.resolved.page,
+      occurrence_index: anchor.resolved.occurrence_index,
+      anchor_rect: canonicaliseRect(anchor.resolved.anchor_rect),
+      rect: canonicaliseRect(anchor.resolved.rect),
+    };
   }
 
   return canonical;
@@ -772,10 +980,13 @@ function checkFields(
       checkFieldType(`${path}/type`, field["type"], issues);
     }
 
-    const page = "page" in field ? checkPage(`${path}/page`, field["page"], options.pageSizes, issues) : null;
+    const page =
+      "page" in field
+        ? checkPage(`${path}/page`, field["page"], options.pageSizes, refusesImprecision(document), issues)
+        : null;
 
     if ("rect" in field) {
-      checkRect(`${path}/rect`, field["rect"], page, options.pageSizes, issues);
+      checkRect(`${path}/rect`, field["rect"], page, options.pageSizes, refusesImprecision(document), issues);
     }
 
     for (const flag of ["required", "read_only"] as const) {
@@ -793,7 +1004,8 @@ function checkFields(
     }
 
     if ("anchor" in field) {
-      checkAnchor(`${path}/anchor`, field["anchor"], issues);
+      const fieldRequired = typeof field["required"] === "boolean" ? field["required"] : true;
+      checkAnchor(`${path}/anchor`, field["anchor"], fieldRequired, field["rect"], declaredMinor(document), issues);
     }
   });
 }
@@ -819,7 +1031,58 @@ function checkFieldType(path: string, type: unknown, issues: ValidationIssue[]):
   );
 }
 
-function checkPage(path: string, page: unknown, pageSizes: PageSize[] | undefined, issues: ValidationIssue[]): number | null {
+function checkIntegerRange(path: string, label: string, value: number, issues: ValidationIssue[], code: ValidationCode): boolean {
+  if (Math.abs(value) <= MAX_SCHEMA_INTEGER) {
+    return true;
+  }
+
+  issues.push(
+    issue(
+      path,
+      code,
+      `${label} is at most ${MAX_SCHEMA_INTEGER}, the largest integer this schema's two implementations agree ` +
+        "on: PHP counts to 2^63 and JavaScript stops being exact at 2^53, so a larger value means one thing in " +
+        "the editor and another in the API.",
+    ),
+  );
+
+  return false;
+}
+
+/** Whether this document's version refuses an over-precise coordinate rather than rounding it. */
+function refusesImprecision(document: Record<string, unknown>): boolean {
+  const minor = declaredMinor(document);
+
+  return minor !== null && minor >= PRECISION_REFUSED_SINCE_MINOR;
+}
+
+/** A coordinate must arrive already canonical. Returns false when it did not. */
+function checkPrecision(path: string, label: string, value: number, issues: ValidationIssue[]): boolean {
+  if (!Number.isFinite(value) || isCanonical(value)) {
+    return true;
+  }
+
+  issues.push(
+    issue(
+      path,
+      "coordinate_too_precise",
+      `${label} has more than ${CANONICAL_DECIMALS} decimal places. Documents carry canonical numbers, and ` +
+        "this one is refused rather than rounded: rounding is a transformation, and two implementations that " +
+        "both transform can disagree about the result — which would be a disagreement about the document's " +
+        "digest. Round it yourself and send the result.",
+    ),
+  );
+
+  return false;
+}
+
+function checkPage(
+  path: string,
+  page: unknown,
+  pageSizes: PageSize[] | undefined,
+  refuseImprecise: boolean,
+  issues: ValidationIssue[],
+): number | null {
   if (typeof page !== "number" || !Number.isInteger(page)) {
     issues.push(issue(path, "invalid_type", "page must be an integer."));
 
@@ -831,6 +1094,12 @@ function checkPage(path: string, page: unknown, pageSizes: PageSize[] | undefine
       issue(path, "page_out_of_range", `page is 1-based (coordinate_space.page_index_base is 1); got ${page}.`),
     );
 
+    return null;
+  }
+
+  // Gated by version like the precision rule, and for the same reason: 1.0 accepted a larger
+  // integer, and refusing one now would be a semantic tightening of a published version.
+  if (refuseImprecise && !checkIntegerRange(path, "page", page, issues, "page_out_of_range")) {
     return null;
   }
 
@@ -846,6 +1115,7 @@ function checkRect(
   rect: unknown,
   page: number | null,
   pageSizes: PageSize[] | undefined,
+  refuseImprecise: boolean,
   issues: ValidationIssue[],
 ): void {
   if (!isObject(rect)) {
@@ -863,20 +1133,36 @@ function checkRect(
       continue;
     }
 
-    const value = rect[name];
+    const raw = rect[name];
 
-    if (typeof value !== "number") {
+    if (typeof raw !== "number") {
       issues.push(issue(`${path}/${name}`, "invalid_type", `rect.${name} must be a number.`));
 
       continue;
     }
 
-    if (!Number.isFinite(value)) {
+    if (!Number.isFinite(raw)) {
       issues.push(
-        issue(`${path}/${name}`, "coordinate_not_finite", `rect.${name} must be a finite number; got ${value}.`),
+        issue(`${path}/${name}`, "coordinate_not_finite", `rect.${name} must be a finite number; got ${raw}.`),
       );
 
       continue;
+    }
+
+    // From 1.1 a finer value is refused rather than rounded: rounding would make the validator's
+    // answer depend on a transformation the two implementations do not agree about. 1.0 rounds,
+    // because refusing would be a semantic tightening of a published version
+    // ({@link PRECISION_REFUSED_SINCE_MINOR}). Rounding *before* the checks rather than after is
+    // the one change 1.0 gets, and it takes nothing away: it refuses only values that rounded into
+    // an invalid state, which were never documents that worked.
+    let value = raw;
+
+    if (refuseImprecise) {
+      if (!checkPrecision(`${path}/${name}`, `rect.${name}`, value, issues)) {
+        continue;
+      }
+    } else {
+      value = roundCoordinate(value);
     }
 
     if ((name === "x" || name === "y") && value < 0) {
@@ -899,7 +1185,7 @@ function checkRect(
       continue;
     }
 
-    values[name] = roundCoordinate(value);
+    values[name] = value;
   }
 
   const x = values.x;
@@ -984,7 +1270,32 @@ function checkPrefill(
   }
 }
 
-function checkAnchor(path: string, anchor: unknown, issues: ValidationIssue[]): void {
+/**
+ * The minor version a document declares, or null when it does not declare a usable one.
+ *
+ * Only used to decide which members a document may contain; every other check is
+ * version-independent, and a document with no readable version has already been reported.
+ */
+function declaredMinor(document: Record<string, unknown>): number | null {
+  const declared = document["schema_version"];
+
+  if (typeof declared !== "string") {
+    return null;
+  }
+
+  const match = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.exec(declared);
+
+  return match ? Number(match[2]) : null;
+}
+
+function checkAnchor(
+  path: string,
+  anchor: unknown,
+  fieldRequired: boolean,
+  fieldRect: unknown,
+  minor: number | null,
+  issues: ValidationIssue[],
+): void {
   if (!isObject(anchor)) {
     issues.push(issue(path, "invalid_type", "anchor must be an object with the text to locate."));
 
@@ -993,12 +1304,45 @@ function checkAnchor(path: string, anchor: unknown, issues: ValidationIssue[]): 
 
   checkObjectShape(path, anchor, ANCHOR_REQUIRED, ANCHOR_OPTIONAL, issues);
 
+  // The version string has to be a contract, not a label: a document declaring 1.0 is read
+  // against a file that forbids undeclared properties, so a 1.1 member in it is refused with the
+  // code that consumer would use.
+  if (minor !== null && minor < ANCHOR_MEMBERS_MINOR) {
+    for (const member of ANCHOR_MEMBERS_SINCE_1_1) {
+      if (member in anchor) {
+        issues.push(
+          issue(
+            `${path}/${member}`,
+            "unknown_property",
+            `anchor.${member} arrived in schema 1.1, and this document declares 1.${minor}. Declare 1.1 to ` +
+              `use it: a document that says 1.${minor} is read against a contract that does not have it, and ` +
+              "refusing an undeclared property is what that contract does.",
+          ),
+        );
+      }
+    }
+  }
+
   if ("text" in anchor) {
     checkNonEmptyString(`${path}/text`, "anchor.text", anchor["text"], ANCHOR_TEXT_MAX_LENGTH, issues);
   }
 
   if ("occurrence" in anchor) {
-    checkAnchorOccurrence(`${path}/occurrence`, anchor["occurrence"], issues);
+    checkAnchorOccurrence(
+      `${path}/occurrence`,
+      anchor["occurrence"],
+      minor !== null && minor >= PRECISION_REFUSED_SINCE_MINOR,
+      issues,
+    );
+  }
+
+  const placement = checkAnchorPlacement(`${path}/placement`, anchor, issues) ?? DEFAULT_ANCHOR_PLACEMENT;
+  checkAnchorRequired(path, anchor, fieldRequired, placement, issues);
+  checkAnchorTolerance(`${path}/tolerance`, anchor, placement, issues);
+
+  if ("resolved" in anchor) {
+    const tolerance = typeof anchor["tolerance"] === "number" ? anchor["tolerance"] : null;
+    checkResolvedAnchor(`${path}/resolved`, anchor["resolved"], placement, tolerance, fieldRect, issues);
   }
 
   if ("origin" in anchor) {
@@ -1053,6 +1397,13 @@ function checkAnchor(path: string, anchor: unknown, issues: ValidationIssue[]): 
           `anchor.offset.${name} must be a finite number; got ${value}.`,
         ),
       );
+
+      continue;
+    }
+
+    // `offset` is a 1.0 member, so it follows the version's rule like `rect` does.
+    if (minor !== null && minor >= PRECISION_REFUSED_SINCE_MINOR) {
+      checkPrecision(`${path}/offset/${name}`, `anchor.offset.${name}`, value, issues);
     }
   }
 }
@@ -1060,7 +1411,421 @@ function checkAnchor(path: string, anchor: unknown, issues: ValidationIssue[]): 
 /**
  * `"sole"` or a 1-based index, and nothing else. See {@link AnchorOccurrence}.
  */
-function checkAnchorOccurrence(path: string, occurrence: unknown, issues: ValidationIssue[]): void {
+function checkAnchorPlacement(
+  path: string,
+  anchor: Record<string, unknown>,
+  issues: ValidationIssue[],
+): AnchorPlacement | null {
+  if (!("placement" in anchor)) {
+    return null;
+  }
+
+  const placement = anchor["placement"];
+
+  if (typeof placement !== "string") {
+    issues.push(issue(path, "invalid_type", "anchor.placement must be a string."));
+
+    return null;
+  }
+
+  if (!(ANCHOR_PLACEMENTS as readonly string[]).includes(placement)) {
+    issues.push(
+      issue(
+        path,
+        "invalid_format",
+        `anchor.placement must be one of ${ANCHOR_PLACEMENTS.join(", ")}; got "${placement}". ` +
+          '"replace" lets the anchor decide where the field goes and keeps only the rectangle\'s size; ' +
+          '"cross_check" keeps the declared rectangle and requires the anchor to agree with it. Omitting ' +
+          'the property is "replace", which is what an anchor has always meant here; "cross_check" is the ' +
+          "narrower mode and has to be stated.",
+      ),
+    );
+
+    return null;
+  }
+
+  return placement as AnchorPlacement;
+}
+
+function checkAnchorRequired(
+  path: string,
+  anchor: Record<string, unknown>,
+  fieldRequired: boolean,
+  placement: AnchorPlacement,
+  issues: ValidationIssue[],
+): void {
+  if (!("required" in anchor)) {
+    return;
+  }
+
+  const required = anchor["required"];
+
+  if (typeof required !== "boolean") {
+    issues.push(issue(`${path}/required`, "invalid_type", "anchor.required must be a boolean."));
+
+    return;
+  }
+
+  if (required) {
+    return;
+  }
+
+  if (fieldRequired) {
+    issues.push(
+      issue(
+        `${path}/required`,
+        "anchor_optional_on_required_field",
+        'anchor.required is false on a field whose own "required" is true. An absent anchor omits the field, ' +
+          "and a required field that is never placed can never be completed. Make the field optional, or " +
+          "require the anchor.",
+      ),
+    );
+
+    return;
+  }
+
+  if (placement === "cross_check") {
+    issues.push(
+      issue(
+        `${path}/required`,
+        "invalid_format",
+        'anchor.required false means an absent anchor omits the field, which contradicts anchor.placement ' +
+          '"cross_check": there the declared rectangle is authoritative and the anchor only checks it, so an ' +
+          'absent anchor has nothing to omit. Use "replace", or require the anchor.',
+      ),
+    );
+  }
+}
+
+function checkAnchorTolerance(
+  path: string,
+  anchor: Record<string, unknown>,
+  placement: AnchorPlacement,
+  issues: ValidationIssue[],
+): void {
+  if (!("tolerance" in anchor)) {
+    return;
+  }
+
+  const tolerance = anchor["tolerance"];
+
+  if (typeof tolerance !== "number") {
+    issues.push(issue(path, "invalid_type", "anchor.tolerance must be a number of points."));
+
+    return;
+  }
+
+  if (!Number.isFinite(tolerance)) {
+    issues.push(issue(path, "coordinate_not_finite", `anchor.tolerance must be a finite number; got ${tolerance}.`));
+
+    return;
+  }
+
+  if (!checkPrecision(path, "anchor.tolerance", tolerance, issues)) {
+    return;
+  }
+
+  if (tolerance < 0) {
+    issues.push(
+      issue(path, "invalid_format", `anchor.tolerance is a distance in points and must not be negative; got ${tolerance}.`),
+    );
+
+    return;
+  }
+
+  // Bounded so the canonical form stays total, not because a larger number is unreasonable: past
+  // roughly 1e20 this runtime and PHP spell the same value differently (100000000000000000000
+  // against 1.0e+20), so one document would canonicalise to two different digests.
+  if (tolerance > ANCHOR_TOLERANCE_MAX) {
+    issues.push(
+      issue(
+        path,
+        "invalid_format",
+        `anchor.tolerance is a distance on one page and must be at most ${ANCHOR_TOLERANCE_MAX} pt, PDF's ` +
+          `largest page side; got ${tolerance}. The bound keeps the canonical form total: past about 1e17 this ` +
+          "schema's two implementations spell the same number differently, and a document with two spellings " +
+          "has two digests.",
+      ),
+    );
+
+    return;
+  }
+
+  if (placement === "replace") {
+    issues.push(
+      issue(
+        path,
+        "invalid_format",
+        'anchor.tolerance only means something with anchor.placement "cross_check". In "replace" mode the ' +
+          "anchor decides the position outright, so there is no declared rectangle to be within a tolerance of.",
+      ),
+    );
+  }
+}
+
+function checkResolvedAnchor(
+  path: string,
+  resolved: unknown,
+  placement: AnchorPlacement,
+  anchorTolerance: number | null,
+  fieldRect: unknown,
+  issues: ValidationIssue[],
+): void {
+  if (!isObject(resolved)) {
+    issues.push(issue(path, "invalid_type", "anchor.resolved must be an object recording what resolution found."));
+
+    return;
+  }
+
+  checkObjectShape(path, resolved, RESOLVED_ANCHOR_REQUIRED, [], issues);
+
+  if ("document_sha256" in resolved) {
+    const digest = resolved["document_sha256"];
+
+    if (typeof digest !== "string" || !DOCUMENT_SHA256_PATTERN.test(digest)) {
+      issues.push(
+        issue(
+          `${path}/document_sha256`,
+          "invalid_format",
+          "anchor.resolved.document_sha256 must be 64 lowercase hexadecimal characters: the digest of the " +
+            "exact bytes the text was located in.",
+        ),
+      );
+    }
+  }
+
+  for (const name of ["page", "occurrence_index"] as const) {
+    if (!(name in resolved)) {
+      continue;
+    }
+
+    const value = resolved[name];
+
+    if (typeof value !== "number" || !Number.isInteger(value)) {
+      issues.push(issue(`${path}/${name}`, "invalid_type", `anchor.resolved.${name} must be an integer.`));
+
+      continue;
+    }
+
+    if (value < 1) {
+      issues.push(
+        issue(
+          `${path}/${name}`,
+          name === "page" ? "page_out_of_range" : "invalid_format",
+          `anchor.resolved.${name} is 1-based; got ${value}.`,
+        ),
+      );
+
+      continue;
+    }
+
+    checkIntegerRange(
+      `${path}/${name}`,
+      `anchor.resolved.${name}`,
+      value,
+      issues,
+      name === "page" ? "page_out_of_range" : "invalid_format",
+    );
+  }
+
+  // `anchor_rect` records where the text was, not where anything goes: a heading's ascender
+  // legitimately starts above the CropBox edge, so it is never checked as a placement.
+  if ("anchor_rect" in resolved) {
+    checkMeasuredRect(`${path}/anchor_rect`, resolved["anchor_rect"], issues);
+  }
+
+  if (!("rect" in resolved)) {
+    return;
+  }
+
+  // `resolved` is a 1.1 member, so it can only appear where the rule applies.
+  checkRect(`${path}/rect`, resolved["rect"], null, undefined, true, issues);
+
+  // And bounded, which the field's own rect is not: `$defs/resolved_rect` arrived in 1.1 and can
+  // carry the bound, while `rect` is 1.0's and tightening it would change what this build accepts
+  // for documents already valid (#105).
+  checkCoordinateMagnitude(`${path}/rect`, resolved["rect"], issues);
+
+  const recordedRect = resolved["rect"];
+
+  if (!isObject(fieldRect) || !isObject(recordedRect)) {
+    return;
+  }
+
+  if (placement === "replace") {
+    // In `replace` mode the receipt's rectangle is where the field went, so the two must agree.
+    // Compared canonically, because canonical values are what will be stored: comparing what the
+    // caller wrote would accept a document that stops importing the moment it is written down.
+    for (const name of RECT_REQUIRED) {
+      if (typeof fieldRect[name] !== "number" || typeof recordedRect[name] !== "number") {
+        return;
+      }
+
+      const declared = roundCoordinate(fieldRect[name] as number);
+      const actual = roundCoordinate(recordedRect[name] as number);
+
+      // Exact: in `replace` mode the receipt's rectangle *is* the field's, so there is no
+      // disagreement a tolerance could be measuring in any of the four numbers.
+      if (declared !== actual) {
+        issues.push(
+          issue(
+            `${path}/rect/${name}`,
+            "invalid_format",
+            `anchor.resolved.rect must be the field's own rect when anchor.placement is "replace": the receipt ` +
+              `records where the field was placed, and this one says ${actual} where the field says ${declared}.`,
+          ),
+        );
+
+        return;
+      }
+    }
+
+    return;
+  }
+
+  // A cross-check receipt is the record that the check passed, so it has to survive the check —
+  // and against the tolerance the anchor itself states, because a receipt whose standard has to
+  // be looked up elsewhere proves nothing about what was applied.
+  if (anchorTolerance === null) {
+    issues.push(
+      issue(
+        path,
+        "missing_property",
+        'A "cross_check" anchor carrying anchor.resolved must also state anchor.tolerance: the receipt is the ' +
+          "record that the check passed, and without the distance it passed by there is nothing to check it against.",
+      ),
+    );
+
+    return;
+  }
+
+  // Rounded first, and the tolerance with them: import canonicalises every coordinate to three
+  // decimals independently, so a declared 330.0004 and a resolved 331.00179 are 1.00139 apart and
+  // inside a stated 1.0004 — and canonicalise to 330, 331.002 and 1, which is 1.002 apart and
+  // outside. Accepting that would emit a document its own next import refuses.
+  const slack = roundCoordinate(anchorTolerance);
+
+  for (const name of ["x", "y"] as const) {
+    if (typeof fieldRect[name] !== "number" || typeof recordedRect[name] !== "number") {
+      return;
+    }
+
+    const declared = roundCoordinate(fieldRect[name] as number);
+    const actual = roundCoordinate(recordedRect[name] as number);
+    // The stated bound, enforced exactly. Both sides and the tolerance are already canonical, so
+    // the page-edge epsilon has nothing left to absorb and would only widen what the document
+    // says — a receipt 0.001 pt outside a stated `tolerance: 0` would pass and then be stored
+    // claiming it had been checked to zero. The distance is rounded rather than compared raw
+    // because subtracting two three-decimal values can land a few ulps above the bound they sit
+    // exactly on.
+    const distance = roundCoordinate(Math.abs(declared - actual));
+
+    if (distance > slack) {
+      issues.push(
+        issue(
+          `${path}/rect/${name}`,
+          "anchor_cross_check_failed",
+          `anchor.resolved records a ${name} of ${actual} against a declared ${name} of ${declared}, which is ` +
+            `${distance} pt apart and outside the ${slack} pt tolerance the anchor states. A receipt ` +
+            "that records a failed check is not a record that the check passed.",
+        ),
+      );
+
+      return;
+    }
+  }
+}
+
+/**
+ * A rectangle that records where something was, rather than where something goes: finite, with
+ * non-negative extents, and never checked against the page.
+ */
+function checkMeasuredRect(path: string, rect: unknown, issues: ValidationIssue[]): void {
+  if (!isObject(rect)) {
+    issues.push(issue(path, "invalid_type", "rect must be an object with x, y, width, and height."));
+
+    return;
+  }
+
+  checkObjectShape(path, rect, RECT_REQUIRED, [], issues);
+
+  for (const name of RECT_REQUIRED) {
+    if (!(name in rect)) {
+      continue;
+    }
+
+    const value = rect[name];
+
+    if (typeof value !== "number") {
+      issues.push(issue(`${path}/${name}`, "invalid_type", `rect.${name} must be a number.`));
+
+      continue;
+    }
+
+    if (!Number.isFinite(value)) {
+      issues.push(issue(`${path}/${name}`, "coordinate_not_finite", `rect.${name} must be a finite number; got ${value}.`));
+
+      continue;
+    }
+
+    // Refused rather than rounded, for the reason given in checkRect().
+    if (!checkPrecision(`${path}/${name}`, `rect.${name}`, value, issues)) {
+      continue;
+    }
+
+    if ((name === "width" || name === "height") && value < 0) {
+      issues.push(
+        issue(`${path}/${name}`, "dimension_not_positive", `rect.${name} must not be negative; got ${value}.`),
+      );
+
+      continue;
+    }
+
+  }
+
+  checkCoordinateMagnitude(path, rect, issues);
+}
+
+/**
+ * Every component of a rectangle within the magnitude both implementations agree on.
+ *
+ * Shared by the measured rectangle and the resolved one, because the reason is shared and has
+ * nothing to do with either being a measurement or a placement: past roughly 1e17 this runtime and
+ * PHP spell the same number differently, so a document holding one canonicalises to two digests.
+ * Nothing on a page is a page-side away from it, so the bound refuses nothing real.
+ */
+function checkCoordinateMagnitude(path: string, rect: unknown, issues: ValidationIssue[]): void {
+  if (!isObject(rect)) {
+    return;
+  }
+
+  for (const name of RECT_REQUIRED) {
+    const value = rect[name];
+
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      continue;
+    }
+
+    if (Math.abs(value) > MEASURED_RECT_MAX_MAGNITUDE) {
+      issues.push(
+        issue(
+          `${path}/${name}`,
+          "invalid_format",
+          `rect.${name} must be within ${MEASURED_RECT_MAX_MAGNITUDE} pt of the origin, PDF's largest page ` +
+            `side; got ${value}. The bound keeps the canonical form total: past about 1e17 this schema's two ` +
+            "implementations spell the same number differently, and a document with two spellings has two digests.",
+        ),
+      );
+    }
+  }
+}
+
+function checkAnchorOccurrence(
+  path: string,
+  occurrence: unknown,
+  refuseImprecise: boolean,
+  issues: ValidationIssue[],
+): void {
   if (typeof occurrence === "string") {
     if (occurrence === ANCHOR_OCCURRENCE_SOLE) {
       return;
@@ -1088,6 +1853,12 @@ function checkAnchorOccurrence(path: string, occurrence: unknown, issues: Valida
 
   if (occurrence < 1) {
     issues.push(issue(path, "invalid_format", `anchor.occurrence indexes are 1-based; got ${occurrence}.`));
+
+    return;
+  }
+
+  if (refuseImprecise) {
+    checkIntegerRange(path, "anchor.occurrence", occurrence, issues, "invalid_format");
   }
 }
 

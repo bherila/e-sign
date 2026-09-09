@@ -2,6 +2,7 @@ import {
   type FieldSchemaDocument,
   parseFieldSchema,
   serializeFieldSchema,
+  validateFieldSchema,
 } from "@/schema/fieldSchema";
 
 import fixtureJson from "../../../../tests/Fixtures/schema/nda-two-signers.json";
@@ -353,6 +354,164 @@ describe("patching a field", () => {
       width: 180,
       height: 36,
     });
+  });
+});
+
+describe("a resolution receipt", () => {
+  /**
+   * A receipt is bound to the field's page and, in `replace` mode, to its exact rectangle, so
+   * editing either makes it a record of resolving something else. The importer refuses that, and
+   * the editor offers no way to delete a receipt by hand — so keeping one through a drag would
+   * make Save a 422 with no way out. The anchor *request* is kept: publishing resolves it again.
+   */
+  function resolved(): EditorState {
+    const raw = JSON.parse(JSON.stringify(fixtureJson)) as Record<string, any>;
+    raw.fields[5].anchor.resolved = {
+      document_sha256: "d".repeat(64),
+      page: 2,
+      occurrence_index: 1,
+      anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
+      rect: raw.fields[5].rect,
+    };
+
+    return createEditorState(parseFieldSchema(raw));
+  }
+
+  it("survives a document that is only read", () => {
+    expect(findField(resolved().document, "counterparty_signature")?.anchor?.resolved).toBeDefined();
+  });
+
+  it.each([
+    [
+      "moving the field",
+      { type: "move_field", id: "counterparty_signature", rect: { x: 340, y: 650, width: 170, height: 36 } },
+    ],
+    [
+      "patching its rectangle",
+      { type: "update_field", id: "counterparty_signature", patch: { rect: { x: 340 } } },
+    ],
+    [
+      "patching its page",
+      { type: "update_field", id: "counterparty_signature", patch: { page: 1 } },
+    ],
+  ] as const)("is dropped by %s, and the request is kept", (_name, action) => {
+    const next = editorReducer(resolved(), action as Parameters<typeof editorReducer>[1]);
+    const field = findField(next.document, "counterparty_signature");
+
+    expect(field?.anchor?.resolved).toBeUndefined();
+    expect(field?.anchor?.text).toBe("Counterparty signature:");
+  });
+
+  it("is not copied onto a duplicate, which sits somewhere else entirely", () => {
+    const next = editorReducer(resolved(), { type: "duplicate_field", id: "counterparty_signature" });
+    const copy = findField(next.document, "counterparty_signature_copy");
+
+    expect(copy?.anchor?.resolved).toBeUndefined();
+    expect(copy?.anchor?.text).toBe("Counterparty signature:");
+  });
+
+  /**
+   * The rule is the result, not the action: a gesture that changes nothing invalidates nothing.
+   *
+   * `FieldBox.finish()` reports a pointer-up as a move even when the displacement is zero, so a
+   * plain selection click arrives here as `move_field`. Deciding invalidation from the action
+   * deleted the receipt, marked the document dirty and pushed an undo entry for a click.
+   */
+  it("survives a move that does not move it", () => {
+    const start = resolved();
+    const at = findField(start.document, "counterparty_signature")!;
+    const next = editorReducer(start, {
+      type: "move_field",
+      id: "counterparty_signature",
+      x: at.rect.x,
+      y: at.rect.y,
+    });
+
+    expect(findField(next.document, "counterparty_signature")?.anchor?.resolved).toBeDefined();
+    expect(isDirty(next)).toBe(false);
+    expect(canUndo(next)).toBe(false);
+  });
+
+  it("survives a patch that sets the rectangle to what it already is", () => {
+    const start = resolved();
+    const at = findField(start.document, "counterparty_signature")!;
+    const next = editorReducer(start, {
+      type: "update_field",
+      id: "counterparty_signature",
+      patch: { rect: { x: at.rect.x, y: at.rect.y } },
+    });
+
+    expect(findField(next.document, "counterparty_signature")?.anchor?.resolved).toBeDefined();
+  });
+
+  it("survives an edit that cannot invalidate it", () => {
+    const next = editorReducer(resolved(), {
+      type: "update_field",
+      id: "counterparty_signature",
+      patch: { label: "Counterparty" },
+    });
+
+    expect(findField(next.document, "counterparty_signature")?.anchor?.resolved).toBeDefined();
+  });
+});
+
+describe("no editor action can produce an unsavable document", () => {
+  /**
+   * The invariant, stated once: whatever sequence of actions the UI allows, the result validates.
+   *
+   * The contract has cross-property rules — a receipt is bound to its field's rectangle, and an
+   * optional anchor is only allowed on an optional field — and the inspector exposes a control
+   * for one side of each pair and not the other. So the reducer owns the consequence: an edit
+   * that breaks a pair has to repair it, or the editor can reach a state Save refuses with no
+   * control able to undo it.
+   */
+  /** A document whose optional field carries the optional-anchor option. */
+  function optionalAnchor(): EditorState {
+    const raw = JSON.parse(JSON.stringify(fixtureJson)) as Record<string, any>;
+    raw.fields[9].anchor.required = false;
+
+    return createEditorState(parseFieldSchema(raw));
+  }
+
+  it("keeps the anchor's requiredness coherent when the field becomes required", () => {
+    // Field 9 is the optional notes field whose anchor may legitimately be absent.
+    const before = findField(optionalAnchor().document, "counterparty_notes");
+    expect(before?.required).toBe(false);
+    expect(before?.anchor?.required).toBe(false);
+
+    const next = editorReducer(optionalAnchor(), {
+      type: "update_field",
+      id: "counterparty_notes",
+      patch: { required: true },
+    });
+    const field = findField(next.document, "counterparty_notes");
+
+    expect(field?.required).toBe(true);
+    expect(field?.anchor?.required).toBeUndefined();
+    expect(field?.anchor?.text).toBe("Notes:");
+    expect(validateFieldSchema(JSON.parse(serializeFieldSchema(next.document)))).toEqual([]);
+  });
+
+  it("leaves an optional anchor alone when the field stays optional", () => {
+    const next = editorReducer(optionalAnchor(), {
+      type: "update_field",
+      id: "counterparty_notes",
+      patch: { label: "Notes" },
+    });
+
+    expect(findField(next.document, "counterparty_notes")?.anchor?.required).toBe(false);
+  });
+
+  it("still validates after a drag, a page change and a requiredness toggle in sequence", () => {
+    const next = apply(
+      state(),
+      { type: "update_field", id: "counterparty_notes", patch: { required: true } },
+      { type: "move_field", id: "counterparty_signature", x: 340, y: 660 },
+      { type: "update_field", id: "counterparty_signature", patch: { page: 1 } },
+      { type: "duplicate_field", id: "counterparty_signature" },
+    );
+
+    expect(validateFieldSchema(JSON.parse(serializeFieldSchema(next.document)))).toEqual([]);
   });
 });
 

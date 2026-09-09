@@ -12,6 +12,7 @@ use App\Domain\Preparation\Schema\InvalidFieldSchemaException;
 use App\Domain\Preparation\Schema\Prefill;
 use App\Domain\Preparation\Schema\ValidationCode;
 use App\Domain\Preparation\Text\AnchorOrigin;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\FieldSchemaFixture;
 
@@ -24,7 +25,9 @@ class FieldSchemaDocumentTest extends TestCase
     {
         $document = FieldSchemaDocument::fromJson(FieldSchemaFixture::json());
 
-        $this->assertSame('1.0', $document->schemaVersion->toString());
+        // The fixture uses `anchor.required`, a 1.1 member, so it declares 1.1 — and the
+        // importer keeps whatever version the document arrived with.
+        $this->assertSame('1.1', $document->schemaVersion->toString());
         $this->assertSame('doc_synthetic_nda', $document->documentId);
         $this->assertTrue($document->coordinateSpace->isNative());
         $this->assertSame(['buyer', 'counterparty'], $document->recipientIds());
@@ -136,23 +139,124 @@ class FieldSchemaDocumentTest extends TestCase
         $this->assertFalse($field->readOnly);
     }
 
-    public function test_a_non_canonical_document_canonicalises_on_first_import_then_is_stable(): void
+    /**
+     * Spelling is canonicalised; precision is refused.
+     *
+     * A document may spell `650.0` for `650` or omit a defaulted property, and import tidies both
+     * — those are two spellings of one value. A coordinate finer than a thousandth of a point is a
+     * different matter: rounding it would be a *transformation*, and the two implementations of
+     * this schema do not agree about every transformation, so the same submitted document could
+     * canonicalise to two byte strings and two `field_schema_sha256`. It is refused instead, and
+     * the caller rounds it themselves — a producer's rounding is its own business, and what it
+     * sends is then taken literally.
+     */
+    public function test_a_document_with_loose_spelling_canonicalises_and_is_then_stable(): void
     {
         $raw = self::minimalDocument();
         unset($raw['fields'][0]['read_only']);
-        // Coordinates finer than the canonical precision, and an integral value spelled as a float.
-        $raw['fields'][0]['rect'] = ['x' => 60.00049, 'y' => 650.0, 'width' => 170.4567, 'height' => 36];
+        // An integral value spelled as a float, and a canonical fractional one.
+        $raw['fields'][0]['rect'] = ['x' => 60.0, 'y' => 650.0, 'width' => 170.457, 'height' => 36];
 
         $document = FieldSchemaDocument::fromArray($raw);
         $canonical = $document->canonicalJson();
 
-        $this->assertNotSame(json_encode($raw, FieldSchemaDocument::JSON_FLAGS), $canonical);
         $this->assertStringContainsString('"x":60,"y":650,"width":170.457,"height":36', $canonical);
         $this->assertSame($canonical, FieldSchemaDocument::fromJson($canonical)->canonicalJson());
         $this->assertSame(
             json_decode($canonical, true),
             FieldSchemaDocument::fromJson($canonical)->toArray(),
         );
+    }
+
+    /**
+     * From 1.1. A 1.0 document still rounds, because refusing would be a semantic tightening of a
+     * published version and this schema reserves those for a major bump — see the sibling case.
+     */
+    public function test_a_coordinate_finer_than_the_canonical_precision_is_refused_from_1_1(): void
+    {
+        $raw = self::minimalDocument();
+        $raw['schema_version'] = '1.1';
+        $raw['fields'][0]['rect'] = ['x' => 60.00049, 'y' => 650, 'width' => 170.4567, 'height' => 36];
+
+        try {
+            FieldSchemaDocument::fromArray($raw);
+            $this->fail('Expected the document to be refused rather than rounded.');
+        } catch (InvalidFieldSchemaException $refused) {
+            $this->assertSame(
+                ['coordinate_too_precise', 'coordinate_too_precise'],
+                array_map(static fn ($error) => $error->code->value, $refused->result->errors),
+            );
+        }
+    }
+
+    /**
+     * 1.0 rounds it, exactly as it always has.
+     *
+     * Refusing here would take away a document that worked: an integration posting to the API and
+     * never opening the editor had one canonical form for this value, deterministically. The two
+     * implementations can still disagree about it — that is the cost, it is issue #105, and it is
+     * a 2.0 question rather than something a minor version gets to fix by tightening underneath
+     * its consumers.
+     */
+    public function test_a_1_0_document_still_rounds_a_finer_coordinate(): void
+    {
+        $raw = self::minimalDocument();
+        $raw['fields'][0]['rect'] = ['x' => 60.00049, 'y' => 650, 'width' => 170.4567, 'height' => 36];
+
+        $canonical = FieldSchemaDocument::fromArray($raw)->canonicalJson();
+
+        $this->assertStringContainsString('"x":60,"y":650,"width":170.457,"height":36', $canonical);
+    }
+
+    /**
+     * Rounding interacts with **two** independent rules, in opposite directions, and the 1.0 path
+     * has to satisfy both at once.
+     *
+     * Rounding always moves a value toward zero. So it can only ever *hide* a sign problem —
+     * `-0.0004` becomes `-0.0`, which is not less than zero, so a negative coordinate passed
+     * validation and then threw from `Rect`'s constructor, a 500 where a 422 belongs. And it can
+     * only ever *create* an extent problem — `0.0004` becomes `0`, which is not greater than
+     * zero, and the document that used to be stored then failed its own next import.
+     *
+     * One value and one rule is not the property: a test of the negative case alone passes while
+     * extents are checked on the wrong basis, and a test of the width case alone passes while
+     * signs are. The matrix is sign against member kind, which is what pins each check to the
+     * value that can go wrong for it.
+     *
+     * @return iterable<string, array{string, float, string}>
+     */
+    public static function nearZeroCoordinates(): iterable
+    {
+        //                                     member    value      expected code ('' = accepted)
+        yield 'a corner that rounds to -0.0' => ['x', -0.0004, 'coordinate_negative'];
+        yield 'a corner that rounds to 0' => ['x', 0.0004, ''];
+        yield 'an extent that rounds to -0.0' => ['width', -0.0004, 'dimension_not_positive'];
+        yield 'an extent that rounds to 0' => ['width', 0.0004, 'dimension_not_positive'];
+    }
+
+    #[DataProvider('nearZeroCoordinates')]
+    public function test_a_1_0_document_checks_each_rule_on_the_value_that_can_break_it(
+        string $member,
+        float $value,
+        string $expected,
+    ): void {
+        $raw = self::minimalDocument();
+        $raw['fields'][0]['rect'][$member] = $value;
+
+        if ($expected === '') {
+            // Accepted *and* storable: the point is that validation and construction agree.
+            $this->assertInstanceOf(FieldSchemaDocument::class, FieldSchemaDocument::fromArray($raw));
+
+            return;
+        }
+
+        try {
+            FieldSchemaDocument::fromArray($raw);
+            $this->fail('Expected '.$expected.' rather than acceptance or a constructor failure.');
+        } catch (InvalidFieldSchemaException $refused) {
+            $this->assertSame($expected, $refused->result->errors[0]->code->value);
+            $this->assertSame('/fields/0/rect/'.$member, $refused->result->errors[0]->path);
+        }
     }
 
     public function test_a_document_built_in_code_exports_canonically(): void

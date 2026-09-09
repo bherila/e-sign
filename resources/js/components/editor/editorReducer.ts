@@ -343,7 +343,48 @@ function mapField(
 }
 
 function withRect(field: FieldDefinition, rect: Rect): FieldDefinition {
-  return { ...field, rect: roundRect(rect) };
+  return settled(field, { ...field, rect: roundRect(rect) });
+}
+
+const RECT_KEYS = ["x", "y", "width", "height"] as const;
+
+/**
+ * Drop a resolution receipt that the *result* of an edit has invalidated.
+ *
+ * `anchor.resolved` records what resolution found for this field on this page: the importer
+ * requires its `page` to be the field's and, in `replace` mode, its rectangle to be the field's
+ * own. An edit that changes either therefore leaves an answer to a question the field is no
+ * longer asking, and keeping it would make the next Save a 422 with nothing in the editor
+ * offering a way to clear it.
+ *
+ * **The rule is about the result, not the action.** Invalidation is a property of whether the
+ * canonical rectangle or the page actually changed, never of which gesture produced it. Deciding
+ * it from the action was wrong in both directions: a pointer-up with zero displacement still
+ * arrives as a move, so merely clicking a field deleted its receipt, dirtied the document and
+ * pushed an undo entry; and every future action that can move a field would have needed its own
+ * case here. Comparing canonical values means each editor action — including ones not yet
+ * written — inherits the rule instead of restating it.
+ *
+ * Dropping the receipt is not losing anything: the anchor *request* is kept, so publishing
+ * resolves it again against the document. What is thrown away is a stale answer.
+ */
+function settled(before: FieldDefinition, after: FieldDefinition): FieldDefinition {
+  if (after.anchor?.resolved === undefined) {
+    return after;
+  }
+
+  if (before.page === after.page && sameRect(before.rect, after.rect)) {
+    return after;
+  }
+
+  const { resolved: _resolved, ...anchor } = after.anchor;
+
+  return { ...after, anchor };
+}
+
+/** Canonical equality: the comparison the importer will make, on the values it will be given. */
+function sameRect(a: Rect, b: Rect): boolean {
+  return RECT_KEYS.every((key) => roundCoordinate(a[key]) === roundCoordinate(b[key]));
 }
 
 function roundRect(rect: Rect): Rect {
@@ -396,6 +437,18 @@ function applyPatch(field: FieldDefinition, patch: FieldPatch): FieldDefinition 
 
   if (patch.required !== undefined) {
     next.required = patch.required;
+
+    // `anchor.required: false` says the text may legitimately be absent and the field is then
+    // omitted, which can only be true of a field nobody has to fill in. Making the field required
+    // therefore contradicts it, and the contract refuses the pair. The inspector has no control
+    // for the anchor's own requiredness, so leaving the two to disagree would produce a document
+    // no sequence of editor actions could repair — Save would 422 for ever. Clearing the property
+    // restores the default, which is that the anchor is required too: the same treatment a drag
+    // gives a receipt it has invalidated.
+    if (patch.required && next.anchor?.required === false) {
+      const { required: _required, ...anchor } = next.anchor;
+      next.anchor = anchor;
+    }
   }
 
   if (patch.read_only !== undefined) {
@@ -413,7 +466,7 @@ function applyPatch(field: FieldDefinition, patch: FieldPatch): FieldDefinition 
     }
   }
 
-  return next;
+  return settled(field, next);
 }
 
 /**
@@ -453,5 +506,7 @@ function duplicateField(source: FieldDefinition, document: FieldSchemaDocument):
   // answer to a name an integration uses to patch exactly one.
   delete copy.alias;
 
-  return copy;
+  // The copy is offset from the original, so a receipt describing the original's rectangle
+  // describes nothing about this one. Decided by the same comparison as every other edit.
+  return settled(source, copy);
 }

@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Tests\Unit\Preparation\Schema;
 
 use App\Domain\Preparation\Schema\AnchorPlacement;
+use App\Domain\Preparation\Schema\AnchorPlacementMode;
+use App\Domain\Preparation\Schema\CanonicalNumber;
 use App\Domain\Preparation\Schema\CoordinateSpaceDeclaration;
 use App\Domain\Preparation\Schema\FieldDefinition;
 use App\Domain\Preparation\Schema\FieldSchemaValidator;
@@ -191,7 +193,10 @@ class FieldSchemaContractTest extends TestCase
             'A default occurrence would be the "first match wins" fallback the Text module refuses.',
         );
         $this->assertSame(
-            [['const' => AnchorPlacement::OCCURRENCE_SOLE], ['type' => 'integer', 'minimum' => 1]],
+            [
+                ['const' => AnchorPlacement::OCCURRENCE_SOLE],
+                ['type' => 'integer', 'minimum' => 1, 'maximum' => CanonicalNumber::MAX_INTEGER],
+            ],
             $anchor['properties']['occurrence']['oneOf'],
         );
         $this->assertStringNotContainsString('"all"', json_encode($anchor['properties']['occurrence']['oneOf']) ?: '');
@@ -200,6 +205,57 @@ class FieldSchemaContractTest extends TestCase
             array_map(static fn (AnchorOrigin $corner): string => $corner->value, AnchorOrigin::cases()),
             $anchor['properties']['origin']['enum'],
         );
+    }
+
+    /**
+     * The relationships between properties, which a contract file states with a conditional.
+     *
+     * A rule tying one property to another is the easiest kind for a schema file and an importer
+     * to disagree about, because the file can only say it with `if`/`then` and it is tempting not
+     * to write one. The cost falls on an integration: it validates against the published file, is
+     * told the document conforms, and gets a 422 from the service. `fieldSchemaContract.test.ts`
+     * proves each of these by running ajv and the importer over the same document; this pins the
+     * shape so the conditionals cannot quietly be dropped from the file.
+     */
+    public function test_the_conditional_relationships_are_stated_in_the_contract(): void
+    {
+        $field = self::definition('field');
+        $anchor = self::definition('anchor');
+
+        // anchor.required false omits the field, which a required field cannot do. The field has
+        // to say `required: false` explicitly, because omitting it means true.
+        $this->assertCount(1, $field['allOf']);
+        $condition = $field['allOf'][0];
+
+        $this->assertSame(['anchor'], $condition['if']['required']);
+        $this->assertSame(['required'], $condition['if']['properties']['anchor']['required']);
+        $this->assertFalse($condition['if']['properties']['anchor']['properties']['required']['const']);
+        $this->assertSame(['required'], $condition['then']['required']);
+        $this->assertFalse($condition['then']['properties']['required']['const']);
+
+        $conditions = array_map(
+            static fn (array $rule): array => [$rule['if'], $rule['then']],
+            $anchor['allOf'],
+        );
+
+        // A tolerance only means something in cross_check mode.
+        $this->assertSame(['tolerance'], $conditions[0][0]['required']);
+        $this->assertSame(
+            AnchorPlacementMode::CrossCheck->value,
+            $conditions[0][1]['properties']['placement']['const'],
+        );
+
+        // required false and cross_check contradict each other: there is nothing to omit.
+        $this->assertSame(['required'], $conditions[1][0]['required']);
+        $this->assertFalse($conditions[1][0]['properties']['required']['const']);
+        $this->assertSame(
+            AnchorPlacementMode::Replace->value,
+            $conditions[1][1]['properties']['placement']['const'],
+        );
+
+        // A cross_check receipt has to state the tolerance it was judged against.
+        $this->assertSame(['placement', 'resolved'], $conditions[2][0]['required']);
+        $this->assertSame(['tolerance'], $conditions[2][1]['required']);
     }
 
     public function test_the_signing_order_shape_is_stages_of_recipient_ids(): void

@@ -1,5 +1,6 @@
 import fixtureJson from "../../../tests/Fixtures/schema/nda-two-signers.json";
 import {
+  ANCHOR_TOLERANCE_MAX,
   CANONICAL_DECIMALS,
   FIELD_SCHEMA_VERSION,
   FIELD_TYPES,
@@ -90,13 +91,23 @@ describe("parseFieldSchema", () => {
   it("keeps the anchor placement request verbatim", () => {
     const document = parseFieldSchema(fixture());
 
+    // `placement` and `required` are absent because they equal their defaults, and the
+    // canonical form omits a defaulted anchor property — which is what keeps a document written
+    // before those properties existed byte-identical, and its digest with it.
     expect(document.fields[5]!.anchor).toEqual({
       text: "Counterparty signature:",
       occurrence: "sole",
       origin: "bottom_left",
       offset: { dx: 0, dy: 12.5 },
     });
-    expect(document.fields[9]!.anchor).toEqual({ text: "Notes:", occurrence: 2 });
+    // The optional notes field's anchor, as a caller can send it today. `required: false` — the
+    // narrow compatibility option for an anchor that may be absent — is a 1.1 member the importer
+    // reads but `AnchorResolutionGate` refuses to store until resolution ships, so the shared
+    // fixture does not carry it and the cases that exercise it add it themselves.
+    expect(document.fields[9]!.anchor).toEqual({
+      text: "Notes:",
+      occurrence: 2,
+    });
   });
 });
 
@@ -116,6 +127,87 @@ describe("serializeFieldSchema", () => {
     expect(twice).toBe(once);
   });
 
+  it("round trips a resolution receipt without drift", () => {
+    // The editor reads back documents the service has already resolved: a published template
+    // version, or an envelope. A receipt it could not re-emit byte for byte would show up as a
+    // spurious unsaved change the moment somebody opened one.
+    const json = serializeFieldSchema(
+      parseFieldSchema(
+        brokenFixture((raw) => {
+          raw.fields[5].anchor.resolved = {
+            document_sha256: "b".repeat(64),
+            page: 2,
+            occurrence_index: 1,
+            anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
+            // In `replace` mode the receipt records where the field went, so it has to be the
+            // field's own rectangle, exactly: the importer no longer rounds a fractional tail
+            // away, it refuses one.
+            rect: { x: 330, y: 650, width: 170, height: 36 },
+          };
+        }),
+      ),
+    );
+
+    expect(json).toContain('"occurrence_index":1');
+    expect(json).toContain('"rect":{"x":330,"y":650,"width":170,"height":36}');
+    expect(serializeFieldSchema(parseFieldSchema(json))).toBe(json);
+  });
+
+  /**
+   * The largest tolerance the schema allows still canonicalises to bytes PHP would write.
+   *
+   * `tolerance` is the first number in this schema with no page behind it, which is what made the
+   * exponential range reachable at all — and in that range the canonical form is undefined,
+   * because PHP writes `1.0e+20` where this runtime writes `100000000000000000000`. The schema
+   * bounds the property rather than trying to agree on a spelling, so the top of the range is a
+   * plain integer here and a plain integer there.
+   */
+  it("canonicalises the largest allowed tolerance as a plain integer", () => {
+    const raw = JSON.parse(JSON.stringify(fixtureJson)) as Record<string, any>;
+    raw.fields[5].anchor.placement = "cross_check";
+    raw.fields[5].anchor.tolerance = ANCHOR_TOLERANCE_MAX;
+
+    const json = serializeFieldSchema(parseFieldSchema(raw));
+
+    expect(json).toContain(`"tolerance":${ANCHOR_TOLERANCE_MAX}`);
+    expect(json).not.toContain("e+");
+    expect(validateFieldSchema(JSON.parse(json))).toEqual([]);
+  });
+
+  it("omits a defaulted anchor property so an older document keeps its bytes", () => {
+    const json = serializeFieldSchema(
+      parseFieldSchema(
+        brokenFixture((raw) => {
+          raw.fields[5].anchor.placement = "replace";
+          raw.fields[5].anchor.required = true;
+        }),
+      ),
+    );
+
+    // Written out explicitly, canonicalised away: an anchor authored before `placement` and
+    // `required` existed must produce exactly the bytes it always produced, because the
+    // field-schema digest is what every attestation on an anchored agreement is bound to.
+    expect(json).toContain('"anchor":{"text":"Counterparty signature:","occurrence":"sole","origin":"bottom_left"');
+    expect(json).not.toContain('"placement":"replace"');
+    expect(json).toBe(serializeFieldSchema(parseFieldSchema(fixture())));
+  });
+
+  it("keeps a non-default placement and a false anchor.required", () => {
+    const json = serializeFieldSchema(
+      parseFieldSchema(
+        brokenFixture((raw) => {
+          raw.fields[5].anchor.placement = "cross_check";
+          raw.fields[5].anchor.tolerance = 2;
+          raw.fields[9].anchor.required = false;
+        }),
+      ),
+    );
+
+    expect(json).toContain('"placement":"cross_check"');
+    expect(json).toContain('"tolerance":2');
+    expect(json).toContain('"text":"Notes:","occurrence":2,"required":false');
+  });
+
   it("preserves stable field ids and template aliases", () => {
     const reimported = parseFieldSchema(serializeFieldSchema(parseFieldSchema(fixture())));
     const aliased = reimported.fields.find((field) => field.alias === "counterparty_signature_block");
@@ -126,17 +218,35 @@ describe("serializeFieldSchema", () => {
     );
   });
 
-  it("writes integral coordinates without a fractional part and rounds to three decimals", () => {
+  it("writes integral coordinates without a fractional part", () => {
     const json = serializeFieldSchema(
       parseFieldSchema(
         brokenFixture((raw) => {
-          raw.fields[0].rect = { x: 60.00049, y: 650.0, width: 170.4567, height: 36 };
+          raw.fields[0].rect = { x: 60.0, y: 650.0, width: 170.457, height: 36 };
         }),
       ),
     );
 
     expect(json).toContain('"x":60,"y":650,"width":170.457,"height":36');
     expect(serializeFieldSchema(parseFieldSchema(json))).toBe(json);
+  });
+
+  /**
+   * Spelling is canonicalised; precision is refused.
+   *
+   * `650.0` and `650` are two spellings of one value and import tidies them. A coordinate finer
+   * than a thousandth of a point is not a spelling — rounding it is a transformation, and this
+   * runtime and PHP do not agree about every transformation (`1.6484999999999999` rounds to 1.649
+   * here and 1.648 there). Refusing it is what keeps one document to one digest.
+   */
+  it("refuses a coordinate finer than the canonical precision rather than rounding it", () => {
+    const issues = validateFieldSchema(
+      brokenFixture((raw) => {
+        raw.fields[0].rect = { x: 60.00049, y: 650, width: 170.4567, height: 36 };
+      }),
+    );
+
+    expect(issues.map((problem) => problem.code)).toEqual(["coordinate_too_precise", "coordinate_too_precise"]);
   });
 
   it("survives a thousand round trips of generated documents without coordinate drift", () => {
@@ -422,6 +532,207 @@ describe("validateFieldSchema", () => {
       (raw) => delete raw.fields[5].anchor.offset.dx,
       "missing_property",
       "/fields/5/anchor/offset",
+    ],
+    [
+      "an undeclared anchor placement",
+      (raw) => (raw.fields[5].anchor.placement = "nudge"),
+      "invalid_format",
+      "/fields/5/anchor/placement",
+    ],
+    [
+      "an optional anchor on a required field",
+      (raw) => (raw.fields[5].anchor.required = false),
+      "anchor_optional_on_required_field",
+      "/fields/5/anchor/required",
+    ],
+    [
+      "a 1.1 anchor member in a document that declares 1.0",
+      (raw) => {
+        raw.schema_version = "1.0";
+        raw.fields[5].anchor.placement = "replace";
+      },
+      "unknown_property",
+      "/fields/5/anchor/placement",
+    ],
+    [
+      "a cross-check receipt that disagrees with the declared rectangle",
+      (raw) => {
+        raw.fields[5].anchor.placement = "cross_check";
+        raw.fields[5].anchor.tolerance = 1;
+        raw.fields[5].anchor.resolved = {
+          document_sha256: "d".repeat(64),
+          page: 2,
+          occurrence_index: 1,
+          anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
+          rect: { x: 390, y: 650, width: 170, height: 36 },
+        };
+      },
+      "anchor_cross_check_failed",
+      "/fields/5/anchor/resolved/rect/x",
+    ],
+    [
+      "a cross-check receipt with no tolerance to have passed by",
+      (raw) => {
+        raw.fields[5].anchor.placement = "cross_check";
+        raw.fields[5].anchor.resolved = {
+          document_sha256: "d".repeat(64),
+          page: 2,
+          occurrence_index: 1,
+          anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
+          rect: { x: 330, y: 650, width: 170, height: 36 },
+        };
+      },
+      "missing_property",
+      "/fields/5/anchor/resolved",
+    ],
+    [
+      "an optional anchor that only cross-checks a rectangle it cannot omit",
+      (raw) => {
+        raw.fields[9].anchor.required = false;
+        raw.fields[9].anchor.placement = "cross_check";
+      },
+      "invalid_format",
+      "/fields/9/anchor/required",
+    ],
+    [
+      "a receipt describing a rectangle the field is not at",
+      (raw) => {
+        raw.fields[5].anchor.resolved = {
+          document_sha256: "c".repeat(64),
+          page: 2,
+          occurrence_index: 1,
+          anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
+          rect: { x: 999, y: 650, width: 170, height: 36 },
+        };
+      },
+      "invalid_format",
+      "/fields/5/anchor/resolved/rect/x",
+    ],
+    [
+      "a measured anchor rect with a negative extent",
+      (raw) => {
+        raw.fields[5].anchor.resolved = {
+          document_sha256: "c".repeat(64),
+          page: 2,
+          occurrence_index: 1,
+          anchor_rect: { x: 330, y: 622.4, width: -1, height: 12 },
+          rect: { x: 330, y: 650, width: 170, height: 36 },
+        };
+      },
+      "dimension_not_positive",
+      "/fields/5/anchor/resolved/anchor_rect/width",
+    ],
+    [
+      "a tolerance on an anchor that decides the position outright",
+      (raw) => (raw.fields[5].anchor.tolerance = 2),
+      "invalid_format",
+      "/fields/5/anchor/tolerance",
+    ],
+    [
+      "a negative cross-check tolerance",
+      (raw) => {
+        raw.fields[5].anchor.placement = "cross_check";
+        raw.fields[5].anchor.tolerance = -1;
+      },
+      "invalid_format",
+      "/fields/5/anchor/tolerance",
+    ],
+    [
+      "a resolution receipt with a digest that is not one",
+      (raw) => {
+        raw.fields[5].anchor.resolved = {
+          document_sha256: "not-a-digest",
+          page: 2,
+          occurrence_index: 1,
+          anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
+          rect: { x: 330, y: 646.9, width: 170, height: 36 },
+        };
+      },
+      "invalid_format",
+      "/fields/5/anchor/resolved/document_sha256",
+    ],
+    [
+      "a resolution receipt with a zero occurrence index",
+      (raw) => {
+        raw.fields[5].anchor.resolved = {
+          document_sha256: "a".repeat(64),
+          page: 2,
+          occurrence_index: 0,
+          anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
+          rect: { x: 330, y: 646.9, width: 170, height: 36 },
+        };
+      },
+      "invalid_format",
+      "/fields/5/anchor/resolved/occurrence_index",
+    ],
+    [
+      "a resolution receipt missing the digest of the bytes it measured",
+      (raw) => {
+        raw.fields[5].anchor.resolved = {
+          page: 2,
+          occurrence_index: 1,
+          anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
+          rect: { x: 330, y: 646.9, width: 170, height: 36 },
+        };
+      },
+      "missing_property",
+      "/fields/5/anchor/resolved",
+    ],
+    [
+      "a cross-check that only passes before canonical rounding",
+      (raw) => {
+        raw.fields[5].rect.x = 330.0004;
+        raw.fields[5].anchor.placement = "cross_check";
+        raw.fields[5].anchor.tolerance = 1.0004;
+        raw.fields[5].anchor.resolved = {
+          document_sha256: "d".repeat(64),
+          page: 2,
+          occurrence_index: 1,
+          anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
+          rect: { x: 331.00179, y: 650, width: 170, height: 36 },
+        };
+      },
+      "anchor_cross_check_failed",
+      "/fields/5/anchor/resolved/rect/x",
+    ],
+    [
+      "a cross-check receipt outside the exact tolerance it states",
+      (raw) => {
+        raw.fields[5].anchor.placement = "cross_check";
+        raw.fields[5].anchor.tolerance = 0;
+        raw.fields[5].anchor.resolved = {
+          document_sha256: "d".repeat(64),
+          page: 2,
+          occurrence_index: 1,
+          anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
+          rect: { x: 330.001, y: 650, width: 170, height: 36 },
+        };
+      },
+      "anchor_cross_check_failed",
+      "/fields/5/anchor/resolved/rect/x",
+    ],
+    [
+      "a measured rect beyond the largest page a PDF can have",
+      (raw) => {
+        raw.fields[5].anchor.resolved = {
+          document_sha256: "d".repeat(64),
+          page: 2,
+          occurrence_index: 1,
+          anchor_rect: { x: 1e20, y: 622.4, width: 165.6, height: 12 },
+          rect: raw.fields[5].rect,
+        };
+      },
+      "invalid_format",
+      "/fields/5/anchor/resolved/anchor_rect/x",
+    ],
+    [
+      "a tolerance beyond the largest page a PDF can have",
+      (raw) => {
+        raw.fields[5].anchor.placement = "cross_check";
+        raw.fields[5].anchor.tolerance = ANCHOR_TOLERANCE_MAX + 1;
+      },
+      "invalid_format",
+      "/fields/5/anchor/tolerance",
     ],
     [
       "a recipient email that is not an address",

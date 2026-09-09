@@ -29,12 +29,50 @@ final class CanonicalNumber
     public const DECIMALS = 3;
 
     /**
+     * Largest integer this schema admits: 2^53 - 1, the largest both implementations agree on.
+     *
+     * Every integer property — a page number, an occurrence index — is bounded by it, and for the
+     * reason `AnchorPlacement::MAX_TOLERANCE` bounds a distance: a document must mean the same
+     * thing in both projections. PHP's integers run to 2^63 - 1, and JavaScript's numbers stop
+     * being exact at 2^53, so between the two a value is representable on one side and rounded on
+     * the other — and the TypeScript importer would accept a document the PHP one refuses, which
+     * an integration meets as a 422 after its own editor said the document was fine.
+     *
+     * `Number.MAX_SAFE_INTEGER` is the line because it is the largest integer JavaScript can hold
+     * *and distinguish from its successor*. Below it both languages parse, compare and print the
+     * same digits (docs/preparation/field-schema.md, "Why every number in this schema is
+     * bounded").
+     */
+    public const MAX_INTEGER = 9_007_199_254_740_991;
+
+    /**
      * Slack allowed when comparing a rounded coordinate against a page boundary.
      *
      * One unit in the last retained place: a rectangle that sits exactly on the page edge must
      * not be rejected because rounding moved it half a thousandth of a point outwards.
      */
     public const TOLERANCE = 0.001;
+
+    /**
+     * Whether a value is already canonical: at most {@see DECIMALS} decimal places.
+     *
+     * The importer refuses a finer value rather than rounding it, and the difference matters more
+     * than it looks. Rounding is a *transformation*, and two implementations that both transform
+     * can disagree about the result: `round(1.6484999999999999, 3)` is 1.648 in PHP and 1.649 in
+     * the TypeScript editor, so the same submitted document would canonicalise to two different
+     * byte strings and two different `field_schema_sha256` — the digest every attestation binds.
+     * Refusing instead means no accepted value is ever transformed, so there is nothing for the
+     * two to disagree about.
+     *
+     * Producers still round: the editor rounds what a drag produced, and resolution rounds what it
+     * measured. That is safe precisely because it happens once, on one side, before the value
+     * becomes part of a document — a producer's rounding is its own business, and what it sends is
+     * then taken literally.
+     */
+    public static function isCanonical(float $value): bool
+    {
+        return is_finite($value) && round($value, self::DECIMALS) === $value;
+    }
 
     /**
      * Round to the canonical precision, half away from zero.

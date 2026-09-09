@@ -2,7 +2,12 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { FIELD_TYPES, type FieldDefinition, type FieldSchemaDocument } from "@/schema/fieldSchema";
+import {
+  DEFAULT_ANCHOR_PLACEMENT,
+  FIELD_TYPES,
+  type FieldDefinition,
+  type FieldSchemaDocument,
+} from "@/schema/fieldSchema";
 
 import type { FieldPatch } from "./editorReducer";
 import { EditorSelect } from "./EditorSelect";
@@ -212,10 +217,29 @@ export function FieldInspector({
         <div className="rounded-md border p-2 text-xs">
           <p className="font-medium">Anchor placement</p>
           <p className="text-muted-foreground">
-            Placed relative to <span className="font-mono">{JSON.stringify(field.anchor.text)}</span>,
-            occurrence <span className="font-mono">{String(field.anchor.occurrence)}</span>. The
-            resolver writes the resolved rectangle before send; editing the rectangle here does
-            not remove the anchor.
+            {/*
+              The two modes do opposite things to this field's rectangle, so they cannot share a
+              sentence. Telling somebody who positioned a field by hand that it will be moved is
+              the more damaging half of the confusion, which is why `cross_check` says plainly
+              that the rectangle stays where they put it.
+            */}
+            {(field.anchor.placement ?? DEFAULT_ANCHOR_PLACEMENT) === "cross_check" ? (
+              <>
+                Checked against <span className="font-mono">{JSON.stringify(field.anchor.text)}</span>,
+                occurrence <span className="font-mono">{String(field.anchor.occurrence)}</span>. This
+                rectangle decides where the field goes and is left exactly as you set it; the anchor
+                only has to agree with it, and a disagreement larger than the tolerance stops the
+                send rather than moving anything.
+              </>
+            ) : (
+              <>
+                Placed relative to <span className="font-mono">{JSON.stringify(field.anchor.text)}</span>,
+                occurrence <span className="font-mono">{String(field.anchor.occurrence)}</span>. The
+                resolver writes the resolved rectangle before send, so this rectangle is a
+                placeholder for its position and supplies only its size.
+              </>
+            )}{" "}
+            Editing the rectangle here does not remove the anchor.
           </p>
         </div>
       )}
