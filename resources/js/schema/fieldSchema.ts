@@ -337,6 +337,16 @@ export const ANCHOR_MEMBERS_SINCE_1_1 = ["placement", "required", "tolerance", "
 
 export const ANCHOR_MEMBERS_MINOR = 1;
 
+/**
+ * The first minor version that refuses an over-precise coordinate instead of rounding it.
+ *
+ * 1.0 rounds, as it always has. Refusing is a semantic tightening — a document 1.0 accepted stops
+ * being accepted — and this schema's policy reserves those for a **major** bump. The price is that
+ * a 1.0 document can still canonicalise two ways across the two implementations (issue #105); that
+ * is a 2.0 question, not something a minor version fixes by tightening underneath its consumers.
+ */
+export const PRECISION_REFUSED_SINCE_MINOR = 1;
+
 export const RESOLVED_ANCHOR_REQUIRED = [
   "document_sha256",
   "page",
@@ -970,10 +980,13 @@ function checkFields(
       checkFieldType(`${path}/type`, field["type"], issues);
     }
 
-    const page = "page" in field ? checkPage(`${path}/page`, field["page"], options.pageSizes, issues) : null;
+    const page =
+      "page" in field
+        ? checkPage(`${path}/page`, field["page"], options.pageSizes, refusesImprecision(document), issues)
+        : null;
 
     if ("rect" in field) {
-      checkRect(`${path}/rect`, field["rect"], page, options.pageSizes, issues);
+      checkRect(`${path}/rect`, field["rect"], page, options.pageSizes, refusesImprecision(document), issues);
     }
 
     for (const flag of ["required", "read_only"] as const) {
@@ -1036,6 +1049,13 @@ function checkIntegerRange(path: string, label: string, value: number, issues: V
   return false;
 }
 
+/** Whether this document's version refuses an over-precise coordinate rather than rounding it. */
+function refusesImprecision(document: Record<string, unknown>): boolean {
+  const minor = declaredMinor(document);
+
+  return minor !== null && minor >= PRECISION_REFUSED_SINCE_MINOR;
+}
+
 /** A coordinate must arrive already canonical. Returns false when it did not. */
 function checkPrecision(path: string, label: string, value: number, issues: ValidationIssue[]): boolean {
   if (!Number.isFinite(value) || isCanonical(value)) {
@@ -1056,7 +1076,13 @@ function checkPrecision(path: string, label: string, value: number, issues: Vali
   return false;
 }
 
-function checkPage(path: string, page: unknown, pageSizes: PageSize[] | undefined, issues: ValidationIssue[]): number | null {
+function checkPage(
+  path: string,
+  page: unknown,
+  pageSizes: PageSize[] | undefined,
+  refuseImprecise: boolean,
+  issues: ValidationIssue[],
+): number | null {
   if (typeof page !== "number" || !Number.isInteger(page)) {
     issues.push(issue(path, "invalid_type", "page must be an integer."));
 
@@ -1071,7 +1097,9 @@ function checkPage(path: string, page: unknown, pageSizes: PageSize[] | undefine
     return null;
   }
 
-  if (!checkIntegerRange(path, "page", page, issues, "page_out_of_range")) {
+  // Gated by version like the precision rule, and for the same reason: 1.0 accepted a larger
+  // integer, and refusing one now would be a semantic tightening of a published version.
+  if (refuseImprecise && !checkIntegerRange(path, "page", page, issues, "page_out_of_range")) {
     return null;
   }
 
@@ -1087,6 +1115,7 @@ function checkRect(
   rect: unknown,
   page: number | null,
   pageSizes: PageSize[] | undefined,
+  refuseImprecise: boolean,
   issues: ValidationIssue[],
 ): void {
   if (!isObject(rect)) {
@@ -1104,28 +1133,36 @@ function checkRect(
       continue;
     }
 
-    const value = rect[name];
+    const raw = rect[name];
 
-    if (typeof value !== "number") {
+    if (typeof raw !== "number") {
       issues.push(issue(`${path}/${name}`, "invalid_type", `rect.${name} must be a number.`));
 
       continue;
     }
 
-    if (!Number.isFinite(value)) {
+    if (!Number.isFinite(raw)) {
       issues.push(
-        issue(`${path}/${name}`, "coordinate_not_finite", `rect.${name} must be a finite number; got ${value}.`),
+        issue(`${path}/${name}`, "coordinate_not_finite", `rect.${name} must be a finite number; got ${raw}.`),
       );
 
       continue;
     }
 
-    // A document carries canonical numbers, so a finer value is refused rather than rounded:
-    // rounding would make the validator's answer depend on a transformation the two
-    // implementations do not agree about. Refusing means every accepted value is already the value
-    // that will be stored, so validation and canonicalisation cannot come apart.
-    if (!checkPrecision(`${path}/${name}`, `rect.${name}`, value, issues)) {
-      continue;
+    // From 1.1 a finer value is refused rather than rounded: rounding would make the validator's
+    // answer depend on a transformation the two implementations do not agree about. 1.0 rounds,
+    // because refusing would be a semantic tightening of a published version
+    // ({@link PRECISION_REFUSED_SINCE_MINOR}). Rounding *before* the checks rather than after is
+    // the one change 1.0 gets, and it takes nothing away: it refuses only values that rounded into
+    // an invalid state, which were never documents that worked.
+    let value = raw;
+
+    if (refuseImprecise) {
+      if (!checkPrecision(`${path}/${name}`, `rect.${name}`, value, issues)) {
+        continue;
+      }
+    } else {
+      value = roundCoordinate(value);
     }
 
     if ((name === "x" || name === "y") && value < 0) {
@@ -1291,7 +1328,12 @@ function checkAnchor(
   }
 
   if ("occurrence" in anchor) {
-    checkAnchorOccurrence(`${path}/occurrence`, anchor["occurrence"], issues);
+    checkAnchorOccurrence(
+      `${path}/occurrence`,
+      anchor["occurrence"],
+      minor !== null && minor >= PRECISION_REFUSED_SINCE_MINOR,
+      issues,
+    );
   }
 
   const placement = checkAnchorPlacement(`${path}/placement`, anchor, issues) ?? DEFAULT_ANCHOR_PLACEMENT;
@@ -1359,7 +1401,10 @@ function checkAnchor(
       continue;
     }
 
-    checkPrecision(`${path}/offset/${name}`, `anchor.offset.${name}`, value, issues);
+    // `offset` is a 1.0 member, so it follows the version's rule like `rect` does.
+    if (minor !== null && minor >= PRECISION_REFUSED_SINCE_MINOR) {
+      checkPrecision(`${path}/offset/${name}`, `anchor.offset.${name}`, value, issues);
+    }
   }
 }
 
@@ -1593,7 +1638,8 @@ function checkResolvedAnchor(
     return;
   }
 
-  checkRect(`${path}/rect`, resolved["rect"], null, undefined, issues);
+  // `resolved` is a 1.1 member, so it can only appear where the rule applies.
+  checkRect(`${path}/rect`, resolved["rect"], null, undefined, true, issues);
 
   // And bounded, which the field's own rect is not: `$defs/resolved_rect` arrived in 1.1 and can
   // carry the bound, while `rect` is 1.0's and tightening it would change what this build accepts
@@ -1774,7 +1820,12 @@ function checkCoordinateMagnitude(path: string, rect: unknown, issues: Validatio
   }
 }
 
-function checkAnchorOccurrence(path: string, occurrence: unknown, issues: ValidationIssue[]): void {
+function checkAnchorOccurrence(
+  path: string,
+  occurrence: unknown,
+  refuseImprecise: boolean,
+  issues: ValidationIssue[],
+): void {
   if (typeof occurrence === "string") {
     if (occurrence === ANCHOR_OCCURRENCE_SOLE) {
       return;
@@ -1806,7 +1857,9 @@ function checkAnchorOccurrence(path: string, occurrence: unknown, issues: Valida
     return;
   }
 
-  checkIntegerRange(path, "anchor.occurrence", occurrence, issues, "invalid_format");
+  if (refuseImprecise) {
+    checkIntegerRange(path, "anchor.occurrence", occurrence, issues, "invalid_format");
+  }
 }
 
 /**

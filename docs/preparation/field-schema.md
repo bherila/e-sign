@@ -281,11 +281,11 @@ artifact, `tests/Fixtures/schema/numeric-refusals.json`: each side computes its 
 asserts they match the file, so neither can drift silently and the file is regenerated deliberately
 rather than edited.
 
-### Precision is refused, never rounded
+### Precision is refused from 1.1, and rounded in 1.0
 
-The importer used to round a coordinate to three decimals. It now **refuses** one that is finer,
-with `coordinate_too_precise`, and the difference is the reason the canonical form can be trusted
-at all.
+A **1.1** document refuses a coordinate finer than three decimals, with `coordinate_too_precise`,
+rather than rounding it. A **1.0** document rounds it, exactly as it always has. That difference is
+deliberate and it is a version difference, not an inconsistency.
 
 Rounding is a *transformation*, and two implementations that both transform can disagree about the
 result. They did: `1.6484999999999999` rounds to `1.648` in PHP and `1.649` in the TypeScript
@@ -304,8 +304,23 @@ before the value is part of a document — a producer's rounding is its own busi
 sends is then taken literally. Two producers rounding differently is harmless; two *readers*
 rounding differently is a document with two digests.
 
-No document that worked stops working: a value with four decimals never had a single canonical
-form, so refusing it removes an ambiguity rather than a capability.
+**Why 1.0 keeps rounding.** Refusing is a *semantic tightening*: a document 1.0 accepted stops
+being accepted. This schema's own policy says anything but an additive change bumps the **major**
+version, and applying a new restriction to a published minor because it makes a tidier invariant
+would be exactly the kind of quiet contract violation the rest of this document exists to refuse.
+It would also take away documents that worked — a four-decimal coordinate is ordinary output from
+an integration that calculates positions, and one that posts to the API and never opens the editor
+had a single canonical form for it, deterministically.
+
+The cost is that a 1.0 document can still canonicalise two ways across the two implementations.
+That is real, it is [issue #105](https://github.com/bherila/e-sign/issues/105), and it is a 2.0
+question rather than something a minor version fixes underneath its consumers. The same gate covers
+the integer range: 1.1 refuses a whole number past 2^53, and 1.0 does not, for the same reason.
+
+1.0 does get one change, and it takes nothing away: rounding happens *before* the sign and
+dimension checks rather than after, so a width of `0.0004` — which rounded to zero and produced a
+document that failed its own next import — is refused instead of stored broken. A document that
+was accepted into an unreadable state was never a document that worked.
 
 **The rule is not expressible in the published contract.** `multipleOf: 0.001` is the obvious
 spelling and it is unusable: ajv rejects 5,425 of the 40,001 three-decimal values in ±20, because

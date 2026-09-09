@@ -113,6 +113,21 @@ final class FieldSchemaValidator
 
     public const ANCHOR_MEMBERS_MINOR = 1;
 
+    /**
+     * The first minor version that refuses an over-precise coordinate instead of rounding it.
+     *
+     * 1.0 rounds, as it always has. Refusing is a *semantic tightening* — a document 1.0 accepted
+     * stops being accepted — and this schema's own policy says anything but an additive change
+     * bumps the **major** version. Applying the new rule to 1.0 because it makes a tidier
+     * invariant would be the quiet contract violation this schema exists to refuse; the price of
+     * that discipline is that a 1.0 document can still canonicalise two ways across the two
+     * implementations, which is issue #105 and is a 2.0 question rather than a bug fix.
+     *
+     * 1.1 refuses, which is a rule of the version rather than of this build, so it is expressed
+     * here and not in a deployment gate.
+     */
+    public const PRECISION_REFUSED_SINCE_MINOR = 1;
+
     private const MAJOR_MINOR_1_1 = '1.1';
 
     /**
@@ -554,11 +569,18 @@ final class FieldSchemaValidator
             }
 
             if (array_key_exists('page', $field)) {
-                $this->checkPage($path.'/page', $field['page'], $pageSizes, $errors);
+                $this->checkPage($path.'/page', $field['page'], $pageSizes, $this->refusesImprecision($version), $errors);
             }
 
             if (array_key_exists('rect', $field)) {
-                $this->checkRect($path.'/rect', $field['rect'], $field['page'] ?? null, $pageSizes, $errors);
+                $this->checkRect(
+                    $path.'/rect',
+                    $field['rect'],
+                    $field['page'] ?? null,
+                    $pageSizes,
+                    $this->refusesImprecision($version),
+                    $errors,
+                );
             }
 
             foreach (['required', 'read_only'] as $flag) {
@@ -621,9 +643,14 @@ final class FieldSchemaValidator
     /**
      * @param  list<ValidationError>  $errors
      */
-    private function checkPage(string $path, mixed $page, ?PageSizes $pageSizes, array &$errors): void
-    {
-        if ($this->isWholeNumberBeyondRange($page)) {
+    private function checkPage(
+        string $path,
+        mixed $page,
+        ?PageSizes $pageSizes,
+        bool $refuseImprecise,
+        array &$errors,
+    ): void {
+        if ($refuseImprecise && $this->isWholeNumberBeyondRange($page)) {
             $errors[] = new ValidationError($path, ValidationCode::PageOutOfRange, 'page'.' is at most '.CanonicalNumber::MAX_INTEGER.', the largest integer this schema\'s two '
                     .'implementations agree on: PHP counts to 2^63 and JavaScript stops being exact at 2^53, '
                     .'so a larger value means one thing in the editor and another in the API.',
@@ -640,7 +667,7 @@ final class FieldSchemaValidator
             return;
         }
 
-        if ($this->isOutsideIntegerRange($number)) {
+        if ($refuseImprecise && $this->isOutsideIntegerRange($number)) {
             $errors[] = new ValidationError($path, ValidationCode::PageOutOfRange, 'page'.' is at most '.CanonicalNumber::MAX_INTEGER.', the largest integer this schema\'s two '
                     .'implementations agree on: PHP counts to 2^63 and JavaScript stops being exact at 2^53, '
                     .'so a larger value means one thing in the editor and another in the API.',
@@ -671,8 +698,14 @@ final class FieldSchemaValidator
     /**
      * @param  list<ValidationError>  $errors
      */
-    private function checkRect(string $path, mixed $rect, mixed $page, ?PageSizes $pageSizes, array &$errors): void
-    {
+    private function checkRect(
+        string $path,
+        mixed $rect,
+        mixed $page,
+        ?PageSizes $pageSizes,
+        bool $refuseImprecise,
+        array &$errors,
+    ): void {
         if (! $this->isObject($rect)) {
             $errors[] = new ValidationError($path, ValidationCode::InvalidType, 'rect must be an object with x, y, width, and height.');
 
@@ -708,16 +741,25 @@ final class FieldSchemaValidator
                 continue;
             }
 
-            // A document carries canonical numbers, so a finer value is refused rather than
-            // rounded. Rounding here would make the validator's answer depend on a
-            // *transformation*, and the two implementations of this schema do not agree about
-            // every transformation: `round(1.6484999999999999, 3)` is 1.648 in PHP and 1.649 in
-            // the editor. Refusing means every accepted value is already the value that will be
-            // stored, so validation and canonicalisation cannot come apart — no rounding to zero
-            // behind a positivity check, no `-0.0` slipping past a sign check and detonating in
-            // Rect's constructor, and no two spellings of one document.
-            if (! $this->checkPrecision($path.'/'.$name, 'rect.'.$name, $value, $errors)) {
-                continue;
+            // From 1.1, a document carries canonical numbers and a finer value is refused rather
+            // than rounded: rounding would make the validator's answer depend on a
+            // *transformation*, and the two implementations do not agree about every one —
+            // `round(1.6484999999999999, 3)` is 1.648 in PHP and 1.649 in the editor. Refusing
+            // means every accepted value already *is* the stored value, so validation and
+            // canonicalisation cannot come apart.
+            //
+            // 1.0 rounds, because refusing would be a semantic tightening of a published version
+            // and this schema's policy reserves those for a major bump
+            // ({@see PRECISION_REFUSED_SINCE_MINOR}). Rounding *before* the checks below rather
+            // than after is the one change 1.0 does get, and it takes nothing away: it refuses
+            // only values that rounded into an invalid state, like a width of 0.0004 becoming
+            // zero — documents that were accepted and then failed their own next import.
+            if ($refuseImprecise) {
+                if (! $this->checkPrecision($path.'/'.$name, 'rect.'.$name, $value, $errors)) {
+                    continue;
+                }
+            } else {
+                $value = CanonicalNumber::round($value);
             }
 
             if (($name === 'x' || $name === 'y') && $value < 0.0) {
@@ -839,7 +881,7 @@ final class FieldSchemaValidator
         }
 
         if (array_key_exists('occurrence', $anchor)) {
-            $this->checkAnchorOccurrence($path.'/occurrence', $anchor['occurrence'], $errors);
+            $this->checkAnchorOccurrence($path.'/occurrence', $anchor['occurrence'], $this->refusesImprecision($version), $errors);
         }
 
         $mode = $this->checkAnchorPlacement($path.'/placement', $anchor, $errors)
@@ -914,7 +956,10 @@ final class FieldSchemaValidator
                 continue;
             }
 
-            $this->checkPrecision($path.'/offset/'.$name, 'anchor.offset.'.$name, (float) $value, $errors);
+            // `offset` is a 1.0 member, so it follows the version's rule like `rect` does.
+            if ($this->refusesImprecision($version)) {
+                $this->checkPrecision($path.'/offset/'.$name, 'anchor.offset.'.$name, (float) $value, $errors);
+            }
         }
     }
 
@@ -1248,7 +1293,7 @@ final class FieldSchemaValidator
         // The resolved rectangle *is* a placement, so it is checked like one. The page-fit check
         // is deliberately not run here: it belongs to the field's own rect, which in `replace`
         // mode is required to be this same rectangle.
-        $this->checkRect($path.'/rect', $resolved['rect'], null, null, $errors);
+        $this->checkRect($path.'/rect', $resolved['rect'], null, null, true, $errors);
 
         // And bounded, which the field's own rect is not. `$defs/resolved_rect` exists to carry
         // that bound: it arrived in 1.1, so it can have one, while `rect` is 1.0's and tightening
@@ -1493,7 +1538,7 @@ final class FieldSchemaValidator
      *
      * @param  list<ValidationError>  $errors
      */
-    private function checkAnchorOccurrence(string $path, mixed $occurrence, array &$errors): void
+    private function checkAnchorOccurrence(string $path, mixed $occurrence, bool $refuseImprecise, array &$errors): void
     {
         if (is_string($occurrence)) {
             if ($occurrence === AnchorPlacement::OCCURRENCE_SOLE) {
@@ -1510,7 +1555,7 @@ final class FieldSchemaValidator
             return;
         }
 
-        if ($this->isWholeNumberBeyondRange($occurrence)) {
+        if ($refuseImprecise && $this->isWholeNumberBeyondRange($occurrence)) {
             $errors[] = new ValidationError($path, ValidationCode::InvalidFormat, 'anchor.occurrence'.' is at most '.CanonicalNumber::MAX_INTEGER.', the largest integer this schema\'s two '
                     .'implementations agree on: PHP counts to 2^63 and JavaScript stops being exact at 2^53, '
                     .'so a larger value means one thing in the editor and another in the API.',
@@ -1740,6 +1785,12 @@ final class FieldSchemaValidator
      *
      * @param  list<ValidationError>  $errors
      */
+    /** Whether this document's version refuses an over-precise coordinate rather than rounding it. */
+    private function refusesImprecision(?SchemaVersion $version): bool
+    {
+        return $version instanceof SchemaVersion && $version->minor >= self::PRECISION_REFUSED_SINCE_MINOR;
+    }
+
     private function checkPrecision(string $path, string $label, float $value, array &$errors): bool
     {
         if (! is_finite($value) || CanonicalNumber::isCanonical($value)) {

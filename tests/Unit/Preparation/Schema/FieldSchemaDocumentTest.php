@@ -167,9 +167,14 @@ class FieldSchemaDocumentTest extends TestCase
         );
     }
 
-    public function test_a_coordinate_finer_than_the_canonical_precision_is_refused(): void
+    /**
+     * From 1.1. A 1.0 document still rounds, because refusing would be a semantic tightening of a
+     * published version and this schema reserves those for a major bump — see the sibling case.
+     */
+    public function test_a_coordinate_finer_than_the_canonical_precision_is_refused_from_1_1(): void
     {
         $raw = self::minimalDocument();
+        $raw['schema_version'] = '1.1';
         $raw['fields'][0]['rect'] = ['x' => 60.00049, 'y' => 650, 'width' => 170.4567, 'height' => 36];
 
         try {
@@ -181,6 +186,25 @@ class FieldSchemaDocumentTest extends TestCase
                 array_map(static fn ($error) => $error->code->value, $refused->result->errors),
             );
         }
+    }
+
+    /**
+     * 1.0 rounds it, exactly as it always has.
+     *
+     * Refusing here would take away a document that worked: an integration posting to the API and
+     * never opening the editor had one canonical form for this value, deterministically. The two
+     * implementations can still disagree about it — that is the cost, it is issue #105, and it is
+     * a 2.0 question rather than something a minor version gets to fix by tightening underneath
+     * its consumers.
+     */
+    public function test_a_1_0_document_still_rounds_a_finer_coordinate(): void
+    {
+        $raw = self::minimalDocument();
+        $raw['fields'][0]['rect'] = ['x' => 60.00049, 'y' => 650, 'width' => 170.4567, 'height' => 36];
+
+        $canonical = FieldSchemaDocument::fromArray($raw)->canonicalJson();
+
+        $this->assertStringContainsString('"x":60,"y":650,"width":170.457,"height":36', $canonical);
     }
 
     public function test_a_document_built_in_code_exports_canonically(): void

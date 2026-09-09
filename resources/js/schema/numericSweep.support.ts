@@ -1,4 +1,5 @@
 import fixtureJson from "../../../tests/Fixtures/schema/nda-two-signers.json";
+import legacySchemaJson from "../../schema/field-schema-1.0.json";
 import schemaJson from "../../schema/field-schema-1.1.json";
 
 /**
@@ -22,8 +23,9 @@ export const ANCHORED_FIELD = 5;
 export const PLAIN_FIELD = 0;
 
 /** Every numeric member of the contract, as a document path, with the constraints it declares. */
-export function contractMembers(): Map<string, MemberBounds> {
-  const defs = (schemaJson as Json)["$defs"];
+export function contractMembers(version: "1.0" | "1.1" = "1.1"): Map<string, MemberBounds> {
+  const file = (version === "1.0" ? legacySchemaJson : schemaJson) as Json;
+  const defs = file["$defs"];
   const found = new Map<string, MemberBounds>();
 
   const walk = (node: Json, path: string, seen: string[]): void => {
@@ -65,7 +67,7 @@ export function contractMembers(): Map<string, MemberBounds> {
     }
   };
 
-  walk(schemaJson as Json, "", []);
+  walk(file, "", []);
 
   return new Map([...found.entries()].sort(([a], [b]) => a.localeCompare(b)));
 }
@@ -77,8 +79,9 @@ export function contractMembers(): Map<string, MemberBounds> {
  * `cross_check`, and a `replace` receipt's rect must equal the field's own, so an unrelated
  * refusal would answer before the property under test could.
  */
-export function documentWith(path: string, value: number | string): Json {
+export function documentWith(path: string, value: number | string, version: "1.0" | "1.1" = "1.1"): Json {
   const document = JSON.parse(JSON.stringify(fixtureJson)) as Json;
+  document["schema_version"] = version;
   const index = path.startsWith("fields[].anchor") ? ANCHORED_FIELD : PLAIN_FIELD;
   const field = document["fields"][index] as Json;
 

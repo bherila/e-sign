@@ -6,6 +6,7 @@ namespace Tests\Unit\Preparation\Schema;
 
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\FieldSchemaValidator;
+use App\Domain\Preparation\Schema\SchemaVersion;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\FieldSchemaFixture;
@@ -45,9 +46,9 @@ final class NumericBoundsSweepTest extends TestCase
      *
      * @return array<string, array{type: string, maximum: int|float|null}>
      */
-    public static function contractMembers(): array
+    public static function contractMembers(string $version = SchemaVersion::CURRENT): array
     {
-        $schema = FieldSchemaFixture::schema();
+        $schema = FieldSchemaFixture::schema($version);
         $defs = $schema['$defs'];
         $found = [];
 
@@ -159,8 +160,42 @@ final class NumericBoundsSweepTest extends TestCase
     #[DataProvider('members')]
     public function test_the_member_survives_its_own_round_trip(string $path): void
     {
+        $this->assertRoundTrips($path, SchemaVersion::CURRENT);
+    }
+
+    /**
+     * The same property for a **1.0** document, where the rule is different on purpose.
+     *
+     * 1.1 refuses an over-precise coordinate; 1.0 rounds it, because refusing would be a semantic
+     * tightening of a published version and this schema reserves those for a major bump. Both are
+     * swept, and the sweep says which version it is probing rather than encoding whichever
+     * behaviour happens to be current — the next reader has to be able to tell which rule a case
+     * meant.
+     *
+     * Only the members 1.0 actually declares are swept here; the 1.1 additions cannot appear in a
+     * 1.0 document at all, and the derivation reads that from `field-schema-1.0.json` rather than
+     * from a list somebody kept.
+     */
+    #[DataProvider('legacyMembers')]
+    public function test_the_member_survives_its_own_round_trip_under_1_0(string $path): void
+    {
+        $this->assertRoundTrips($path, '1.0');
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function legacyMembers(): iterable
+    {
+        foreach (array_keys(self::contractMembers('1.0')) as $path) {
+            yield $path => [$path];
+        }
+    }
+
+    private function assertRoundTrips(string $path, string $version): void
+    {
         // One canonical step below the smallest positive value: zero after rounding.
-        $document = self::documentWith($path, 0.0004);
+        $document = self::documentWith($path, 0.0004, $version);
 
         if ((new FieldSchemaValidator)->validate($document)->at(self::pointer($path)) !== []) {
             $this->addToAssertionCount(1);
@@ -173,9 +208,8 @@ final class NumericBoundsSweepTest extends TestCase
         $this->assertSame(
             [],
             (new FieldSchemaValidator)->validate($stored)->at(self::pointer($path)),
-            $path.' accepts a value it cannot read back: import rounds to three decimals, so what '
-                .'was validated is not what was stored. Validate the canonical value, never the '
-                .'submitted one.',
+            $path.' accepts a value it cannot read back in schema '.$version.': what was validated '
+                .'is not what was stored. Either refuse the value or store what you validated.',
         );
     }
 
@@ -190,9 +224,10 @@ final class NumericBoundsSweepTest extends TestCase
     /**
      * @return array<string, mixed>
      */
-    public static function documentWith(string $path, int|float|string $value): array
+    public static function documentWith(string $path, int|float|string $value, string $version = SchemaVersion::CURRENT): array
     {
         $document = FieldSchemaFixture::asArray();
+        $document['schema_version'] = $version;
         $index = str_starts_with($path, 'fields[].anchor') ? self::ANCHORED_FIELD : self::PLAIN_FIELD;
 
         if (str_starts_with($path, 'fields[].anchor.resolved')) {

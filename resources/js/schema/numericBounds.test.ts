@@ -45,18 +45,34 @@ function refuses(path: string, value: number): boolean {
   return validateFieldSchema(documentWith(path, value)).some((problem) => problem.path === pointer(path));
 }
 
+function assertRoundTrips(path: string, version: "1.0" | "1.1"): void {
+  const document = documentWith(path, 0.0004, version);
+  const at = (candidate: Json) => validateFieldSchema(candidate).filter((problem) => problem.path === pointer(path));
+
+  if (at(document).length > 0) {
+    return;
+  }
+
+  const stored = JSON.parse(serializeFieldSchema(parseFieldSchema(document))) as Json;
+
+  expect(at(stored)).toEqual([]);
+}
+
 describe("the numeric round-trip sweep", () => {
   it.each(Object.keys(EXPECTATIONS))("%s survives its own round trip", (path) => {
-    const document = documentWith(path, 0.0004);
-    const at = (candidate: Json) => validateFieldSchema(candidate).filter((problem) => problem.path === pointer(path));
+    assertRoundTrips(path, "1.1");
+  });
 
-    if (at(document).length > 0) {
-      return;
-    }
-
-    const stored = JSON.parse(serializeFieldSchema(parseFieldSchema(document))) as Json;
-
-    expect(at(stored)).toEqual([]);
+  /**
+   * The same property for a 1.0 document, where the rule is different on purpose.
+   *
+   * 1.1 refuses an over-precise coordinate; 1.0 rounds it, because refusing would be a semantic
+   * tightening of a published version. Both are swept, and each case says which version it means
+   * rather than encoding whichever behaviour happens to be current. Only the members 1.0 declares
+   * are swept, read from `field-schema-1.0.json` rather than from a list somebody kept.
+   */
+  it.each([...contractMembers("1.0").keys()])("%s survives its own round trip under 1.0", (path) => {
+    assertRoundTrips(path, "1.0");
   });
 });
 
