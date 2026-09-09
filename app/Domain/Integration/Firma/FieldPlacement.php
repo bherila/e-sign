@@ -226,7 +226,7 @@ final readonly class FieldPlacement
      *                                       resolved rectangle, but no receipt, so the envelope
      *                                       resolves the anchor again before sending rather than
      *                                       trusting coordinates it cannot tie to any bytes.
-     * @return array<string, mixed> Native field schema 1.0.
+     * @return array<string, mixed> A native field schema document, declaring `SchemaVersion::CURRENT`.
      *
      * @throws FirmaException
      */
@@ -490,7 +490,11 @@ final readonly class FieldPlacement
         $request = $resolved->anchor;
 
         $native = [
-            'text' => (string) $anchor['text'],
+            // The *resolved* request's text, not the caller's: `anchoredRect()` trims what
+            // arrives, and send resolves this document again from scratch. Storing the untrimmed
+            // string would have the facade find " Signature: " on create and the native resolver
+            // fail to find it on send, on the same bytes.
+            'text' => $request->text,
             'occurrence' => self::occurrenceValue($anchor),
             'placement' => AnchorPlacementMode::Replace->value,
             'origin' => $request->origin->value,

@@ -96,6 +96,7 @@ class PreparationServiceProvider extends ServiceProvider
                 $app->make(PdfTextLocator::class),
                 $app->make(RevisionBytes::class),
                 $app->make(SchemaAnchorResolver::class),
+                $app->make(PdfPreflight::class),
             ),
         );
 

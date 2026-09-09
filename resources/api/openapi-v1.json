@@ -2214,7 +2214,7 @@
               "null"
             ],
             "additionalProperties": true,
-            "description": "A native field schema 1.0 document. Refused with `template_version_id`, which already carries one."
+            "description": "A native field schema document. The current contract version is 1.1; a document declaring an older supported minor is read against that minor's contract, and one declaring a newer minor is refused. Refused with `template_version_id`, which already carries one."
           },
           "title": {
             "type": [

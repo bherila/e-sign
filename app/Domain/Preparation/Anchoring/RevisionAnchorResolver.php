@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace App\Domain\Preparation\Anchoring;
 
+use App\Domain\Integration\Firma\PageGeometryReader;
+use App\Domain\Preparation\Contracts\PdfPreflight;
 use App\Domain\Preparation\Contracts\PdfTextLocator;
 use App\Domain\Preparation\Documents\Models\DocumentRevision;
 use App\Domain\Preparation\Documents\PreflightPageSizes;
 use App\Domain\Preparation\Documents\RevisionBytes;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
+use App\Domain\Preparation\Schema\PageSizes;
 use App\Domain\Preparation\Schema\ValidationCode;
 use App\Domain\Preparation\Text\TextExtractionException;
 use App\Domain\Preparation\Text\TextRun;
@@ -42,6 +45,7 @@ final readonly class RevisionAnchorResolver
         private PdfTextLocator $text,
         private RevisionBytes $bytes,
         private SchemaAnchorResolver $resolver,
+        private PdfPreflight $preflight,
     ) {}
 
     /**
@@ -58,13 +62,63 @@ final readonly class RevisionAnchorResolver
             return AnchorResolutionOutcome::unchanged($schema);
         }
 
+        $bytes = $this->readBytes($revision);
+
         return $this->resolver->resolve(
             $schema,
-            $this->runs($schema, $revision),
+            $this->runs($schema, $bytes, $revision),
             $digest,
-            PreflightPageSizes::of($revision->document),
+            $this->pageSizes($revision, $bytes),
             $omitAbsentFields,
         );
+    }
+
+    /**
+     * The displayed size of every page, which an anchored field cannot be placed without.
+     *
+     * A resolved rectangle is the matched text's position plus the caller's offset, so whether it
+     * lands on the page is only knowable afterwards — and only against a page size. Resolving
+     * without one would still place the field, silently skipping the one check that catches an
+     * offset which walks off the edge, and a signer would be left with a field they cannot reach.
+     *
+     * Two sources, in the order {@see PageGeometryReader} uses.
+     * The recorded preflight report first: it is the measurement every stored rectangle was
+     * already validated against, so a second one that disagreed would be worse than none. Then a
+     * parse of *these* bytes — the ones just proved against the revision's digest — for a row
+     * whose report predates page geometry or was written by an older build. There is no third
+     * source and no default: a page size is never assumed (AGENTS.md, "Coordinates are never
+     * guessed").
+     *
+     * A document that yields neither is one nothing can be placed on. That is reachable only if
+     * the stored object no longer parses at all, which is the same class of fact as bytes that do
+     * not hash to their row, so it leaves the same way.
+     *
+     * @throws AnchorDocumentUnavailable
+     */
+    private function pageSizes(DocumentRevision $revision, string $bytes): PageSizes
+    {
+        $recorded = PreflightPageSizes::of($revision->document);
+
+        if ($recorded instanceof PageSizes) {
+            return $recorded;
+        }
+
+        $sizes = [];
+
+        foreach ($this->preflight->inspect($bytes)->pages as $geometry) {
+            $sizes[$geometry->pageNumber] = [
+                'width' => $geometry->nativeWidth(),
+                'height' => $geometry->nativeHeight(),
+            ];
+        }
+
+        try {
+            return PageSizes::fromMap($sizes);
+        } catch (Throwable $unusable) {
+            $this->log($revision, $unusable);
+
+            throw AnchorDocumentUnavailable::forRevision((string) $revision->public_id, $unusable);
+        }
     }
 
     private function hasAnchors(FieldSchemaDocument $schema): bool
@@ -83,10 +137,8 @@ final readonly class RevisionAnchorResolver
      *
      * @throws AnchorResolutionFailed
      */
-    private function runs(FieldSchemaDocument $schema, DocumentRevision $revision): array
+    private function runs(FieldSchemaDocument $schema, string $bytes, DocumentRevision $revision): array
     {
-        $bytes = $this->readBytes($revision);
-
         try {
             return $this->text->extract($bytes);
         } catch (TextExtractionException $failure) {

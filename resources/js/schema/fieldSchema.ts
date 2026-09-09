@@ -1,5 +1,5 @@
 /**
- * Native field definition schema 1.0 — the editor's half of the contract.
+ * Native field definition schema — the editor's half of the contract.
  *
  * The contract itself is `resources/schema/field-schema-1.0.json`; the server half is
  * `app/Domain/Preparation/Schema`. The three are kept in step by tests, not by convention:

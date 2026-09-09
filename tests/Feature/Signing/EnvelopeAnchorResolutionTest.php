@@ -360,6 +360,39 @@ class EnvelopeAnchorResolutionTest extends TestCase
         }
     }
 
+    /**
+     * A report with no page geometry does not quietly disable the page-bound check.
+     *
+     * Whether a resolved rectangle lands on the page is only knowable against a page size, so a
+     * document row whose preflight report predates page geometry used to have its anchors
+     * resolved with the right and bottom bounds unchecked — and an offset that walks off the
+     * edge would send, leaving the signer a field they cannot reach. The bytes are already open
+     * and already proved against the revision's digest by this point, so the geometry is read
+     * from them rather than assumed or skipped.
+     */
+    public function test_page_geometry_absent_from_the_report_is_read_from_the_bytes(): void
+    {
+        $this->scenario->document->forceFill(['preflight_report' => ['pages' => []]])->save();
+
+        $schema = SigningFixtures::mutateField($this->anchoredSchema(), 'seller_signature', [
+            'anchor' => [
+                'text' => 'Counterparty signature:',
+                'occurrence' => 'sole',
+                'placement' => AnchorPlacementMode::Replace->value,
+                'origin' => 'bottom_left',
+                // Far below the bottom of any page this document has.
+                'offset' => ['dx' => 0, 'dy' => 5_000],
+            ],
+        ]);
+
+        $envelope = $this->scenario->preparedDraft(['field_schema' => $schema]);
+
+        $failure = $this->refusedSend($envelope);
+
+        $this->assertTrue($failure->hasCode(ValidationCode::AnchorResolvedOffPage->value));
+        $this->assertSame(EnvelopeState::Draft, $envelope->refresh()->state);
+    }
+
     // ------------------------------------------------------------------------ storage failure
 
     /**

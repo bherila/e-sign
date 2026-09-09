@@ -310,7 +310,7 @@
       }
     },
     "resolved_anchor": {
-      "description": "What resolution found, written by the service and never by a caller authoring a document. The anchor is the question, the field's rect is the answer everything downstream uses, and this is the receipt in between. `document_sha256` is the digest of the exact bytes the text was located in, which is what lets a stored rectangle be trusted without re-resolving: a receipt from a different revision is detected and resolved again before send, and after send nothing re-resolves at all.",
+      "description": "What resolution found, written by the service and never by a caller authoring a document. The anchor is the question, the field's rect is the answer everything downstream uses, and this is the receipt in between. `document_sha256` is the digest of the exact bytes the text was located in: provenance for a stored rectangle, not a reason to skip re-measuring it. Publishing a template version and sending an envelope each resolve every anchored field again, receipt or no receipt, because a receipt is bound to a document, a page and an occurrence but not to the anchor text, origin or offset. Sending therefore always reads the document. After send nothing re-resolves at all.",
       "type": "object",
       "additionalProperties": false,
       "required": ["document_sha256", "page", "occurrence_index", "anchor_rect", "rect"],

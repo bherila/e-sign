@@ -5,9 +5,13 @@ declare(strict_types=1);
 namespace Tests\Feature\Integration\Firma;
 
 use App\Domain\Identity\Credentials\IssuedServiceCredential;
+use App\Domain\Integration\Firma\FieldPlacement;
+use App\Domain\Integration\Firma\PlannedRecipient;
+use App\Domain\Preparation\Contracts\PdfPreflight;
 use App\Domain\Preparation\Documents\DocumentBlobStore;
 use App\Domain\Preparation\Documents\Models\Document;
 use App\Domain\Preparation\Schema\AnchorPlacementMode;
+use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\FieldSchemaValidator;
 use App\Domain\Preparation\Schema\SchemaVersion;
 use App\Domain\Signing\Envelopes\EnvelopeState;
@@ -250,8 +254,9 @@ class FirmaCreateAndSendTest extends TestCase
         $this->assertEqualsWithDelta(36.0, $field->rect->height, 0.01);
 
         // Issue #23: the request is kept beside the rectangle it produced, with a receipt
-        // naming the revision the text was located in. That is what tells the envelope's own
-        // send-time resolution the work is already done for these exact bytes.
+        // naming the revision the text was located in. Send resolves the request again from
+        // scratch — a receipt records what was found and is never a reason to skip looking — so
+        // what is stored here has to be a request the native resolver can answer identically.
         $anchor = $field->anchor;
         $this->assertNotNull($anchor);
         $this->assertSame('Signature:', $anchor->text);
@@ -273,6 +278,57 @@ class FirmaCreateAndSendTest extends TestCase
             $envelope->field_schema_sha256,
         );
         $this->assertNull($envelope->omitted_anchor_fields);
+    }
+
+    /**
+     * The stored request is the one that was actually resolved, whitespace and all.
+     *
+     * `anchoredRect()` trims what it is handed before looking it up, so `" Signature: "` finds
+     * `"Signature:"`. Send then resolves the same document again from scratch, and it resolves
+     * whatever the schema *says* — so storing the caller's untrimmed string would have the facade
+     * place the field and the native resolver immediately fail to find it, on the same bytes, in
+     * the same request.
+     *
+     * Driven through `FieldPlacement` rather than the HTTP surface on purpose: Laravel's
+     * `TrimStrings` middleware happens to trim the payload first, so over HTTP the two
+     * normalisations agree by accident. A domain object's contract does not get to depend on
+     * which middleware ran.
+     */
+    public function test_a_whitespace_padded_anchor_is_stored_as_the_text_that_was_resolved(): void
+    {
+        $bytes = PdfFixtures::bytes('single-page-letter');
+        $pages = [];
+
+        foreach (app(PdfPreflight::class)->inspect($bytes)->pages as $geometry) {
+            $pages[$geometry->pageNumber] = $geometry;
+        }
+
+        $schema = app(FieldPlacement::class)->schema(
+            'doc_whitespace_anchor',
+            $pages,
+            [new PlannedRecipient('r1', 'Dana Buyer', 'dana@buyer.example.test', 1, ['temp_1'])],
+            [[
+                'type' => 'signature',
+                'page_number' => 1,
+                'recipient_id' => 'temp_1',
+                'anchor' => ['text' => "  Signature: \n", 'occurrence' => 'sole'],
+                'position' => [
+                    'x' => 0.0,
+                    'y' => 0.0,
+                    'width' => 170.0 / self::PAGE_WIDTH * 100,
+                    'height' => 36.0 / self::PAGE_HEIGHT * 100,
+                ],
+            ]],
+            static fn (): string => $bytes,
+            true,
+            hash('sha256', $bytes),
+        );
+
+        $field = FieldSchemaDocument::fromArray($schema)->fields[0];
+
+        $this->assertSame('Signature:', $field->anchor?->text);
+        $this->assertEqualsWithDelta(72.0, $field->rect->x, 0.01);
+        $this->assertEqualsWithDelta(582.4, $field->rect->y, 0.01);
     }
 
     /**
