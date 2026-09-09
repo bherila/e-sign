@@ -19,6 +19,7 @@ import {
   RECIPIENT_REQUIRED,
   RECT_REQUIRED,
   serializeFieldSchema,
+  validateFieldSchema,
   VALIDATION_CODES,
 } from "./fieldSchema";
 
@@ -114,8 +115,71 @@ describe("the published JSON Schema", () => {
     ["an anchor with no occurrence", (raw: Record<string, any>) => delete raw.fields[5].anchor.occurrence],
     ["an anchor occurrence of all", (raw: Record<string, any>) => (raw.fields[5].anchor.occurrence = "all")],
     ["an undeclared anchor origin", (raw: Record<string, any>) => (raw.fields[5].anchor.origin = "centre")],
+    [
+      "an optional anchor on a required field",
+      (raw: Record<string, any>) => (raw.fields[9].required = true),
+    ],
+    [
+      "an optional anchor on a field that does not state required at all",
+      (raw: Record<string, any>) => delete raw.fields[9].required,
+    ],
+    [
+      "a tolerance with no cross-check to be the tolerance of",
+      (raw: Record<string, any>) => (raw.fields[5].anchor.tolerance = 2),
+    ],
+    [
+      "an optional anchor that only cross-checks a rectangle it cannot omit",
+      (raw: Record<string, any>) => (raw.fields[9].anchor.placement = "cross_check"),
+    ],
+    [
+      "a cross-check receipt with no tolerance to have passed by",
+      (raw: Record<string, any>) => {
+        raw.fields[5].anchor.placement = "cross_check";
+        raw.fields[5].anchor.resolved = {
+          document_sha256: "d".repeat(64),
+          page: 2,
+          occurrence_index: 1,
+          anchor_rect: { x: 330, y: 622.4, width: 165.6, height: 12 },
+          rect: raw.fields[5].rect,
+        };
+      },
+    ],
   ])("rejects %s", (_name, mutate) => {
     expect(errorsFor(brokenFixture(mutate)).length).toBeGreaterThan(0);
+  });
+
+  /**
+   * The published file and the importers have to give a client the same answer.
+   *
+   * A relationship between two properties is the easiest kind of rule for a contract file and an
+   * importer to disagree about, because the file can only express it with a conditional and it is
+   * tempting not to write one. The cost of the disagreement falls on an integration: it validates
+   * against the published schema, is told the document conforms, and gets a 422 from the service.
+   * These are the relationships 1.1 encodes, each asserted in both projections at once.
+   */
+  it.each([
+    [
+      "anchor_optional_on_required_field",
+      (raw: Record<string, any>) => (raw.fields[9].required = true),
+      "/fields/9/anchor/required",
+    ],
+    [
+      "invalid_format",
+      (raw: Record<string, any>) => (raw.fields[5].anchor.tolerance = 2),
+      "/fields/5/anchor/tolerance",
+    ],
+    [
+      "invalid_format",
+      (raw: Record<string, any>) => (raw.fields[9].anchor.placement = "cross_check"),
+      "/fields/9/anchor/required",
+    ],
+  ])("refuses %s in the contract file and in the importer alike", (code, mutate, path) => {
+    const document = brokenFixture(mutate);
+
+    expect(errorsFor(document).length).toBeGreaterThan(0);
+    expect(
+      validateFieldSchema(document).filter((issue) => issue.code === code && issue.path === path),
+    ).toHaveLength(1);
   });
 });
 

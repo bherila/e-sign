@@ -81,6 +81,12 @@ class SigningRequestController extends Controller
      * `send_validation` naming the parties who are not ready. Neither leaves a half-built
      * draft: creation is one transaction, and a refused send is reported with the draft
      * deleted from nobody's view because it was never announced.
+     *
+     * The send resolves the document's anchors a second time — a receipt never licenses skipping
+     * resolution — but it does not *read* the document a second time. `Documents\RevisionBytes`
+     * is bound `scoped` and carries the bytes it proved during creation through to here, so
+     * there is no window in which the object can become unavailable between the two phases and
+     * turn one call into an error, an orphan draft, and a duplicate on the retry.
      */
     public function createAndSend(CreateAndSendRequest $request): JsonResponse
     {

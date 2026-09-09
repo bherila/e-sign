@@ -186,7 +186,11 @@ string that is nowhere in the document and a *required* anchor would sail past t
 exists to catch it, placing silently at the old coordinates. Resolution is a pure function of the
 request and the bytes, so re-running it on an unchanged pair costs one parse and returns the same
 rectangle; running it again on a changed one is the entire point. A field set with no anchor at
-all still never opens the document.
+all still never opens the document, and neither does a second resolution inside the same request:
+`Documents\RevisionBytes` is bound `scoped` and carries bytes it has already proved. That is what
+keeps `create-and-send` a single call — the facade places the fields, the envelope is committed,
+and the send resolves again from those same proven bytes rather than reopening an object that
+could have gone away in between.
 
 The digest a receipt carries is **proved, not assumed**: the bytes are hashed when they are read
 and refused if they do not match the revision row (`Documents\RevisionBytes`). A write-time check

@@ -22,10 +22,31 @@ use Throwable;
  * a document that is not the one the envelope is bound to, and finalization would only notice
  * afterwards — after signing. Reading through here makes that impossible rather than unlikely
  * (AGENTS.md, "Retain originals byte-for-byte").
+ *
+ * ## Proven once per revision, for the life of the request
+ *
+ * Bytes that have been read and proved are kept, keyed by the revision and the digest they were
+ * proved against. That is a correctness property before it is a performance one, and the case it
+ * exists for is `POST /signing-requests/create-and-send`: the facade reads the review revision to
+ * resolve anchors, commits the envelope, and then `send()` resolves them again — because a receipt
+ * is never a licence to skip resolution. Two reads mean a window between them, and an object that
+ * becomes unavailable inside it produces the worst possible outcome for an operation whose whole
+ * contract is that it is one call: the client gets an error, a draft exists anyway, and a retry
+ * makes a second one. Carrying the proven bytes through the request removes the window rather
+ * than compensating for it afterwards — a rollback would itself have to succeed while the object
+ * store is the thing that is failing.
+ *
+ * The binding is `scoped`, so the memo lives exactly as long as one request or one queued job and
+ * a worker never accumulates across them. What it holds is one document per revision touched,
+ * which is bounded by the upload size limit and by how many revisions a single request can name —
+ * in practice one.
  */
-final readonly class RevisionBytes
+final class RevisionBytes
 {
-    public function __construct(private DocumentBlobStore $blobs) {}
+    /** @var array<string, string> Revision key and digest => bytes already proved to be theirs. */
+    private array $proven = [];
+
+    public function __construct(private readonly DocumentBlobStore $blobs) {}
 
     /**
      * @throws DocumentStorageException When the object cannot be read, is empty, or is not the
@@ -33,6 +54,12 @@ final readonly class RevisionBytes
      */
     public function read(DocumentRevision $revision): string
     {
+        $memo = $revision->getKey().':'.$revision->sha256;
+
+        if (array_key_exists($memo, $this->proven)) {
+            return $this->proven[$memo];
+        }
+
         try {
             $bytes = $this->blobs->disk((string) $revision->disk)->get((string) $revision->path);
         } catch (Throwable $exception) {
@@ -59,6 +86,6 @@ final readonly class RevisionBytes
             );
         }
 
-        return $bytes;
+        return $this->proven[$memo] = $bytes;
     }
 }

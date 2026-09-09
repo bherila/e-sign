@@ -839,6 +839,79 @@ class FirmaCreateAndSendTest extends TestCase
     }
 
     /**
+     * `create-and-send` opens the document once, so there is no window to lose it in.
+     *
+     * Anchors are resolved twice by design — once by the facade to place the fields, and again
+     * inside `send()`, because a receipt is a record of what was found and never permission to
+     * skip looking. Two *reads* would be a different matter: the envelope is committed between
+     * them, so an object that became unavailable in between would return an error to a client
+     * whose whole contract is that this is one call, leave a draft behind anyway, and turn the
+     * obvious retry into a duplicate agreement.
+     *
+     * The fix carries the proven bytes through the request rather than compensating afterwards:
+     * a rollback would itself have to succeed while the object store is the thing that is
+     * failing. `RevisionBytes` is bound `scoped` and remembers what it has proved, so the second
+     * resolution measures the same bytes without a second `get()`.
+     *
+     * This makes the object vanish the instant it has been read — the failure Codex described,
+     * exactly in the window it described — and asserts the call still succeeds, with one
+     * envelope, `sent`, no draft, and one read. (`putVerified()` confirms its write through
+     * `readStream()`, so intercepting `get()` catches only the anchor reads.)
+     */
+    public function test_the_document_is_opened_once_so_there_is_no_window_between_create_and_send(): void
+    {
+        [, $issued] = $this->scenario();
+
+        $real = Storage::disk('documents');
+        $reads = 0;
+
+        $disk = Mockery::mock($real)->makePartial();
+        $disk->shouldReceive('get')->andReturnUsing(function (string $path) use ($real, &$reads): ?string {
+            $reads++;
+            $bytes = $real->get($path);
+            // Gone the moment it has been handed over. A second read cannot succeed.
+            $real->delete($path);
+
+            return $bytes;
+        });
+
+        $filesystems = Mockery::mock(FilesystemManager::class);
+        $filesystems->shouldReceive('disk')->andReturn($disk);
+        $this->app->instance(DocumentBlobStore::class, new DocumentBlobStore($filesystems));
+
+        $response = $this->postJson(self::BASE.'/create-and-send', [
+            'name' => 'Synthetic anchored agreement',
+            'document' => base64_encode(PdfFixtures::bytes('single-page-letter')),
+            'recipients' => [['first_name' => 'Dana', 'email' => 'dana@buyer.example.test', 'order' => 1]],
+            'fields' => [[
+                'type' => 'signature',
+                'page_number' => 1,
+                'anchor' => ['text' => 'Signature:', 'occurrence' => 'sole'],
+                'position' => [
+                    'x' => 0.0,
+                    'y' => 0.0,
+                    'width' => 170.0 / self::PAGE_WIDTH * 100,
+                    'height' => 36.0 / self::PAGE_HEIGHT * 100,
+                ],
+            ]],
+        ], FirmaFacadeScenario::headers($issued))->assertStatus(201);
+
+        $this->assertSame(1, $reads, 'The document is read once and carried through the request.');
+        $this->assertSame(1, Envelope::query()->count());
+        $this->assertSame(0, Envelope::query()->where('state', EnvelopeState::Draft->value)->count());
+
+        $envelope = Envelope::query()->where('public_id', $response->json('id'))->firstOrFail();
+
+        $this->assertSame(EnvelopeState::Sent, $envelope->state);
+
+        // And the fields really were placed from the document, so the read that was skipped was
+        // a second one rather than the only one.
+        $field = $envelope->fieldSchema()->fields[0];
+        $this->assertEqualsWithDelta(72.0, $field->rect->x, 0.01);
+        $this->assertEqualsWithDelta(582.4, $field->rect->y, 0.01);
+    }
+
+    /**
      * A storage failure is a 500, is reported, and leaks nothing.
      *
      * `DocumentStorageException` messages interpolate the disk name, the object path, and the

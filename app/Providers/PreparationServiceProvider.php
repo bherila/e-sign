@@ -90,6 +90,11 @@ class PreparationServiceProvider extends ServiceProvider
             );
         });
 
+        // Scoped, not bound: the memo of proven bytes has to survive from the facade's anchor
+        // lookup to the send that follows it in the same request, and must not survive past it.
+        // See RevisionBytes for why carrying them is the fix rather than compensating afterwards.
+        $this->app->scoped(RevisionBytes::class);
+
         $this->app->bind(
             RevisionAnchorResolver::class,
             fn (Application $app): RevisionAnchorResolver => new RevisionAnchorResolver(

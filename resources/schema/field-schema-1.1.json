@@ -121,6 +121,26 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "recipient_id", "type", "page", "rect"],
+      "allOf": [
+        {
+          "$comment": "anchor.required false means an absent anchor omits the field, and a required field cannot be omitted. Both importers refuse the combination as anchor_optional_on_required_field, so the published contract refuses it too rather than telling a client its document conforms and letting the service answer 422. `required` defaults to true, so the field has to say false explicitly.",
+          "if": {
+            "type": "object",
+            "required": ["anchor"],
+            "properties": {
+              "anchor": {
+                "type": "object",
+                "required": ["required"],
+                "properties": {"required": {"const": false}}
+              }
+            }
+          },
+          "then": {
+            "required": ["required"],
+            "properties": {"required": {"const": false}}
+          }
+        }
+      ],
       "properties": {
         "id": {
           "description": "Stable field id, unique within the document.",
@@ -249,6 +269,34 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["text", "occurrence"],
+      "allOf": [
+        {
+          "$comment": "tolerance is the slack a cross_check is judged against. In replace mode the anchor decides the position outright, so there is no declared rectangle for a tolerance to be measured from.",
+          "if": {"type": "object", "required": ["tolerance"], "properties": {"tolerance": true}},
+          "then": {
+            "required": ["placement"],
+            "properties": {"placement": {"const": "cross_check"}}
+          }
+        },
+        {
+          "$comment": "required false means an absent anchor omits the field; in cross_check the declared rectangle is authoritative and the anchor only checks it, so an absent anchor has nothing to omit. placement defaults to replace, so an omitted placement satisfies this.",
+          "if": {
+            "type": "object",
+            "required": ["required"],
+            "properties": {"required": {"const": false}}
+          },
+          "then": {"properties": {"placement": {"const": "replace"}}}
+        },
+        {
+          "$comment": "A cross_check receipt is the record of a comparison, and the standard it was judged against belongs in the document. Without a stated tolerance the receipt's claim would have to be re-derived from whatever the deployment happens to be configured with later.",
+          "if": {
+            "type": "object",
+            "required": ["placement", "resolved"],
+            "properties": {"placement": {"const": "cross_check"}, "resolved": true}
+          },
+          "then": {"required": ["tolerance"], "properties": {"tolerance": true}}
+        }
+      ],
       "properties": {
         "text": {
           "description": "Exact text to locate. Matched case-sensitively against decoded text runs; never a regular expression over PDF bytes and never a fuzzy match.",

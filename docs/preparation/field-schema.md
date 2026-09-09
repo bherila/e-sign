@@ -158,6 +158,26 @@ written.
 `Text\AnchorOrigin`, so the document cannot express a placement the resolver does not implement,
 and there is one definition of what each mode means.
 
+**1.1 also states the relationships between these properties, and 1.0 did not.** Four rules tie
+one property to another, and each is now an `if`/`then` in the contract file rather than only a
+rule in the importers:
+
+| Rule | Where |
+|---|---|
+| `anchor.required: false` requires the field's own `required` to be `false` | `$defs/field` |
+| `anchor.tolerance` requires `placement: "cross_check"` | `$defs/anchor` |
+| `anchor.required: false` requires `placement: "replace"` | `$defs/anchor` |
+| a `cross_check` `resolved` receipt requires `anchor.tolerance` | `$defs/anchor` |
+
+A relationship between two properties is the easiest kind of rule for a contract file and an
+importer to disagree about, because the file can only say it with a conditional and it is tempting
+not to write one. The cost of that disagreement falls entirely on an integration: it validates
+against the published file, is told its document conforms, and then gets a 422 from the service.
+`fieldSchemaContract.test.ts` runs `ajv` and the TypeScript importer over the same document for
+each rule and asserts both refuse it; `FieldSchemaContractTest` pins the conditionals' shape so
+they cannot be dropped from the file. 1.0 stays exactly as published — these are not backported,
+because the file is frozen and its consumers are entitled to the bytes they have.
+
 ## Field types
 
 `signature`, `initials`, `text`, `name`, `company`, `title`, `agreement_date`, `signing_date`,

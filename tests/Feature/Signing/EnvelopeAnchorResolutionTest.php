@@ -349,6 +349,11 @@ class EnvelopeAnchorResolutionTest extends TestCase
     {
         $envelope = $this->scenario->preparedDraft(['field_schema' => $this->preResolvedSchema()]);
 
+        // A new request: `RevisionBytes` is bound `scoped`, so bytes proved while building the
+        // schema above are carried only as far as the request that proved them. A draft created
+        // yesterday and sent today reads the document again, which is the point.
+        app()->forgetScopedInstances();
+
         Storage::disk('documents')->delete($this->scenario->revision->path);
 
         $this->expectException(AnchorDocumentUnavailable::class);
