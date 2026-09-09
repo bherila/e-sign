@@ -379,8 +379,13 @@ final readonly class SchemaAnchorResolver
 
         if (! $offPage && $pageSizes instanceof PageSizes && $pageSizes->has($field->page)) {
             $size = $pageSizes->of($field->page);
-            $offPage = $rect->right() > $size['width'] + CanonicalNumber::TOLERANCE
-                || $rect->bottom() > $size['height'] + CanonicalNumber::TOLERANCE;
+            // The *derived* edges are rounded too, not only the components. Canonical 601.998 and
+            // 10.003 sum to 612.00100000000009 while `612 + 0.001` is 612.00099999999998, so an
+            // edge exactly on the permitted boundary would be refused for a difference that exists
+            // only in the representation. The field-schema validator rounds its derived edge for
+            // the same reason.
+            $offPage = CanonicalNumber::round($rect->right()) > $size['width'] + CanonicalNumber::TOLERANCE
+                || CanonicalNumber::round($rect->bottom()) > $size['height'] + CanonicalNumber::TOLERANCE;
         }
 
         if (! $offPage) {

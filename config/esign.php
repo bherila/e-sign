@@ -645,8 +645,12 @@ return [
          * tolerance turns the check into a formality that passes on a page whose text has moved.
          * A document may name its own `anchor.tolerance`, which wins over this.
          * See docs/preparation/anchors.md.
+         *
+         * Left uncast on purpose. `(float) "one"` is `0.0`, which is a legal tolerance, so a
+         * casting typo would silently switch every cross-check to demanding an exact match rather
+         * than failing as the configuration mistake it is. The provider parses it.
          */
-        'anchor_cross_check_tolerance' => (float) env('ESIGN_ANCHOR_CROSS_CHECK_TOLERANCE', 1.0),
+        'anchor_cross_check_tolerance' => env('ESIGN_ANCHOR_CROSS_CHECK_TOLERANCE', 1.0),
     ],
 
     /*

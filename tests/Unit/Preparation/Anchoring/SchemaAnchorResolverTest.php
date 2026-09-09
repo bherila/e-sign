@@ -654,6 +654,45 @@ final class SchemaAnchorResolverTest extends TestCase
     }
 
     /**
+     * The *derived* edges are rounded too, not only the components a receipt stores.
+     *
+     * Canonicalising `x` and `width` is not enough, because the check adds them: `601.998 +
+     * 10.003` is `612.00100000000009` while `612 + 0.001` is `612.00099999999998`, so a rectangle
+     * whose right edge sits exactly on the permitted boundary is refused for a difference that
+     * exists only in the representation. The field-schema validator rounds its derived edge for
+     * this reason, and this is the same rule one operation later — the components were the
+     * previous round's fix, and the sum of them is this one.
+     */
+    public function test_a_derived_edge_on_the_boundary_is_not_off_the_page(): void
+    {
+        $width = 10.003;
+        $runs = [new TextRun(
+            page: 1,
+            text: 'Signature:',
+            rect: new NativeRect(601.998, 100.0, 60.0, 12.0),
+            fontSize: 12.0,
+            fontResource: 'F1',
+        )];
+
+        $document = $this->documentWith(
+            $this->replacingAnchor(),
+            rect: ['x' => 1, 'y' => 1, 'width' => $width, 'height' => 36],
+        );
+
+        // Precondition: the raw sum really does exceed the boundary while the canonical one does
+        // not. Without this the case proves nothing about rounding.
+        $this->assertGreaterThan(612 + CanonicalNumber::TOLERANCE, 601.998 + $width);
+        $this->assertLessThanOrEqual(612 + CanonicalNumber::TOLERANCE, CanonicalNumber::round(601.998 + $width));
+
+        $this->assertSame(
+            ['signature'],
+            $this->resolver()
+                ->resolve($document, $runs, self::DIGEST, PageSizes::fromList([['width' => 612, 'height' => 792]]))
+                ->resolved,
+        );
+    }
+
+    /**
      * A page the document does not have is not an anchor that is legitimately absent.
      *
      * The search is scoped to the field's page, so a field naming page 9 of a three-page document
@@ -768,6 +807,37 @@ final class SchemaAnchorResolverTest extends TestCase
         $runs = (new TcPdfTextLocator)->extract($bytes, null, $budget);
 
         $this->assertNotSame([], $runs);
+    }
+
+    /**
+     * The budget is charged *inside* the page walk, not around it.
+     *
+     * A single page can hold millions of text-showing operators while satisfying every ceiling
+     * preflight applies to the document, so ticking between pages — or even per produced run —
+     * lets one stream spend the whole budget before anything checks. The unit charged has to be
+     * the unit a pathological stream multiplies, which is the content-stream operation.
+     *
+     * A single-page fixture is the case that distinguishes the two: with the tick outside the
+     * walk there is exactly one page boundary and the budget is consulted once, after the work.
+     */
+    public function test_the_budget_is_charged_during_a_single_pages_walk(): void
+    {
+        $ticks = 0;
+        $budget = new PreflightBudget(
+            new PreflightLimits(timeBudgetSeconds: 3600.0),
+            // A clock that counts how often the backstops are consulted.
+            function () use (&$ticks): float {
+                $ticks++;
+
+                return 0.0;
+            },
+        );
+
+        (new TcPdfTextLocator)->extract(PdfFixtures::bytes('single-page-letter'), null, $budget);
+
+        // One page, four text runs, and many more operations than either: anything in single
+        // digits means the budget is being consulted around the work rather than during it.
+        $this->assertGreaterThan(20, $ticks);
     }
 
     private function resolver(): SchemaAnchorResolver

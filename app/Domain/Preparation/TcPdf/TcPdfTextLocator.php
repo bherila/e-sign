@@ -70,13 +70,12 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
                 continue;
             }
 
-            // Between pages and between runs: a stream that is slow rather than large shows up
-            // here as elapsed time or resident memory, which is what the backstops are for.
-            $budget?->tick();
-
-            foreach ($this->extractPage($graph, $flattened) as $run) {
+            // Charged *inside* the page walk, not around it. A single page can hold millions of
+            // text-showing operators, so ticking between pages would let one page spend the whole
+            // budget before anything checked — the cost is incurred by the walk, so that is where
+            // it has to be counted.
+            foreach ($this->extractPage($graph, $flattened, $budget) as $run) {
                 $runs[] = $run;
-                $budget?->tick();
             }
         }
 
@@ -86,8 +85,11 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
     /**
      * @return array<int, TextRun>
      */
-    private function extractPage(PdfObjectGraph $graph, FlattenedPage $flattened): array
-    {
+    private function extractPage(
+        PdfObjectGraph $graph,
+        FlattenedPage $flattened,
+        ?PreflightBudget $budget = null,
+    ): array {
         $content = $graph->contentStream($flattened->dictionary);
         if ($content === '') {
             return [];
@@ -103,6 +105,7 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
             $flattened->geometry->pageNumber,
             $runs,
             0,
+            $budget,
         );
 
         return $runs;
@@ -127,6 +130,7 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
         int $pageNumber,
         array &$runs,
         int $depth,
+        ?PreflightBudget $budget = null,
     ): void {
         if ($depth > self::MAX_XOBJECT_DEPTH) {
             throw new TextExtractionException(
@@ -142,6 +146,12 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
         $ctm = $baseCtm;
 
         foreach ((new ContentStreamTokenizer($content))->operations() as $operation) {
+            // Every operation, inside the walk. This is the unit a pathological stream multiplies
+            // — a page holding millions of small text-showing operators satisfies every ceiling
+            // preflight applies to the *document* — so ticking around the page, or even per run,
+            // would let one stream spend the whole budget before anything looked.
+            $budget?->tick();
+
             switch ($operation->operator) {
                 case 'q':
                     if (count($ctmStack) < self::MAX_GRAPHICS_DEPTH) {
@@ -253,7 +263,7 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
                     break;
 
                 case 'Do':
-                    $this->enterXObject($graph, $operation, $resources, $ctm, $transform, $pageNumber, $runs, $depth);
+                    $this->enterXObject($graph, $operation, $resources, $ctm, $transform, $pageNumber, $runs, $depth, $budget);
                     break;
             }
         }
@@ -274,6 +284,7 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
         int $pageNumber,
         array &$runs,
         int $depth,
+        ?PreflightBudget $budget = null,
     ): void {
         $name = $operation->name(count($operation->operands) - 1);
         if ($name === null) {
@@ -308,6 +319,7 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
             $pageNumber,
             $runs,
             $depth + 1,
+            $budget,
         );
     }
 

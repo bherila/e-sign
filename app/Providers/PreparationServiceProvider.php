@@ -24,6 +24,7 @@ use App\Domain\Preparation\Text\AnchorResolver;
 use Illuminate\Contracts\Config\Repository;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
+use InvalidArgumentException;
 
 /**
  * Wires the Preparation module's ports to their tc-lib-pdf implementations and builds
@@ -82,13 +83,24 @@ class PreparationServiceProvider extends ServiceProvider
             /** @var Repository $config */
             $config = $app->make('config');
 
-            return new SchemaAnchorResolver(
-                $app->make(AnchorResolver::class),
-                (float) $config->get(
-                    'esign.preparation.anchor_cross_check_tolerance',
-                    SchemaAnchorResolver::DEFAULT_CROSS_CHECK_TOLERANCE,
-                ),
+            $tolerance = $config->get(
+                'esign.preparation.anchor_cross_check_tolerance',
+                SchemaAnchorResolver::DEFAULT_CROSS_CHECK_TOLERANCE,
             );
+
+            // Parsed before it is cast. `(float) "one"` is `0.0` — a perfectly legal tolerance —
+            // so casting first would turn a typo into a silent switch to demanding exact
+            // coordinate matches, which is a change in what the product asserts rather than a
+            // configuration error. The range is checked by the resolver's own constructor.
+            if (! is_numeric($tolerance)) {
+                throw new InvalidArgumentException(
+                    'esign.preparation.anchor_cross_check_tolerance must be a number of points; got '
+                        .var_export($tolerance, true).'. Set ESIGN_ANCHOR_CROSS_CHECK_TOLERANCE to a number, or '
+                        .'leave it unset for the default.',
+                );
+            }
+
+            return new SchemaAnchorResolver($app->make(AnchorResolver::class), (float) $tolerance);
         });
 
         $this->app->bind(
