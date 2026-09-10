@@ -5,16 +5,18 @@ declare(strict_types=1);
 namespace App\Domain\Preparation\Anchoring;
 
 use App\Domain\Preparation\Geometry\NativeRect;
+use App\Domain\Preparation\Preflight\PreflightBudget;
+use App\Domain\Preparation\Preflight\PreflightBudgetException;
 use App\Domain\Preparation\Schema\AnchorPlacement;
 use App\Domain\Preparation\Schema\AnchorPlacementMode;
 use App\Domain\Preparation\Schema\CanonicalNumber;
 use App\Domain\Preparation\Schema\FieldDefinition;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
+use App\Domain\Preparation\Schema\MeasuredRect;
 use App\Domain\Preparation\Schema\PageSizes;
 use App\Domain\Preparation\Schema\ResolvedAnchorRecord;
 use App\Domain\Preparation\Schema\ValidationCode;
 use App\Domain\Preparation\Text\AmbiguousAnchorException;
-use App\Domain\Preparation\Text\Anchor;
 use App\Domain\Preparation\Text\AnchorNotFoundException;
 use App\Domain\Preparation\Text\AnchorResolutionException;
 use App\Domain\Preparation\Text\AnchorResolver;
@@ -109,8 +111,19 @@ final readonly class SchemaAnchorResolver
      *                                  returned document, or is only reported. Publishing reports;
      *                                  sending removes. Either way the absence is never a silent
      *                                  placement at the field's placeholder rectangle.
+     * @param  PreflightBudget|null  $budget  The same budget extraction was charged against, so
+     *                                        the whole of reading one document is bounded by one
+     *                                        set of limits. Matching is not free and is not
+     *                                        covered by extraction's ceiling: it begins after
+     *                                        extraction returns, and it scans every run once per
+     *                                        anchored field. A field set has no length limit, so
+     *                                        a document within every preflight ceiling can still
+     *                                        cost runs x fields here. Null leaves matching
+     *                                        unbounded, which is only safe for inputs a test
+     *                                        controls.
      *
      * @throws AnchorResolutionFailed
+     * @throws PreflightBudgetException
      */
     public function resolve(
         FieldSchemaDocument $schema,
@@ -118,6 +131,7 @@ final readonly class SchemaAnchorResolver
         string $documentSha256,
         ?PageSizes $pageSizes = null,
         bool $omitAbsentFields = true,
+        ?PreflightBudget $budget = null,
     ): AnchorResolutionOutcome {
         /** @var list<AnchorResolutionProblem> $problems */
         $problems = [];
@@ -138,6 +152,10 @@ final readonly class SchemaAnchorResolver
 
                 continue;
             }
+
+            // Before the scan this field is about to pay for, not after: a budget checked only
+            // afterwards reports the cost of work already done.
+            $budget?->tick();
 
             $outcome = $this->resolveField($index, $field, $anchor, $runs, $documentSha256, $pageSizes);
 
@@ -230,6 +248,7 @@ final readonly class SchemaAnchorResolver
                     .', and the document has '.$pageSizes->pageCount().' pages. An anchor is searched on the page '
                     .'its field declares, so this one could not be looked for at all — which is not the same as '
                     .'its text being absent.',
+                member: 'page',
             );
         }
 
@@ -238,7 +257,7 @@ final readonly class SchemaAnchorResolver
         try {
             $matches = $this->anchors->resolve($runs, $request);
         } catch (AnchorResolutionException $failure) {
-            return $this->failureProblem($index, $field, $anchor, $request, $runs, $failure);
+            return $this->failureProblem($index, $field, $anchor, $failure);
         }
 
         if ($matches === []) {
@@ -261,6 +280,12 @@ final readonly class SchemaAnchorResolver
             return $mismatch;
         }
 
+        $unbounded = $this->outOfBoundsProblem($index, $field, $anchor, $found);
+
+        if ($unbounded instanceof AnchorResolutionProblem) {
+            return $unbounded;
+        }
+
         // Storable by construction: the matched text's own box is a measurement and may sit
         // partly outside the page ({@see MeasuredRect}), and the resolved rectangle has already
         // been checked against the page above. The guard stays because a value object that can
@@ -276,8 +301,9 @@ final readonly class SchemaAnchorResolver
                 ValidationCode::AnchorResolvedOffPage,
                 'a rectangle that cannot be recorded',
                 'Field "'.$field->id.'" is anchored to "'.$anchor->text.'" on page '.$field->page
-                    .', and the match cannot be recorded: '.$unstorable->getMessage().' This is a property of the '
-                    .'matched text itself, not of the offset.',
+                    .', and the match cannot be recorded: '.$unstorable->getMessage().' The resolved rectangle is '
+                    .'checked before this point, so what cannot be recorded here is the measurement of the matched '
+                    .'text itself.',
             );
         }
 
@@ -318,17 +344,19 @@ final readonly class SchemaAnchorResolver
     }
 
     /**
-     * @param  array<int, TextRun>  $runs
+     * The count comes from the failure, which counted the matches on its way to being thrown.
+     *
+     * Scanning the runs again to learn it would double the cost of every failed field — and a
+     * document where many fields fail is exactly the one where that matters, since a schema has
+     * no field limit and the scan is over every run on the page.
      */
     private function failureProblem(
         int $index,
         FieldDefinition $field,
         AnchorPlacement $anchor,
-        Anchor $request,
-        array $runs,
         AnchorResolutionException $failure,
     ): AnchorResolutionProblem {
-        $count = count($this->anchors->matches($runs, $request));
+        $count = $failure->matchCount;
 
         $code = match (true) {
             $failure instanceof AnchorNotFoundException => ValidationCode::AnchorNotFound,
@@ -352,6 +380,56 @@ final readonly class SchemaAnchorResolver
                 .'. A field placed at a fallback position is a field nobody agreed to sign there, so nothing '
                 .'is placed and nothing is sent.',
         );
+    }
+
+    /**
+     * The resolved rectangle has to fit the bound its own receipt member carries.
+     *
+     * `anchor.resolved.rect` is 1.1's `$defs/resolved_rect` and is bounded at PDF's largest page
+     * side; the field's own `rect` is 1.0's and is not (#105). So a legal offset on a legal
+     * measurement can produce a rectangle this service would write and then refuse on the next
+     * import — the one failure mode a caller can do nothing about, because the document they sent
+     * was valid. It is checked here, where the offset that caused it can be named.
+     *
+     * Reachable when the page-fit check above did not already refuse it: with no page sizes to
+     * check against, or on a page larger than the bound. Judged on canonical values, because the
+     * receipt stores canonical values and the validator will read those.
+     */
+    private function outOfBoundsProblem(
+        int $index,
+        FieldDefinition $field,
+        AnchorPlacement $anchor,
+        ResolvedAnchor $found,
+    ): ?AnchorResolutionProblem {
+        $components = [
+            'x' => $found->resolvedRect->x,
+            'y' => $found->resolvedRect->y,
+            'width' => $found->resolvedRect->width,
+            'height' => $found->resolvedRect->height,
+        ];
+
+        foreach ($components as $name => $value) {
+            if (abs(CanonicalNumber::round($value)) <= MeasuredRect::MAX_MAGNITUDE) {
+                continue;
+            }
+
+            $where = $name.' '.$this->number($value);
+
+            return new AnchorResolutionProblem(
+                $index,
+                $field->id,
+                $field->recipientId,
+                $anchor->text,
+                ValidationCode::AnchorResolvedOffPage,
+                $where,
+                'Field "'.$field->id.'" is anchored to "'.$anchor->text.'" on page '.$field->page
+                    .', and the offset puts the resolved rectangle beyond '
+                    .$this->number(MeasuredRect::MAX_MAGNITUDE).' pt from the origin, PDF\'s largest page side ('
+                    .$where.'). A rectangle that far out cannot be recorded in the receipt, so nothing is stored.',
+            );
+        }
+
+        return null;
     }
 
     private function offPageProblem(

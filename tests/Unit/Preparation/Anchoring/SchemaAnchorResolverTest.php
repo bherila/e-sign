@@ -14,7 +14,11 @@ use App\Domain\Preparation\Schema\AnchorPlacement;
 use App\Domain\Preparation\Schema\AnchorPlacementMode;
 use App\Domain\Preparation\Schema\CanonicalNumber;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
+use App\Domain\Preparation\Schema\FieldSchemaValidator;
+use App\Domain\Preparation\Schema\MeasuredRect;
 use App\Domain\Preparation\Schema\PageSizes;
+use App\Domain\Preparation\Schema\Rect;
+use App\Domain\Preparation\Schema\ResolvedAnchorRecord;
 use App\Domain\Preparation\Schema\SchemaVersion;
 use App\Domain\Preparation\Schema\ValidationCode;
 use App\Domain\Preparation\TcPdf\TcPdfTextLocator;
@@ -838,6 +842,254 @@ final class SchemaAnchorResolverTest extends TestCase
         // One page, four text runs, and many more operations than either: anything in single
         // digits means the budget is being consulted around the work rather than during it.
         $this->assertGreaterThan(20, $ticks);
+    }
+
+    // ------------------------------------------------------- the receipt survives its own import
+
+    /**
+     * A receipt this resolver writes must import through the validator that reads it back.
+     *
+     * `anchor.resolved.rect` is 1.1's `$defs/resolved_rect` and the validator bounds it at PDF's
+     * largest page side; the field's own `rect` is 1.0's and carries no bound (#105). So a legal
+     * offset applied to a legal measurement can produce a rectangle this service would happily
+     * write and then refuse on the very next read — the one failure a caller cannot act on,
+     * because what they sent was valid.
+     *
+     * The combination is *magnitude* against *what is checked against it*, and the four cells are
+     * not interchangeable: with page sizes in hand the page-fit check refuses an over-large
+     * rectangle first and says so in terms of the page, and only without them — or on a page as
+     * large as the bound itself — does the bound become the thing that catches it. A test of
+     * either alone passes while the other is broken.
+     *
+     * @return iterable<string, array{float, bool, string}>
+     */
+    public static function resolvedMagnitudes(): iterable
+    {
+        // dx, whether page sizes are supplied, and the phrase the refusal must contain.
+        yield 'within the bound, page sizes known' => [10.0, true, ''];
+        yield 'within the bound, page sizes unknown' => [10.0, false, ''];
+        yield 'past the bound, page sizes known' => [20000.0, true, 'the offset puts it off the page'];
+        yield 'past the bound, page sizes unknown' => [20000.0, false, 'the offset puts the resolved rectangle beyond'];
+    }
+
+    #[DataProvider('resolvedMagnitudes')]
+    public function test_a_resolved_rectangle_is_bounded_by_what_its_receipt_can_hold(
+        float $dx,
+        bool $withPageSizes,
+        string $expected,
+    ): void {
+        $runs = (new TcPdfTextLocator)->extract(PdfFixtures::bytes('single-page-letter'));
+
+        $document = $this->documentWith($this->replacingAnchor([
+            'origin' => AnchorOrigin::BottomLeft->value,
+            'offset' => ['dx' => $dx, 'dy' => 0],
+        ]));
+
+        $pages = $withPageSizes ? PageSizes::fromMap([1 => ['width' => 612.0, 'height' => 792.0]]) : null;
+
+        if ($expected === '') {
+            $outcome = $this->resolver()->resolve($document, $runs, self::DIGEST, $pages);
+
+            $this->assertSame(['signature'], $outcome->resolved);
+
+            // The property the bound exists for: what was written imports again unchanged.
+            $result = (new FieldSchemaValidator)->validate($outcome->schema->toArray());
+
+            $this->assertTrue(
+                $result->isValid(),
+                'A receipt this resolver wrote must pass the validator that reads it back: '.$result->describe(),
+            );
+
+            return;
+        }
+
+        $failure = $this->failureOf($document, $runs, $pages);
+
+        $this->assertCount(1, $failure->problems);
+        $this->assertSame(ValidationCode::AnchorResolvedOffPage, $failure->problems[0]->code);
+        $this->assertStringContainsString($expected, $failure->problems[0]->message);
+    }
+
+    /**
+     * And the bound lives on the record, so no other producer can route around it.
+     *
+     * The resolver checks first because only the resolver can name the offset that caused it. The
+     * record checks because a guard that only one caller runs is a guard the next caller does not.
+     */
+    public function test_a_resolved_record_refuses_a_rectangle_its_schema_cannot_hold(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/anchor\.resolved\.rect\.x/');
+
+        new ResolvedAnchorRecord(
+            self::DIGEST,
+            1,
+            1,
+            new MeasuredRect(10.0, 10.0, 40.0, 12.0),
+            new Rect(MeasuredRect::MAX_MAGNITUDE + 1.0, 10.0, 20.0, 20.0),
+        );
+    }
+
+    /**
+     * The bound is judged on the stored value, like every other comparison here.
+     *
+     * A raw component a fraction above the bound is written down as the bound, so refusing it
+     * would make the record stricter than the validator that reads the record — the same
+     * disagreement in the other direction.
+     */
+    public function test_the_bound_is_judged_on_the_value_that_will_be_stored(): void
+    {
+        $record = new ResolvedAnchorRecord(
+            self::DIGEST,
+            1,
+            1,
+            new MeasuredRect(10.0, 10.0, 40.0, 12.0),
+            new Rect(MeasuredRect::MAX_MAGNITUDE + 0.0004, 10.0, 20.0, 20.0),
+        );
+
+        $this->assertSame(MeasuredRect::MAX_MAGNITUDE, CanonicalNumber::round($record->rect->x));
+    }
+
+    // ------------------------------------------------------------------ where a problem points
+
+    /**
+     * A problem points at the member that is wrong.
+     *
+     * The combination is *which failure* against *which member*, and the reason it has to be
+     * tested that way is that every anchor problem but one is about the anchor: a rule that
+     * pointed at `page` for the page-range case and was never checked against the others would
+     * pass a test of the page case while sending every other refusal to the wrong member.
+     *
+     * @return iterable<string, array{string, int, string}>
+     */
+    public static function problemPointers(): iterable
+    {
+        yield 'a page the document does not have' => ['Signature:', 9, '/fields/0/page'];
+        yield 'text that is not in the document' => ['Nowhere in this document:', 1, '/fields/0/anchor'];
+    }
+
+    #[DataProvider('problemPointers')]
+    public function test_a_problem_points_at_the_member_the_sender_must_change(
+        string $text,
+        int $page,
+        string $pointer,
+    ): void {
+        $runs = (new TcPdfTextLocator)->extract(PdfFixtures::bytes('single-page-letter'));
+
+        $failure = $this->failureOf(
+            $this->documentWith($this->replacingAnchor(['text' => $text]), page: $page),
+            $runs,
+            PageSizes::fromMap([1 => ['width' => 612.0, 'height' => 792.0]]),
+        );
+
+        $this->assertCount(1, $failure->problems);
+        $this->assertSame($pointer, $failure->problems[0]->pointer());
+
+        // The send surface addresses fields by id and never carried a pointer, so it is unchanged
+        // by this either way.
+        $this->assertSame('signature', $failure->problems[0]->toSendProblem()['field']);
+    }
+
+    // ------------------------------------------------------------------- what the count comes from
+
+    /**
+     * The match count in a refusal is the one the failure already counted.
+     *
+     * It used to be recovered by scanning every run a second time, which doubled the cost of
+     * exactly the document where cost matters — many fields, all of them failing. The combination
+     * is *failure kind* against *count*, because the three kinds learn the number in different
+     * places: not-found knows it is zero, while ambiguity and an out-of-range occurrence are
+     * thrown from the middle of a scan that has the number in hand.
+     *
+     * Each case asserts the count against a scan performed by the test, so the cheap path cannot
+     * drift from the expensive one it replaced.
+     *
+     * @return iterable<string, array{string, string|int, ValidationCode}>
+     */
+    public static function failureCounts(): iterable
+    {
+        yield 'no match at all' => ['Nowhere in this document:', 'sole', ValidationCode::AnchorNotFound];
+        yield 'more than one match' => ['Signature:', 'sole', ValidationCode::AnchorAmbiguous];
+        yield 'past the last occurrence' => ['Signature:', 9, ValidationCode::AnchorOccurrenceOutOfRange];
+    }
+
+    #[DataProvider('failureCounts')]
+    public function test_a_refusal_reports_the_count_the_failure_already_had(
+        string $text,
+        string|int $occurrence,
+        ValidationCode $code,
+    ): void {
+        $runs = (new TcPdfTextLocator)->extract(PdfFixtures::bytes('multi-occurrence'));
+
+        $failure = $this->failureOf(
+            $this->documentWith($this->replacingAnchor(['text' => $text, 'occurrence' => $occurrence])),
+            $runs,
+        );
+
+        $expected = count((new AnchorResolver)->matches($runs, new Anchor(
+            text: $text,
+            occurrence: $occurrence === 'sole' ? AnchorOccurrence::sole() : AnchorOccurrence::index((int) $occurrence),
+            page: 1,
+            offsetX: 0.0,
+            offsetY: 0.0,
+            width: 170.0,
+            height: 36.0,
+            origin: AnchorOrigin::TopLeft,
+        )));
+
+        $this->assertCount(1, $failure->problems);
+        $this->assertSame($code, $failure->problems[0]->code);
+        $this->assertSame(
+            $expected === 0
+                ? 'no match on page 1'
+                : $expected.' '.($expected === 1 ? 'match' : 'matches').' on page 1',
+            $failure->problems[0]->found,
+            'The reported count must equal what a second scan would have found.',
+        );
+    }
+
+    // ------------------------------------------------------------------- matching is bounded too
+
+    /**
+     * Matching is charged against the same budget extraction was.
+     *
+     * Extraction's ceiling stops when extraction returns, and matching begins there: it scans
+     * every run once per anchored field, and a schema has no field limit, so a document inside
+     * every preflight ceiling can still cost runs x fields. The combination is *a budget being
+     * supplied* against *it being spent*, for the same reason it is in the extraction test — a
+     * guard that fired only with a budget present would leave every existing caller unbounded,
+     * and one that fired regardless would refuse callers passing input they control.
+     *
+     * @return iterable<string, array{bool, bool}>
+     */
+    public static function matchingBudgets(): iterable
+    {
+        yield 'no budget at all' => [false, true];
+        yield 'a budget with room' => [true, true];
+        yield 'a budget already spent' => [true, false];
+    }
+
+    #[DataProvider('matchingBudgets')]
+    public function test_matching_is_bounded_by_the_budget_it_is_given(bool $supplied, bool $completes): void
+    {
+        $runs = (new TcPdfTextLocator)->extract(PdfFixtures::bytes('single-page-letter'));
+        $document = $this->documentWith($this->replacingAnchor());
+
+        $budget = $supplied
+            ? new PreflightBudget(new PreflightLimits(timeBudgetSeconds: $completes ? 3600.0 : 0.0000001))
+            : null;
+
+        if ($supplied && ! $completes) {
+            usleep(1000);
+        }
+
+        if (! $completes) {
+            $this->expectException(PreflightBudgetException::class);
+        }
+
+        $outcome = $this->resolver()->resolve($document, $runs, self::DIGEST, null, true, $budget);
+
+        $this->assertSame(['signature'], $outcome->resolved);
     }
 
     private function resolver(): SchemaAnchorResolver

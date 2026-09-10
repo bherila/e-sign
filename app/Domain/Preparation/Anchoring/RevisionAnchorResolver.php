@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Domain\Preparation\Anchoring;
 
-use App\Domain\Integration\Firma\PageGeometryReader;
 use App\Domain\Preparation\Contracts\PdfPreflight;
 use App\Domain\Preparation\Contracts\PdfTextLocator;
 use App\Domain\Preparation\Documents\Models\DocumentRevision;
@@ -68,13 +67,31 @@ final readonly class RevisionAnchorResolver
 
         $bytes = $this->readBytes($revision);
 
-        return $this->resolver->resolve(
-            $schema,
-            $this->runs($schema, $bytes, $revision),
-            $digest,
-            $this->pageSizes($revision, $bytes),
-            $omitAbsentFields,
-        );
+        // One budget for the whole of reading this document: the parse, the content walk, and
+        // the per-field matching that follows. Matching is not covered by extraction's ceiling —
+        // it starts after extraction returns — and a schema has no field limit, so a document
+        // inside every preflight ceiling can still cost runs x fields once the runs are in hand.
+        $budget = new PreflightBudget($this->limits);
+
+        try {
+            return $this->resolver->resolve(
+                $schema,
+                $this->runs($schema, $bytes, $revision, $budget),
+                $digest,
+                $this->pageSizes($revision, $bytes),
+                $omitAbsentFields,
+                $budget,
+            );
+        } catch (PreflightBudgetException $exhausted) {
+            // A ceiling, crossed anywhere in reading this document: parsing it, walking its
+            // content streams, or matching the anchors against the runs that came out. Not a bad
+            // field set and not a storage failure — a document this build cannot afford to read,
+            // which is what it is from the sender's side too, so it is reported exactly like an
+            // unreadable one. The limit that stopped it goes to the log and never to the response.
+            $this->log($revision, $exhausted);
+
+            throw new AnchorResolutionFailed($this->unreadableProblems($schema));
+        }
     }
 
     /**
@@ -85,9 +102,9 @@ final readonly class RevisionAnchorResolver
      * without one would still place the field, silently skipping the one check that catches an
      * offset which walks off the edge, and a signer would be left with a field they cannot reach.
      *
-     * Two sources, in the order {@see PageGeometryReader} uses.
-     * The recorded preflight report first: it is the measurement every stored rectangle was
-     * already validated against, so a second one that disagreed would be worse than none. Then a
+     * Two sources, in a fixed order. The recorded preflight report first: it is the measurement
+     * every stored rectangle was already validated against, so a second one that disagreed would
+     * be worse than none. Then a
      * parse of *these* bytes — the ones just proved against the revision's digest — for a row
      * whose report predates page geometry or was written by an older build. There is no third
      * source and no default: a page size is never assumed (AGENTS.md, "Coordinates are never
@@ -140,23 +157,25 @@ final readonly class RevisionAnchorResolver
      * @return array<int, TextRun>
      *
      * @throws AnchorResolutionFailed
+     * @throws PreflightBudgetException Answered by the caller, with the matching phase's.
      */
-    private function runs(FieldSchemaDocument $schema, string $bytes, DocumentRevision $revision): array
-    {
+    private function runs(
+        FieldSchemaDocument $schema,
+        string $bytes,
+        DocumentRevision $revision,
+        PreflightBudget $budget,
+    ): array {
         try {
             // Bounded by the same limits the upload was inspected under. Preflight's ceilings
             // describe the *document* — its size, its object count, its streams — and a file can
             // satisfy every one of them while holding millions of small text-showing operators in
             // a single allowed content stream. That is a document nobody can resolve, and without
             // a budget the cost lands on whichever request tried.
-            return $this->text->extract($bytes, null, new PreflightBudget($this->limits));
-        } catch (PreflightBudgetException $exhausted) {
-            // Not a bad field set and not a storage failure: a document this build cannot afford
-            // to read. It is reported like an unreadable one, because that is what it is from the
-            // sender's side, and the limit that stopped it goes to the log.
-            $this->log($revision, $exhausted);
-
-            throw new AnchorResolutionFailed($this->unreadableProblems($schema));
+            //
+            // A ceiling crossed here is deliberately *not* caught here: it is the same fact as one
+            // crossed while matching, and `resolve()` answers both in one place. Two handlers that
+            // must stay identical are two that can drift.
+            return $this->text->extract($bytes, null, $budget);
         } catch (TextExtractionException $failure) {
             // Read, and not parseable. That *is* something about this document, so it is reported
             // to the sender — but only as the stable code. A parser's message carries engine

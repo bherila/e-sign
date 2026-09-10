@@ -6,9 +6,11 @@ namespace App\Domain\Preparation\TcPdf;
 
 use App\Domain\Preparation\Contracts\PdfTextLocator;
 use App\Domain\Preparation\Geometry\CoordinateTransform;
+use App\Domain\Preparation\Geometry\InvalidGeometryException;
 use App\Domain\Preparation\Geometry\NativeRect;
 use App\Domain\Preparation\Geometry\UserSpacePoint;
 use App\Domain\Preparation\Preflight\PreflightBudget;
+use App\Domain\Preparation\Preflight\PreflightBudgetException;
 use App\Domain\Preparation\TcPdf\Parsing\ContentStreamOperation;
 use App\Domain\Preparation\TcPdf\Parsing\ContentStreamTokenizer;
 use App\Domain\Preparation\TcPdf\Parsing\FlattenedPage;
@@ -54,7 +56,18 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
     public function extract(string $pdfBytes, ?int $page = null, ?PreflightBudget $budget = null): array
     {
         try {
-            $graph = PdfObjectGraph::parse($pdfBytes);
+            // The caller's budget, not a fresh one. `parse()` makes its own when given none, and
+            // a private budget carries the *default* limits — so a deployment that raised its
+            // ceilings could accept a document at upload and then refuse the same bytes here,
+            // and the parse would cost nothing against the caller's running total. One document,
+            // one budget, from the first byte read to the last run matched.
+            $graph = PdfObjectGraph::parse($pdfBytes, $budget);
+        } catch (PreflightBudgetException $exhausted) {
+            // A ceiling, not a broken file, and the two call for different answers from whoever
+            // uploaded it. Passing the budget into the parse is what makes this reachable at all;
+            // letting the catch below flatten it would report a decompression bomb as a corrupt
+            // document.
+            throw $exhausted;
         } catch (\Throwable $exception) {
             throw new TextExtractionException('The document could not be parsed: '.$exception->getMessage(), previous: $exception);
         }
@@ -64,19 +77,34 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
         }
 
         $runs = [];
-        foreach ((new PageTreeReader($graph))->pages() as $flattened) {
-            $pageNumber = $flattened->geometry->pageNumber;
-            if ($page !== null && $pageNumber !== $page) {
-                continue;
-            }
 
-            // Charged *inside* the page walk, not around it. A single page can hold millions of
-            // text-showing operators, so ticking between pages would let one page spend the whole
-            // budget before anything checked — the cost is incurred by the walk, so that is where
-            // it has to be counted.
-            foreach ($this->extractPage($graph, $flattened, $budget) as $run) {
-                $runs[] = $run;
+        try {
+            foreach ((new PageTreeReader($graph))->pages() as $flattened) {
+                $pageNumber = $flattened->geometry->pageNumber;
+                if ($page !== null && $pageNumber !== $page) {
+                    continue;
+                }
+
+                // Charged *inside* the page walk, not around it. A single page can hold millions of
+                // text-showing operators, so ticking between pages would let one page spend the whole
+                // budget before anything checked — the cost is incurred by the walk, so that is where
+                // it has to be counted.
+                foreach ($this->extractPage($graph, $flattened, $budget) as $run) {
+                    $runs[] = $run;
+                }
             }
+        } catch (InvalidGeometryException $geometry) {
+            // Content operators are not preflighted — preflight reads the object graph, not the
+            // instructions inside a stream — so an accepted document can still carry a transform
+            // whose product is not a finite coordinate, and `UserSpacePoint` and `NativeRect`
+            // refuse to be built from one. That is this document being unreadable, which is a
+            // thing the contract already has an answer for; leaving it as an `InvalidArgumentException`
+            // would escape callers that catch what this method promises and surface as a 500
+            // instead of the per-field `anchor_text_unreadable` the sender is owed.
+            throw new TextExtractionException(
+                'The document\'s page geometry could not be interpreted: '.$geometry->getMessage(),
+                previous: $geometry,
+            );
         }
 
         return $runs;

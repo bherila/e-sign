@@ -16,6 +16,6 @@ final class AmbiguousAnchorException extends AnchorResolutionException
             ucfirst($anchor->describe()),
             $matches,
             $matches,
-        ));
+        ), $matches);
     }
 }

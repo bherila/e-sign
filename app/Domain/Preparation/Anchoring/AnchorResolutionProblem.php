@@ -27,12 +27,22 @@ final readonly class AnchorResolutionProblem
         public ValidationCode $code,
         public string $found,
         public string $message,
+        public string $member = 'anchor',
     ) {}
 
-    /** RFC 6901 pointer to the anchor inside the document as submitted. */
+    /**
+     * RFC 6901 pointer to the member the sender has to change.
+     *
+     * Almost always the anchor, because almost every one of these is about the anchor. The
+     * exception is a field naming a page the document does not have: what is wrong there is
+     * `page`, the anchor is fine, and pointing at the anchor sends an editor to annotate a
+     * correct value while the incorrect one goes unmarked. The field-schema validator's own
+     * page-range error points at `page`, and two surfaces that disagree about where the same
+     * mistake lives are worse than either.
+     */
     public function pointer(): string
     {
-        return '/fields/'.$this->fieldIndex.'/anchor';
+        return '/fields/'.$this->fieldIndex.'/'.$this->member;
     }
 
     public function toValidationError(): ValidationError

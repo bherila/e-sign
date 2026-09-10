@@ -83,17 +83,44 @@ mutation test encodes exactly which combinations can and cannot catch it.
 
 | Code | Refused |
 |---|---|
+| `page_out_of_range` | the field names a page the document does not have, so its anchor could not be looked for at all |
 | `anchor_not_found` | a required anchor's text is not on the field's page |
 | `anchor_ambiguous` | `occurrence: "sole"` matched more than once |
 | `anchor_occurrence_out_of_range` | `occurrence: n` with fewer than *n* matches |
-| `anchor_resolved_off_page` | the offset put the rectangle off the page it was found on |
+| `anchor_resolved_off_page` | the offset put the rectangle off the page it was found on, or further from the origin than a receipt can record |
 | `anchor_cross_check_failed` | a `cross_check` resolved further than its tolerance from the declared rectangle |
-| `anchor_text_unreadable` | the bytes were read and could not be parsed |
+| `anchor_text_unreadable` | the bytes were read and could not be parsed, or reading them crossed a resource ceiling |
 | `anchor_receipt_inconsistent` | the resolver produced a receipt that contradicts its own request |
+
+Each carries a JSON Pointer to the member the sender has to change. That is the anchor for all of
+them but the first: a field on a page the document does not have has a correct anchor and an
+incorrect `page`, so it points at `/fields/{n}/page`, which is where the field-schema validator's
+own page-range error points too.
+
+`anchor_resolved_off_page` covers two bounds, and the message says which. A rectangle that leaves
+the page is refused because a signer cannot reach it. A rectangle further than 14400 pt from the
+origin — PDF's largest page side — is refused for a different reason: `anchor.resolved.rect` is
+bounded by the schema even though the field's own `rect` is not, so writing one would produce a
+document this service could not read back on the next request. Both are reachable only through the
+offset, since the measurement it is applied to is bounded already.
 
 A document that could not be **read** is a different thing from one that could not be parsed:
 storage failures raise `AnchorDocumentUnavailable`, which is a retryable server failure rather than
 a validation error, and the disk name and object path go to the log rather than to a response.
+
+## Reading one document is one budget
+
+Preflight's ceilings describe the document — its size, its object count, its streams — and a file
+can satisfy every one of them while holding millions of small text-showing operators in a single
+allowed content stream. Resolution therefore carries its own budget, built from the same
+`PreflightLimits` the upload was inspected under, and charges three phases against it: parsing the
+object graph, walking the content streams, and matching the anchors against the runs that come out.
+
+Matching needs the budget as much as extraction does. It begins after extraction returns, so
+extraction's ceiling no longer applies, and it scans every run once per anchored field — while a
+field set has no length limit. A ceiling crossed in any of the three phases reaches the sender as
+`anchor_text_unreadable`, one problem per anchored field, with the limit that stopped it in the log
+and never in the response.
 
 ## The bytes are proved, not assumed
 
