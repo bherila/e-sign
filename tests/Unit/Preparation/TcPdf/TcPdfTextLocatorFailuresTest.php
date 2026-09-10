@@ -12,7 +12,7 @@ use App\Domain\Preparation\TcPdf\TcPdfTextLocator;
 use App\Domain\Preparation\Text\TextExtractionException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
-use Tests\Fixtures\Pdf\PdfFixtureWriter;
+use Tests\Support\PdfBombFixtures;
 use Tests\Support\PdfFixtures;
 
 /**
@@ -131,6 +131,10 @@ final class TcPdfTextLocatorFailuresTest extends TestCase
      * the sender as an unstructured server error in place of the per-field
      * `anchor_text_unreadable` they are owed.
      *
+     * The premise — that preflight really does admit this file — is not assumed here. The
+     * fixture is declared `accept` in the bomb corpus manifest, so `PdfPreflightLimitsTest`
+     * fails if that ever stops being true, and this test would then be proving something else.
+     *
      * The pairing that matters is with the test above: normalising too widely would swallow a
      * budget exhaustion into the same answer, and that cell is what would catch it.
      */
@@ -139,37 +143,6 @@ final class TcPdfTextLocatorFailuresTest extends TestCase
         $this->expectException(TextExtractionException::class);
         $this->expectExceptionMessageMatches('/page geometry could not be interpreted/');
 
-        (new TcPdfTextLocator)->extract(self::documentWithAnOverflowingTransform());
-    }
-
-    /**
-     * A page whose CTM is multiplied past what a float can hold, then asked to show text.
-     *
-     * Two `cm` operators, each already at the top of the range, so the product is infinite rather
-     * than merely enormous — a single one would still produce a finite, absurd coordinate, which
-     * is a different case and not this one.
-     */
-    private static function documentWithAnOverflowingTransform(): string
-    {
-        $writer = new PdfFixtureWriter;
-
-        $font = $writer->add(
-            '<< /Type /Font /Subtype /Type1 /BaseFont /Courier /FirstChar 32 /LastChar 126 '
-            .'/Widths ['.trim(str_repeat('600 ', 95)).'] >>'
-        );
-
-        $enormous = str_repeat('9', 300);
-        $transform = $enormous.' 0 0 '.$enormous.' 0 0 cm ';
-
-        $contents = $writer->addStream('<< >>', 'q '.$transform.$transform.'BT /F1 12 Tf 10 10 Td (Hi) Tj ET Q');
-
-        $pages = $writer->reserve();
-        $page = $writer->add(
-            '<< /Type /Page /Parent '.$pages.' 0 R /MediaBox [0 0 612 792] '
-            .'/Resources << /Font << /F1 '.$font.' 0 R >> >> /Contents '.$contents.' 0 R >>'
-        );
-        $writer->put($pages, '<< /Type /Pages /Kids ['.$page.' 0 R] /Count 1 >>');
-
-        return $writer->build($writer->add('<< /Type /Catalog /Pages '.$pages.' 0 R >>'));
+        (new TcPdfTextLocator)->extract(PdfBombFixtures::bytes('overflowing-transform'));
     }
 }
