@@ -6,12 +6,17 @@ namespace App\Domain\Preparation\TcPdf;
 
 use App\Domain\Preparation\Contracts\PdfTextLocator;
 use App\Domain\Preparation\Geometry\CoordinateTransform;
+use App\Domain\Preparation\Geometry\InvalidGeometryException;
 use App\Domain\Preparation\Geometry\NativeRect;
 use App\Domain\Preparation\Geometry\UserSpacePoint;
+use App\Domain\Preparation\Preflight\PreflightBudget;
+use App\Domain\Preparation\Preflight\PreflightBudgetException;
+use App\Domain\Preparation\Preflight\PreflightLimits;
 use App\Domain\Preparation\TcPdf\Parsing\ContentStreamOperation;
 use App\Domain\Preparation\TcPdf\Parsing\ContentStreamTokenizer;
 use App\Domain\Preparation\TcPdf\Parsing\FlattenedPage;
 use App\Domain\Preparation\TcPdf\Parsing\FontDictionaryReader;
+use App\Domain\Preparation\TcPdf\Parsing\MalformedPageTreeException;
 use App\Domain\Preparation\TcPdf\Parsing\Matrix;
 use App\Domain\Preparation\TcPdf\Parsing\PageTreeReader;
 use App\Domain\Preparation\TcPdf\Parsing\PdfFontModel;
@@ -48,39 +53,101 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
     private const MAX_XOBJECT_DEPTH = 8;
 
     /**
+     * @param  PreflightLimits  $limits  The ceilings this deployment reads documents under, used
+     *                                   when a caller supplies no budget of its own. Injected
+     *                                   rather than defaulted in the body so the container can
+     *                                   hand over the configured set: a deployment that raised a
+     *                                   ceiling and then had extraction apply the built-in one
+     *                                   would accept a document at upload and refuse the same
+     *                                   bytes on the next request.
+     */
+    public function __construct(private PreflightLimits $limits = new PreflightLimits) {}
+
+    /**
      * @return array<int, TextRun>
      */
-    public function extract(string $pdfBytes, ?int $page = null): array
+    public function extract(string $pdfBytes, ?int $page = null, ?PreflightBudget $budget = null): array
+    {
+        // One budget for this read, and every ceiling applied below comes from it. When the
+        // caller supplies none this method owns one, which is not the same as being unbounded:
+        // it means nobody outside is accounting for the cost, so nobody outside is told about it
+        // either. See the catch below.
+        $ceiling = $budget ?? new PreflightBudget($this->limits);
+
+        try {
+            $graph = $this->parse($pdfBytes, $ceiling);
+
+            if ($graph->isEncrypted()) {
+                throw new TextExtractionException('Text cannot be extracted from an encrypted document.');
+            }
+
+            $runs = [];
+
+            // The configured page ceiling, not the page-tree reader's own default. Preflight
+            // already admits documents up to this number; walking to a smaller hard-coded one
+            // would refuse a document the deployment accepted, and do it with a page-tree error
+            // rather than a limit anybody can act on.
+            foreach ((new PageTreeReader($graph))->pages($ceiling->limits->maxPages) as $flattened) {
+                $pageNumber = $flattened->geometry->pageNumber;
+                if ($page !== null && $pageNumber !== $page) {
+                    continue;
+                }
+
+                foreach ($this->extractPage($graph, $flattened, $ceiling) as $run) {
+                    $runs[] = $run;
+                }
+            }
+
+            return $runs;
+        } catch (PreflightBudgetException $exhausted) {
+            // Whose ceiling it was decides who hears about it. A caller that supplied a budget
+            // opted into accounting for this document's cost and can tell "too expensive" from
+            // "broken" — which are different answers for whoever uploaded it. A caller that
+            // supplied none cannot: it never asked to be told, and handing it an exception it
+            // does not catch turns a bounded refusal into an unhandled error.
+            if ($budget instanceof PreflightBudget) {
+                throw $exhausted;
+            }
+
+            throw new TextExtractionException(
+                'The document could not be read within this deployment\'s limits.',
+                previous: $exhausted,
+            );
+        } catch (MalformedPageTreeException|InvalidGeometryException $unreadable) {
+            // Neither is a ceiling and neither is a parse failure: a page tree that does not
+            // describe pages, or a content-stream transform whose product is not a finite
+            // coordinate. Preflight reads the object graph and never the arithmetic inside a
+            // stream, so an accepted document can still arrive here — and both types are
+            // outside what this method promises, so they would escape every caller that catches
+            // what it says it throws.
+            throw new TextExtractionException(
+                'The document\'s pages could not be read: '.$unreadable->getMessage(),
+                previous: $unreadable,
+            );
+        }
+    }
+
+    /**
+     * @throws TextExtractionException
+     * @throws PreflightBudgetException
+     */
+    private function parse(string $pdfBytes, PreflightBudget $budget): PdfObjectGraph
     {
         try {
-            $graph = PdfObjectGraph::parse($pdfBytes);
+            return PdfObjectGraph::parse($pdfBytes, $budget);
+        } catch (PreflightBudgetException $exhausted) {
+            // Answered by the caller of `extract()`, which knows whose budget this was. Letting
+            // the catch below flatten it would report a decompression bomb as a corrupt file.
+            throw $exhausted;
         } catch (\Throwable $exception) {
             throw new TextExtractionException('The document could not be parsed: '.$exception->getMessage(), previous: $exception);
         }
-
-        if ($graph->isEncrypted()) {
-            throw new TextExtractionException('Text cannot be extracted from an encrypted document.');
-        }
-
-        $runs = [];
-        foreach ((new PageTreeReader($graph))->pages() as $flattened) {
-            $pageNumber = $flattened->geometry->pageNumber;
-            if ($page !== null && $pageNumber !== $page) {
-                continue;
-            }
-
-            foreach ($this->extractPage($graph, $flattened) as $run) {
-                $runs[] = $run;
-            }
-        }
-
-        return $runs;
     }
 
     /**
      * @return array<int, TextRun>
      */
-    private function extractPage(PdfObjectGraph $graph, FlattenedPage $flattened): array
+    private function extractPage(PdfObjectGraph $graph, FlattenedPage $flattened, PreflightBudget $budget): array
     {
         $content = $graph->contentStream($flattened->dictionary);
         if ($content === '') {
@@ -97,6 +164,7 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
             $flattened->geometry->pageNumber,
             $runs,
             0,
+            $budget,
         );
 
         return $runs;
@@ -121,6 +189,7 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
         int $pageNumber,
         array &$runs,
         int $depth,
+        PreflightBudget $budget,
     ): void {
         if ($depth > self::MAX_XOBJECT_DEPTH) {
             throw new TextExtractionException(
@@ -136,6 +205,12 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
         $ctm = $baseCtm;
 
         foreach ((new ContentStreamTokenizer($content))->operations() as $operation) {
+            // Charged per operation, which is the unit a pathological stream multiplies. One page
+            // can hold millions of text-showing operators while satisfying every ceiling that
+            // describes the document, so checking between pages — or even per produced run —
+            // lets a single stream spend the whole budget before anything looks.
+            $budget->tick();
+
             switch ($operation->operator) {
                 case 'q':
                     if (count($ctmStack) < self::MAX_GRAPHICS_DEPTH) {
@@ -247,7 +322,7 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
                     break;
 
                 case 'Do':
-                    $this->enterXObject($graph, $operation, $resources, $ctm, $transform, $pageNumber, $runs, $depth);
+                    $this->enterXObject($graph, $operation, $resources, $ctm, $transform, $pageNumber, $runs, $depth, $budget);
                     break;
             }
         }
@@ -268,6 +343,7 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
         int $pageNumber,
         array &$runs,
         int $depth,
+        PreflightBudget $budget,
     ): void {
         $name = $operation->name(count($operation->operands) - 1);
         if ($name === null) {
@@ -302,6 +378,7 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
             $pageNumber,
             $runs,
             $depth + 1,
+            $budget,
         );
     }
 

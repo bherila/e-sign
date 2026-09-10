@@ -266,6 +266,61 @@ emitBomb('deep-nesting-bomb', $writer->build($root), [
     ]);
 })();
 
+// ---------------------------------------------------------------------------
+// 6. Not a bomb: a document whose *arithmetic* overflows rather than its size.
+//
+// Preflight reads the object graph — sizes, object counts, streams — and never interprets
+// the operators inside a content stream. So this file passes every ceiling and costs
+// nothing, and then the first thing that multiplies its transform matrix produces an
+// infinite coordinate that no geometry type will accept.
+//
+// It belongs beside the bombs because it is the same shape of problem — an input that is
+// cheap to admit and expensive to trust — and it is deliberately declared `accept`, so the
+// corpus test pins the premise the extraction test rests on: preflight really does let this
+// through.
+// ---------------------------------------------------------------------------
+(static function (): void {
+    $writer = new PdfFixtureWriter;
+
+    $fontObj = $writer->add(
+        '<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding'
+        .' /FirstChar 32 /LastChar 126 /Widths ['.trim(str_repeat('600 ', 95)).'] >>'
+    );
+
+    // Two transforms, each already at the top of the double range. One alone yields a finite,
+    // absurd coordinate, which is a different case and a legitimate one; their product is
+    // infinite, which is the case no rectangle can hold.
+    $enormous = str_repeat('9', 300);
+    $transform = $enormous.' 0 0 '.$enormous.' 0 0 cm ';
+
+    $contentObj = $writer->addStream(
+        '<< >>',
+        "q\n".$transform.$transform."BT\n/F1 12.0 Tf\n10.0 10.0 Td\n(Signature:) Tj\nET\nQ\n"
+    );
+
+    $pagesObj = $writer->reserve();
+    $pageObj = $writer->add(sprintf(
+        '<< /Type /Page /Parent %d 0 R /MediaBox [0 0 612 792] /CropBox [0 0 612 792] /Rotate 0'
+        .' /Resources << /Font << /F1 %d 0 R >> >> /Contents %d 0 R >>',
+        $pagesObj,
+        $fontObj,
+        $contentObj,
+    ));
+    $writer->put($pagesObj, '<< /Type /Pages /Kids ['.$pageObj.' 0 R] /Count 1 >>');
+    $root = $writer->add('<< /Type /Catalog /Pages '.$pagesObj.' 0 R >>');
+
+    emitBomb('overflowing-transform', $writer->build($root), [
+        'description' => 'One page whose CTM is multiplied past the double range before text is shown.',
+        'expected_preflight' => 'accept',
+        'expected_rejections' => [],
+        'decoded_bytes_if_unbounded' => 0,
+        'page_count' => 1,
+        'proves' => 'Preflight bounds the document, not the arithmetic inside it. Text extraction is '
+            .'where an impossible transform is caught, and it has to leave as an unreadable document '
+            .'rather than as an uncaught geometry error.',
+    ]);
+})();
+
 file_put_contents(
     BOMB_OUT_DIR.'/manifest.json',
     json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)."\n",

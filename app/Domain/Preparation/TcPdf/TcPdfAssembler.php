@@ -15,6 +15,8 @@ use App\Domain\Preparation\Contracts\PdfAssembler;
 use App\Domain\Preparation\Contracts\PdfPreflight;
 use App\Domain\Preparation\Geometry\PageGeometry;
 use App\Domain\Preparation\Geometry\PageRotation;
+use App\Domain\Preparation\Preflight\PreflightBudget;
+use App\Domain\Preparation\Preflight\PreflightLimits;
 use App\Domain\Preparation\TcPdf\Parsing\PageTreeReader;
 use App\Domain\Preparation\TcPdf\Parsing\PdfObjectGraph;
 use Com\Tecnick\Pdf\Exception;
@@ -65,6 +67,7 @@ final readonly class TcPdfAssembler implements PdfAssembler
     public function __construct(
         private ?PdfPreflight $preflight = new TcPdfPreflight,
         private ?string $fontDirectory = null,
+        private PreflightLimits $limits = new PreflightLimits,
     ) {}
 
     /**
@@ -370,12 +373,18 @@ final readonly class TcPdfAssembler implements PdfAssembler
      */
     private function readGeometry(string $pdfBytes): array
     {
+        // Its own budget, from the configured limits. This is a second read of bytes preflight
+        // has already inspected, and it was the one site that parsed without any budget at all
+        // and walked to the page-tree reader's built-in ceiling — so a deployment that raised
+        // `max_pages` could import a document and then fail to read its geometry.
+        $budget = new PreflightBudget($this->limits);
+
         try {
-            $graph = PdfObjectGraph::parse($pdfBytes);
+            $graph = PdfObjectGraph::parse($pdfBytes, $budget);
 
             return array_map(
                 static fn ($page): PageGeometry => $page->geometry,
-                (new PageTreeReader($graph))->pages(),
+                (new PageTreeReader($graph))->pages($budget->limits->maxPages),
             );
         } catch (Throwable $exception) {
             throw new AssemblyException('Page geometry could not be read: '.$exception->getMessage(), previous: $exception);

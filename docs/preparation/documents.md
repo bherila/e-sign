@@ -191,13 +191,29 @@ The costs are real and are accepted explicitly:
 
 ## Limits
 
+These are not preflight's limits, they are the deployment's: every place that reads a document
+applies the same set. Three do — `TcPdfPreflight` when an upload is inspected, `TcPdfTextLocator`
+when text is located, and `TcPdfAssembler` when geometry is re-read during import — and each
+resolves them from the same container binding rather than from a built-in default. A ceiling that
+one honoured and another defaulted would mean a deployment could accept a document at upload and
+refuse the same bytes at the next step that touched it.
+
+Whoever supplies the budget is told when a ceiling stops the read. A caller that supplies one is
+accounting for the cost and can act on the difference between "too expensive here" and "this file
+is broken"; a caller that supplies none is still read under the configured limits, but sees only
+the ordinary "could not be read" failure, because it never asked to account for the cost and would
+not catch an exception about it.
+
+`tests/Feature/Preparation/DocumentReadBudgetTest.php` holds the list of readers and fails both
+when a known one stops honouring the configuration and when a new one is added that defaults.
+
 `config/esign.php` → `documents`, all overridable per deployment:
 
 | Setting | Default | Enforced by | What it rejects |
 |---|---|---|---|
 | `max_bytes` | 32 MiB | Form Request (`max:` in KB) **and** the preflight parser | An upload larger than the ceiling, before it is parsed. `size_limit_exceeded`. |
-| `max_pages` | 500 | Preflight page tree reader | A page tree with more pages than the ceiling. Surfaces as `invalid_page_geometry`. |
-| `max_objects` | 100,000 | Preflight, **while the document is read** | A document that declares or materializes more indirect objects than the ceiling. `object_limit_exceeded`. |
+| `max_pages` | 500 | Every page-tree walk: preflight, text extraction, assembly | A page tree with more pages than the ceiling. Surfaces as `invalid_page_geometry` rather than `page_limit_exceeded` — see issue #108. |
+| `max_objects` | 100,000 | Every parse, **while the document is read** | A document that declares or materializes more indirect objects than the ceiling. `object_limit_exceeded`. |
 | `max_decoded_stream_bytes` | 32 MiB | Preflight, per decoded stream | One stream that inflates past the ceiling. `decompression_limit_exceeded`. |
 | `max_decompressed_bytes` | 256 MiB | Preflight, aggregated over the document | Every decoded stream in one document added up. `decompression_limit_exceeded`. |
 | `preflight_time_budget_seconds` | 30 | Preflight, between units of work | Backstop. `time_budget_exceeded`. |

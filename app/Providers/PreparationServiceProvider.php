@@ -65,10 +65,18 @@ class PreparationServiceProvider extends ServiceProvider
             fn (Application $app): PdfAssembler => new TcPdfAssembler(
                 $app->make(PdfPreflight::class),
                 $app->resourcePath('fonts'),
+                $app->make(PreflightLimits::class),
             ),
         );
 
-        $this->app->bind(PdfTextLocator::class, TcPdfTextLocator::class);
+        // Constructed with the configured limits rather than autowired bare, so a deployment
+        // that raised a ceiling reads documents under the ceiling it set. Every site that reads
+        // a document resolves its limits from this one binding; the enumeration in
+        // tests/Feature/Preparation/DocumentReadBudgetTest.php is what keeps that true.
+        $this->app->bind(
+            PdfTextLocator::class,
+            fn (Application $app): PdfTextLocator => new TcPdfTextLocator($app->make(PreflightLimits::class)),
+        );
 
         $this->app->bind(ReviewNormalizer::class, function (Application $app): ReviewNormalizer {
             /** @var Repository $config */
