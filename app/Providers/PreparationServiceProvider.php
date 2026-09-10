@@ -5,21 +5,26 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Domain\Identity\Audit\AuditRecorder;
+use App\Domain\Preparation\Anchoring\RevisionAnchorResolver;
+use App\Domain\Preparation\Anchoring\SchemaAnchorResolver;
 use App\Domain\Preparation\Contracts\PdfAssembler;
 use App\Domain\Preparation\Contracts\PdfPreflight;
 use App\Domain\Preparation\Contracts\PdfTextLocator;
 use App\Domain\Preparation\Documents\DocumentBlobStore;
 use App\Domain\Preparation\Documents\DocumentIntake;
 use App\Domain\Preparation\Documents\ReviewNormalizer;
+use App\Domain\Preparation\Documents\RevisionBytes;
 use App\Domain\Preparation\Preflight\PreflightLimits;
 use App\Domain\Preparation\Schema\FieldSchemaValidator;
 use App\Domain\Preparation\TcPdf\TcPdfAssembler;
 use App\Domain\Preparation\TcPdf\TcPdfPreflight;
 use App\Domain\Preparation\TcPdf\TcPdfTextLocator;
 use App\Domain\Preparation\Templates\TemplateService;
+use App\Domain\Preparation\Text\AnchorResolver;
 use Illuminate\Contracts\Config\Repository;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
+use InvalidArgumentException;
 
 /**
  * Wires the Preparation module's ports to their tc-lib-pdf implementations and builds
@@ -69,6 +74,49 @@ class PreparationServiceProvider extends ServiceProvider
         );
 
         $this->app->bind(PdfTextLocator::class, TcPdfTextLocator::class);
+
+        // How anchor resolution is assembled. Nothing in this build calls it yet — publishing and
+        // sending wire it up in the pieces that follow — but a class whose collaborators are not
+        // declared anywhere is one nobody can construct, and the cross-check tolerance is a
+        // deployment setting rather than a constant, so it has to be read here.
+        $this->app->bind(SchemaAnchorResolver::class, function (Application $app): SchemaAnchorResolver {
+            /** @var Repository $config */
+            $config = $app->make('config');
+
+            $tolerance = $config->get(
+                'esign.preparation.anchor_cross_check_tolerance',
+                SchemaAnchorResolver::DEFAULT_CROSS_CHECK_TOLERANCE,
+            );
+
+            // Parsed before it is cast. `(float) "one"` is `0.0` — a perfectly legal tolerance —
+            // so casting first would turn a typo into a silent switch to demanding exact
+            // coordinate matches, which is a change in what the product asserts rather than a
+            // configuration error. The range is checked by the resolver's own constructor.
+            if (! is_numeric($tolerance)) {
+                throw new InvalidArgumentException(
+                    'esign.preparation.anchor_cross_check_tolerance must be a number of points; got '
+                        .var_export($tolerance, true).'. Set ESIGN_ANCHOR_CROSS_CHECK_TOLERANCE to a number, or '
+                        .'leave it unset for the default.',
+                );
+            }
+
+            return new SchemaAnchorResolver($app->make(AnchorResolver::class), (float) $tolerance);
+        });
+
+        $this->app->bind(
+            RevisionAnchorResolver::class,
+            fn (Application $app): RevisionAnchorResolver => new RevisionAnchorResolver(
+                $app->make(PdfTextLocator::class),
+                $app->make(RevisionBytes::class),
+                $app->make(SchemaAnchorResolver::class),
+                $app->make(PdfPreflight::class),
+                $app->make(PreflightLimits::class),
+            ),
+        );
+
+        // Scoped: the memo of proven bytes must survive from one read to the next within a
+        // request, and must not survive past it. See RevisionBytes.
+        $this->app->scoped(RevisionBytes::class);
 
         $this->app->bind(ReviewNormalizer::class, function (Application $app): ReviewNormalizer {
             /** @var Repository $config */

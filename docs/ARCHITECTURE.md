@@ -16,6 +16,13 @@ controllers translate shapes, they never hold state or rules.
 | `Delivery` | mail outbox, webhook outbox, retries, attempt logs, operational health |
 | `Integration` | native API, Firma facade and capability matrix, import and migration adapters |
 
+The dependency direction is fixed: `Integration` consumes the other modules and none of them
+imports it. A facade has a different lifetime from the rules underneath it, so a domain module
+that reaches into one — including through a `{@see}` in a docblock, which resolves through the
+same `use` statement — puts a policy where the adapter can define it. That is the shape "one
+state machine" exists to prevent, and `tests/Unit/Preparation/ModuleDirectionTest.php` pins it
+for every module rather than for the file that last broke it.
+
 `Identity` also holds the append-only `esign_audit_events` store, because provisioning is
 the first thing that happens on a new instance and it happens before there is anything to
 sign. `Evidence` still owns the envelope and artifact audit trail and writes into the same

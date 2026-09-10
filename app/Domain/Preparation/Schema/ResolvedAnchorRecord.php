@@ -31,7 +31,7 @@ use InvalidArgumentException;
  * the digest is for is reading a stored document afterwards: it says which bytes the recorded
  * rectangle was measured in, so a receipt from another revision is recognisable as one rather
  * than mistaken for a measurement of this one. After send nothing re-resolves at all
- * (docs/preparation/field-schema.md).
+ * (docs/preparation/anchors.md).
  *
  * A caller may submit one of these, and the validator checks it as strictly as anything else
  * rather than refusing it: an envelope re-reads its own stored schema through the same importer
@@ -58,6 +58,21 @@ final readonly class ResolvedAnchorRecord
 
         if ($occurrenceIndex < 1) {
             throw new InvalidArgumentException('anchor.resolved.occurrence_index is 1-based.');
+        }
+
+        // `rect` is a {@see Rect}, which is 1.0's unbounded placement type, but this member is
+        // 1.1's `$defs/resolved_rect` and the validator bounds it. Without the same bound here a
+        // receipt could be written that the very next import refuses — the service emitting a
+        // document it cannot read back. Judged on the canonical value because that is what will
+        // be stored and therefore what the validator will see: refusing a raw 14400.0004 that is
+        // written down as 14400 would make the two disagree in the other direction.
+        foreach (['x' => $rect->x, 'y' => $rect->y, 'width' => $rect->width, 'height' => $rect->height] as $name => $value) {
+            if (abs(CanonicalNumber::round($value)) > MeasuredRect::MAX_MAGNITUDE) {
+                throw new InvalidArgumentException(
+                    'anchor.resolved.rect.'.$name.' must be within '.MeasuredRect::MAX_MAGNITUDE
+                        .' pt of the origin, PDF\'s largest page side.',
+                );
+            }
         }
     }
 

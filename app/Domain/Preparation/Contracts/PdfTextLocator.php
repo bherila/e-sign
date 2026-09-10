@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Domain\Preparation\Contracts;
 
+use App\Domain\Preparation\Preflight\PreflightBudget;
+use App\Domain\Preparation\Preflight\PreflightBudgetException;
 use App\Domain\Preparation\Text\TextExtractionException;
 use App\Domain\Preparation\Text\TextRun;
 
@@ -21,9 +23,22 @@ interface PdfTextLocator
 {
     /**
      * @param  int|null  $page  1-based page number, or null for the whole document.
+     * @param  PreflightBudget|null  $budget  Charged from the parse onward, so a
+     *                                        content stream that is pathological rather than
+     *                                        merely large is stopped instead of exhausting the
+     *                                        request. Preflight's ceilings bound the *document* —
+     *                                        its size, object count and streams — and a file can
+     *                                        satisfy all of them while holding millions of small
+     *                                        text-showing operators in one allowed stream. Null
+     *                                        leaves extraction unbounded, which is only safe for
+     *                                        bytes a test controls.
      * @return array<int, TextRun> In content-stream order, grouped by ascending page.
      *
-     * @throws TextExtractionException
+     * @throws TextExtractionException When the bytes cannot be read as a document, including a
+     *                                 content stream whose geometry is not finite.
+     * @throws PreflightBudgetException When a ceiling is
+     *                                  crossed. Deliberately distinct: "too expensive to read" and
+     *                                  "not a readable document" call for different answers.
      */
-    public function extract(string $pdfBytes, ?int $page = null): array;
+    public function extract(string $pdfBytes, ?int $page = null, ?PreflightBudget $budget = null): array;
 }
