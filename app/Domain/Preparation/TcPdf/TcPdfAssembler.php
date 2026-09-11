@@ -118,7 +118,7 @@ final readonly class TcPdfAssembler implements PdfAssembler
 
         // One budget per input document, shared by every read of it: the geometry read here and
         // the import in `writePages()`. The output is this adapter's own product and is read back
-        // under a budget of its own.
+        // under a budget of its own, sized to what it was made from (`outputBudget()`).
         $sourceBudget = $this->budget();
         $sourcePages = $this->readGeometry($pdfBytes, $sourceBudget);
         if ($sourcePages === []) {
@@ -171,7 +171,7 @@ final readonly class TcPdfAssembler implements PdfAssembler
         return new AssembledDocument(
             $result,
             $sourcePages,
-            $this->readGeometry($result, $this->budget()),
+            $this->readGeometry($result, $this->outputBudget(count($documents), $written)),
             array_values($warnings),
             microtime(true) - $startedAt,
             max(0, memory_get_peak_usage(true) - $memoryBefore),
@@ -214,6 +214,37 @@ final readonly class TcPdfAssembler implements PdfAssembler
     private function budget(): PreflightBudget
     {
         return new PreflightBudget($this->limits, $this->clock);
+    }
+
+    /**
+     * The budget the output is read back under.
+     *
+     * The output is not an upload. It is `$documents` documents, each admitted under this
+     * deployment's limits, written onto `$pages` pages — and in finalization one of them is the
+     * completion report, appended after every signer has assented. Held to one upload's ceilings,
+     * a document admitted at the page ceiling would be refused at finalization for the report's
+     * page, with the assent already given; so would one near the object or decoded-byte ceiling.
+     *
+     * So the counted ceilings are what the output was made from: exactly the pages this adapter
+     * wrote, and for objects and decoded bytes the sum of its inputs' allowances. Overlays add a
+     * few objects per field and are not separately counted; they fit inside the allowance of the
+     * appended report, which uses a small part of its own. A ceiling of 0, "no ceiling", stays 0.
+     * The per-stream ceiling and the backstops are unchanged: no stream is larger for having been
+     * copied, and a backstop bounds one read, whatever is being read.
+     */
+    private function outputBudget(int $documents, int $pages): PreflightBudget
+    {
+        $summed = static fn (int $ceiling): int => $ceiling > 0 ? $ceiling * $documents : $ceiling;
+
+        return new PreflightBudget(new PreflightLimits(
+            maxBytes: $summed($this->limits->maxBytes),
+            maxPages: $pages,
+            maxObjects: $summed($this->limits->maxObjects),
+            maxDecodedStreamBytes: $this->limits->maxDecodedStreamBytes,
+            maxDecompressedBytes: $summed($this->limits->maxDecompressedBytes),
+            timeBudgetSeconds: $this->limits->timeBudgetSeconds,
+            memoryBudgetBytes: $this->limits->memoryBudgetBytes,
+        ), $this->clock);
     }
 
     /**

@@ -426,6 +426,29 @@ final class DocumentReadBudgetTest extends TestCase
     }
 
     /**
+     * The assembled output is held to what it was made from, not to one upload's ceilings.
+     *
+     * Finalization appends the completion report to a document that was admitted on its own. A
+     * document at the page ceiling is a valid upload, so the report's page must not be what refuses
+     * it — at that point every signer has already assented. The deployment path is used on purpose:
+     * preflight admits both inputs, and only the read-back of the combined output is under test.
+     */
+    public function test_a_document_at_the_page_ceiling_still_takes_its_completion_report(): void
+    {
+        config(['esign.documents.max_pages' => 3]);
+        $this->forgetResolvedLimits();
+
+        $assembled = app(PdfAssembler::class)->assemble(
+            PdfFixtures::bytes('multi-page-mixed-size'),
+            [],
+            [PdfFixtures::bytes('single-page-letter')],
+        );
+
+        $this->assertCount(3, $assembled->sourcePages);
+        $this->assertCount(4, $assembled->outputPages);
+    }
+
+    /**
      * The list above is complete.
      *
      * A behavioural test proves the sites it knows about; it cannot prove there are no others,
