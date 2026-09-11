@@ -446,7 +446,7 @@ final readonly class TcPdfAssembler implements PdfAssembler
 
             return array_map(
                 static fn ($page): PageGeometry => $page->geometry,
-                (new PageTreeReader($graph))->pages($budget->limits->maxPages),
+                (new PageTreeReader($graph))->pages($budget),
             );
         } catch (Throwable $exception) {
             throw new AssemblyException('Page geometry could not be read: '.$exception->getMessage(), previous: $exception);

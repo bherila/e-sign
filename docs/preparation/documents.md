@@ -165,7 +165,8 @@ is wrong and what to do about it. The classes, from the Stage 0 fixture matrix:
 | `embedded_file` | Attachments are not carried into the signed document and would silently disappear. |
 | `launch_action` | Asks a reader to run an external program. |
 | `unparseable` | Anything that cannot be classified is refused, never passed through. |
-| `size_limit_exceeded`, `object_limit_exceeded`, `invalid_page_geometry` | Resource ceilings from `config('esign.documents')`. The page limit surfaces as `invalid_page_geometry` because the page tree reader stops there. |
+| `size_limit_exceeded`, `object_limit_exceeded`, `page_limit_exceeded` | Resource ceilings from `config('esign.documents')`. Until issue #108 a page count over the ceiling was reported as `invalid_page_geometry`; that code now means only a page tree that could not be read. |
+| `invalid_page_geometry` | The page tree does not describe pages — no `/Pages`, a cycle, a page box that cannot exist. |
 | `decompression_limit_exceeded` | A compressed stream expands past what one stream, or the whole document, is allowed to produce. See the limits table below. |
 | `time_budget_exceeded`, `memory_budget_exceeded` | The backstops. Preflight ran longer, or grew further, than one document is allowed to. |
 
@@ -220,7 +221,7 @@ when a known one stops honouring the configuration and when a new one is added t
 | Setting | Default | Enforced by | What it rejects |
 |---|---|---|---|
 | `max_bytes` | 32 MiB | Form Request (`max:` in KB) **and** the preflight parser | An upload larger than the ceiling, before it is parsed. `size_limit_exceeded`. |
-| `max_pages` | 500 | Every page-tree walk: preflight, text extraction, assembly | A page tree with more pages than the ceiling. Surfaces as `invalid_page_geometry` rather than `page_limit_exceeded` — see issue #108. |
+| `max_pages` | 500 | Every page-tree walk: preflight, text extraction, assembly | A page tree with more pages than the ceiling. `page_limit_exceeded`. |
 | `max_objects` | 100,000 | Every parse, **while the document is read** | A document that declares or materializes more indirect objects than the ceiling. `object_limit_exceeded`. |
 | `max_decoded_stream_bytes` | 32 MiB | Every parse, per decoded stream | One stream that inflates past the ceiling. `decompression_limit_exceeded`. Cannot be raised above 32 MiB or set to 0: the import engine re-reads each document under that fixed ceiling, so the assembler refuses a value it could not keep. |
 | `max_decompressed_bytes` | 256 MiB | Preflight, aggregated over the document | Every decoded stream in one document added up. `decompression_limit_exceeded`. |

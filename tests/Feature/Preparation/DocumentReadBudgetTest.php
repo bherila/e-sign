@@ -105,38 +105,44 @@ final class DocumentReadBudgetTest extends TestCase
      * never asked to be told, and handing it a `PreflightBudgetException` it does not catch turns
      * a bounded refusal into an unhandled error at whatever surface it is behind.
      *
-     * The combination is *who owns the budget* against *what went wrong*, and all four cells are
+     * The combination is *who owns the budget* against *what went wrong*, and every cell is
      * needed: keying only on the failure would tell every caller about ceilings, and keying only
      * on ownership would hide a broken document behind a budget the caller did supply.
      *
-     * @return iterable<string, array{bool, bool, class-string<\Throwable>}>
+     * Two ceilings, because they are reached by different code. The object ceiling trips while
+     * the document is parsed; the page ceiling trips while its page tree is walked, which used to
+     * raise a page-tree error instead — so a caller that asked to hear about ceilings was told the
+     * document was broken.
+     *
+     * @return iterable<string, array{bool, ?string, class-string<\Throwable>}>
      */
     public static function failureOwners(): iterable
     {
-        // Caller supplied a budget, the read crossed a ceiling, a broken document, expected type.
-        yield 'a ceiling, on the caller\'s budget' => [true, true, PreflightBudgetException::class];
-        yield 'a ceiling, on a budget the reader owns' => [false, true, TextExtractionException::class];
-        yield 'a broken document, caller has a budget' => [true, false, TextExtractionException::class];
-        yield 'a broken document, no budget' => [false, false, TextExtractionException::class];
+        // Caller supplied a budget, the ceiling crossed (null: none, a broken document), expected type.
+        yield 'the object ceiling, on the caller\'s budget' => [true, 'objects', PreflightBudgetException::class];
+        yield 'the object ceiling, on a budget the reader owns' => [false, 'objects', TextExtractionException::class];
+        yield 'the page ceiling, on the caller\'s budget' => [true, 'pages', PreflightBudgetException::class];
+        yield 'the page ceiling, on a budget the reader owns' => [false, 'pages', TextExtractionException::class];
+        yield 'a broken document, caller has a budget' => [true, null, TextExtractionException::class];
+        yield 'a broken document, no budget' => [false, null, TextExtractionException::class];
     }
 
     #[DataProvider('failureOwners')]
     public function test_a_ceiling_is_reported_to_whoever_asked_to_hear_about_it(
         bool $callerSupplies,
-        bool $ceiling,
+        ?string $ceiling,
         string $expected,
     ): void {
-        $bytes = $ceiling
+        $bytes = $ceiling !== null
             ? PdfFixtures::bytes('multi-page-mixed-size')
             : "%PDF-1.7\nthis is not a cross-reference table\n%%EOF\n";
 
-        // An object ceiling, not the page one. They are two different mechanisms: the object
-        // ceiling is the budget's and raises `PreflightBudgetException`, while the page ceiling
-        // is the page-tree reader's and raises `MalformedPageTreeException`, which preflight
-        // publishes as `invalid_page_geometry` (docs/preparation/documents.md, and #108 —
-        // `PreflightCode::PageLimitExceeded` exists and is never used). This test is about who
-        // hears about a budget, so it uses the ceiling that is one.
-        $limits = new PreflightLimits(maxObjects: 1);
+        // Three pages, so either ceiling at one is crossed.
+        $limits = match ($ceiling) {
+            'objects' => new PreflightLimits(maxObjects: 1),
+            'pages' => new PreflightLimits(maxPages: 1),
+            default => new PreflightLimits,
+        };
         $budget = $callerSupplies ? new PreflightBudget($limits) : null;
 
         // When the caller supplies none, the reader builds one from *its* limits, which is the

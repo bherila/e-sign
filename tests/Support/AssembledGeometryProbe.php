@@ -32,8 +32,9 @@ final readonly class AssembledGeometryProbe
 
     public function __construct(string $pdfBytes)
     {
-        $this->graph = PdfObjectGraph::parse($pdfBytes);
-        $this->pages = (new PageTreeReader($this->graph))->pages();
+        $budget = new PreflightBudget;
+        $this->graph = PdfObjectGraph::parse($pdfBytes, $budget);
+        $this->pages = (new PageTreeReader($this->graph))->pages($budget);
     }
 
     /**

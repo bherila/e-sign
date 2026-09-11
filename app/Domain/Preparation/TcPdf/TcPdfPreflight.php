@@ -133,7 +133,10 @@ final readonly class TcPdfPreflight implements PdfPreflight
                 $findings[] = $finding;
             }
 
-            $flattened = (new PageTreeReader($graph))->pages($this->limits->maxPages);
+            // A page count over the ceiling is refused by the budget, and so leaves through the
+            // budget's catch below as `page_limit_exceeded` — not as a page tree that could not
+            // be read, which is what it used to be reported as.
+            $flattened = (new PageTreeReader($graph))->pages($budget);
             foreach ($flattened as $page) {
                 $budget->tick();
                 $pages[] = $page->geometry;

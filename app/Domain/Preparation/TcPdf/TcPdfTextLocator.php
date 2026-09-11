@@ -93,11 +93,9 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
 
             $runs = [];
 
-            // The configured page ceiling, not the page-tree reader's own default. Preflight
-            // already admits documents up to this number; walking to a smaller hard-coded one
-            // would refuse a document the deployment accepted, and do it with a page-tree error
-            // rather than a limit anybody can act on.
-            foreach ((new PageTreeReader($graph))->pages($ceiling->limits->maxPages) as $flattened) {
+            // The budget's page ceiling, so a document over it is refused as a ceiling — reported
+            // to whoever owns the budget, by the catch below — and never as a broken page tree.
+            foreach ((new PageTreeReader($graph))->pages($ceiling) as $flattened) {
                 $pageNumber = $flattened->geometry->pageNumber;
                 if ($page !== null && $pageNumber !== $page) {
                     continue;

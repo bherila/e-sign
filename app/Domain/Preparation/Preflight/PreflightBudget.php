@@ -214,6 +214,27 @@ final class PreflightBudget
     }
 
     /**
+     * Refuse a page tree that reaches more pages than the ceiling allows.
+     *
+     * Raised by the page-tree walk as it reaches the page past the ceiling, so a long document
+     * is refused as long rather than as a page tree that could not be read — which sends
+     * whoever uploaded it to fix the wrong thing.
+     *
+     * @throws PreflightBudgetException
+     */
+    public function exhaustPages(): never
+    {
+        throw new PreflightBudgetException(
+            PreflightCode::PageLimitExceeded,
+            sprintf(
+                'This PDF has more pages than the %d-page limit for one document. Split the document into '
+                .'smaller files and upload it again.',
+                $this->limits->maxPages,
+            ),
+        );
+    }
+
+    /**
      * The backstops, checked between units of work.
      *
      * @throws PreflightBudgetException
