@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Preparation\TcPdf\Parsing;
 
+use App\Domain\Preparation\Preflight\PreflightBudget;
 use App\Domain\Preparation\Text\TextExtractionException;
 
 /**
@@ -31,7 +32,10 @@ final readonly class FontDictionaryReader
         0x9E => 0x017E, 0x9F => 0x0178,
     ];
 
-    public function __construct(private PdfObjectGraph $graph) {}
+    /**
+     * @param  PreflightBudget  $budget  The document's, charged while a /ToUnicode map is read.
+     */
+    public function __construct(private PdfObjectGraph $graph, private PreflightBudget $budget) {}
 
     /**
      * @param  array<string, array<int, mixed>>  $fontDict
@@ -234,7 +238,7 @@ final readonly class FontDictionaryReader
 
         $cmap = $this->graph->streamData($ref);
 
-        return $cmap === null ? [] : (new ToUnicodeCMapReader)->parse($cmap);
+        return $cmap === null ? [] : (new ToUnicodeCMapReader($this->budget))->parse($cmap);
     }
 
     /**

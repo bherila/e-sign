@@ -58,5 +58,49 @@
         "name": "large-legitimate-control",
         "file": "large-legitimate-control.pdf",
         "bytes": 70638
+    },
+    {
+        "description": "One page whose CTM is multiplied past the double range before text is shown.",
+        "expected_preflight": "accept",
+        "expected_rejections": [],
+        "decoded_bytes_if_unbounded": 0,
+        "page_count": 1,
+        "proves": "Preflight bounds the document, not the arithmetic inside it. Text extraction is where an impossible transform is caught, and it has to leave as an unreadable document rather than as an uncaught geometry error.",
+        "name": "overflowing-transform",
+        "file": "overflowing-transform.pdf",
+        "bytes": 2381
+    },
+    {
+        "description": "One page whose content stream shows a single one-megabyte string with one Tj.",
+        "expected_preflight": "accept",
+        "expected_rejections": [],
+        "decoded_bytes_if_unbounded": 1048576,
+        "page_count": 1,
+        "proves": "One text-showing operator is not one unit of work. Its glyphs are decoded under the document's budget as they are read, not after the whole string has been expanded.",
+        "name": "long-shown-string",
+        "file": "long-shown-string.pdf",
+        "bytes": 2199
+    },
+    {
+        "description": "One page whose content stream is half a million numbers and no operator.",
+        "expected_preflight": "accept",
+        "expected_rejections": [],
+        "decoded_bytes_if_unbounded": 1048576,
+        "page_count": 1,
+        "proves": "A stream that yields no operation still costs its tokens. The tokenizer charges them itself, because a walk that charges per operation is never called.",
+        "name": "operand-flood",
+        "file": "operand-flood.pdf",
+        "bytes": 2167
+    },
+    {
+        "description": "One page shown in a font whose /ToUnicode CMap is a megabyte of bfchar entries.",
+        "expected_preflight": "accept",
+        "expected_rejections": [],
+        "decoded_bytes_if_unbounded": 1048576,
+        "page_count": 1,
+        "proves": "A font's /ToUnicode map is lexed by the same tokenizer as a page, and is charged to the same document: the page walk charges nothing while the fonts it needs are being read.",
+        "name": "cmap-flood",
+        "file": "cmap-flood.pdf",
+        "bytes": 3453
     }
 ]

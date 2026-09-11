@@ -165,7 +165,8 @@ is wrong and what to do about it. The classes, from the Stage 0 fixture matrix:
 | `embedded_file` | Attachments are not carried into the signed document and would silently disappear. |
 | `launch_action` | Asks a reader to run an external program. |
 | `unparseable` | Anything that cannot be classified is refused, never passed through. |
-| `size_limit_exceeded`, `object_limit_exceeded`, `invalid_page_geometry` | Resource ceilings from `config('esign.documents')`. The page limit surfaces as `invalid_page_geometry` because the page tree reader stops there. |
+| `size_limit_exceeded`, `object_limit_exceeded`, `page_limit_exceeded` | Resource ceilings from `config('esign.documents')`. Until issue #108 a page count over the ceiling was reported as `invalid_page_geometry`; that code now means only a page tree that could not be read. |
+| `invalid_page_geometry` | The page tree does not describe pages — no `/Pages`, a cycle, a page box that cannot exist. |
 | `decompression_limit_exceeded` | A compressed stream expands past what one stream, or the whole document, is allowed to produce. See the limits table below. |
 | `time_budget_exceeded`, `memory_budget_exceeded` | The backstops. Preflight ran longer, or grew further, than one document is allowed to. |
 
@@ -191,14 +192,44 @@ The costs are real and are accepted explicitly:
 
 ## Limits
 
+These are not preflight's limits, they are the deployment's: every place that reads a document
+applies the same set. Three do — `TcPdfPreflight` when an upload is inspected, `TcPdfTextLocator`
+when text is located, and `TcPdfAssembler` when a document is imported — and each
+resolves them from the same container binding rather than from a built-in default. A ceiling that
+one honoured and another defaulted would mean a deployment could accept a document at upload and
+refuse the same bytes at the next step that touched it.
+
+Whoever supplies the budget is told when a ceiling stops the read. A caller that supplies one is
+accounting for the cost and can act on the difference between "too expensive here" and "this file
+is broken"; a caller that supplies none is still read under the configured limits, but sees only
+the ordinary "could not be read" failure, because it never asked to account for the cost and would
+not catch an exception about it.
+
+**The import engine is the one reader that cannot be handed a budget.** tc-lib-pdf parses the
+source again with a parser it builds itself, keeping only two of the options it is given. The
+assembler covers it from outside: the geometry read and the import share one budget per document,
+whose time and memory backstops are consulted after each imported page (the last included); the
+import is pinned to not decoding page content; and what it does decode is the same bytes, through
+the same filters, that the budgeted geometry read already decoded — at a per-stream ceiling the
+assembler keeps equal to the engine's by refusing any `max_decoded_stream_bytes` above it.
+
+**The assembled output is not an upload, and is not held to one upload's ceilings.** It is read
+back for its page geometry under a budget sized to what it was made from: exactly the pages the
+assembler wrote, and for objects and decoded bytes the sum of its inputs' allowances. Finalization
+appends the completion report to a document admitted on its own, after every signer has assented,
+so a document admitted at `max_pages` must still take the report's pages.
+
+`tests/Feature/Preparation/DocumentReadBudgetTest.php` holds the list of readers and fails both
+when a known one stops honouring the configuration and when a new one is added that defaults.
+
 `config/esign.php` → `documents`, all overridable per deployment:
 
 | Setting | Default | Enforced by | What it rejects |
 |---|---|---|---|
 | `max_bytes` | 32 MiB | Form Request (`max:` in KB) **and** the preflight parser | An upload larger than the ceiling, before it is parsed. `size_limit_exceeded`. |
-| `max_pages` | 500 | Preflight page tree reader | A page tree with more pages than the ceiling. Surfaces as `invalid_page_geometry`. |
-| `max_objects` | 100,000 | Preflight, **while the document is read** | A document that declares or materializes more indirect objects than the ceiling. `object_limit_exceeded`. |
-| `max_decoded_stream_bytes` | 32 MiB | Preflight, per decoded stream | One stream that inflates past the ceiling. `decompression_limit_exceeded`. |
+| `max_pages` | 500 | Every page-tree walk of an input document: preflight, text extraction, assembly | A page tree with more pages than the ceiling. `page_limit_exceeded`. The assembled output (a document plus its completion report) is held to the pages actually written, not to this. |
+| `max_objects` | 100,000 | Every parse, **while the document is read** | A document that declares or materializes more indirect objects than the ceiling. `object_limit_exceeded`. |
+| `max_decoded_stream_bytes` | 32 MiB | Every parse, per decoded stream | One stream that inflates past the ceiling. `decompression_limit_exceeded`. Cannot be raised above 32 MiB or set to 0: the import engine re-reads each document under that fixed ceiling, so the assembler refuses a value it could not keep. |
 | `max_decompressed_bytes` | 256 MiB | Preflight, aggregated over the document | Every decoded stream in one document added up. `decompression_limit_exceeded`. |
 | `preflight_time_budget_seconds` | 30 | Preflight, between units of work | Backstop. `time_budget_exceeded`. |
 | `preflight_memory_budget_bytes` | 256 MiB | Preflight, between units of work | Backstop. `memory_budget_exceeded`. |
@@ -251,7 +282,7 @@ to move once there is a corpus of real uploads.
 ### The bomb corpus
 
 `tests/Fixtures/pdf/bombs/`, generated by `php tests/Fixtures/pdf/generate-bombs.php`, is
-five synthetic documents that each cost far more to parse than to store:
+synthetic documents that each cost far more to read than to store:
 
 | Fixture | On disk | What it proves |
 |---|---|---|
@@ -260,6 +291,14 @@ five synthetic documents that each cost far more to parse than to store:
 | `deep-nesting-bomb` | ~1 KB | 400 levels of nested arrays fail closed inside the parser rather than recursing until the stack decides. |
 | `object-count-bomb` | ~0.5 KB | A cross-reference stream declaring 5,000,000 entries in 20 bytes is refused while the cross-reference data is read, not after the entries are built. This is U-2. |
 | `large-legitimate-control` | ~69 KB | 40 pages of ordinary contract prose, ~1.6 MiB decoded, is still accepted. A budget that rejects this one is set wrong. |
+| `overflowing-transform` | ~2 KB | Accepted: preflight bounds the document, not the arithmetic inside it. Text extraction multiplies the page's transforms past the double range and must leave as an unreadable document, not an uncaught geometry error. |
+| `long-shown-string` | ~2 KB | Accepted. One `Tj` showing a one-megabyte string: text extraction decodes its glyphs in slices under the document's budget rather than expanding the whole string in one unmetered step. |
+| `operand-flood` | ~2 KB | Accepted. Half a million numbers and no operator, so no operation is ever yielded: the tokenizer charges its own tokens. |
+| `cmap-flood` | ~2 KB | Accepted. A font whose `/ToUnicode` map is a megabyte of entries is lexed under the same budget as the page that uses it. |
+
+The last three are accepted by preflight on purpose, and are refused — under a budget small
+enough to prove it — by `DocumentReadBudgetTest`: their cost is inside one operation, which is
+where text extraction, not preflight, spends it.
 
 `tests/Feature/Preparation/PdfPreflightLimitsTest.php` runs them against a deliberately
 small profile — a 4 MiB aggregate budget against a 2 MiB per-stream ceiling — because

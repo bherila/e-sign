@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Domain\Preparation\TcPdf\Parsing;
 
+use App\Domain\Preparation\Preflight\PreflightBudget;
+use App\Domain\Preparation\Preflight\PreflightBudgetException;
+
 /**
  * Lexes a decoded PDF content stream into operators and their operands.
  *
@@ -25,17 +28,45 @@ final class ContentStreamTokenizer
     /** Bounded so a malformed stream cannot grow the operand list without limit. */
     private const MAX_OPERANDS = 4096;
 
+    /**
+     * Bytes advanced over between two looks at the budget.
+     *
+     * A caller that charges per yielded operation does not see this work: a stream of
+     * operands with no operator yields nothing at all, and a single operation can carry an
+     * array of thousands of tokens. So the tokenizer charges its own work.
+     *
+     * The unit is the byte, not the token, because a token is not a bounded amount of work:
+     * one comment, one run of whitespace, or one string can be the whole stream. Every loop
+     * that advances the offset looks at it, so no loop — however few tokens it yields — scans
+     * more than this many bytes without the budget being consulted. Every token consumes at
+     * least one byte, so tokens are bounded by the same count.
+     */
+    private const BYTES_PER_TICK = 4096;
+
     private int $offset = 0;
 
     private int $length;
 
-    public function __construct(private readonly string $data)
-    {
+    /** The offset at which the budget is next consulted. */
+    private int $checkAt = self::BYTES_PER_TICK;
+
+    /**
+     * @param  PreflightBudget  $budget  The running cost of reading the document this stream
+     *                                   belongs to. Required rather than defaulted: a content
+     *                                   stream is read after its document was parsed under a
+     *                                   budget, and lexing it is part of the same read.
+     */
+    public function __construct(
+        private readonly string $data,
+        private readonly PreflightBudget $budget,
+    ) {
         $this->length = strlen($data);
     }
 
     /**
      * @return \Generator<int, ContentStreamOperation>
+     *
+     * @throws PreflightBudgetException
      */
     public function operations(): \Generator
     {
@@ -83,6 +114,20 @@ final class ContentStreamTokenizer
         };
     }
 
+    /**
+     * Consult the budget, and schedule the next look.
+     *
+     * Every loop that advances the offset compares it with `$checkAt` inline and calls this
+     * when it is reached; the comparison is per byte, the call is per `BYTES_PER_TICK`.
+     *
+     * @throws PreflightBudgetException
+     */
+    private function charge(): void
+    {
+        $this->budget->tick();
+        $this->checkAt = $this->offset + self::BYTES_PER_TICK;
+    }
+
     /** @return array{string, mixed} */
     private function skipOne(): array
     {
@@ -94,6 +139,10 @@ final class ContentStreamTokenizer
     private function skipWhitespaceAndComments(): void
     {
         while ($this->offset < $this->length) {
+            if ($this->offset >= $this->checkAt) {
+                $this->charge();
+            }
+
             $char = $this->data[$this->offset];
             if (str_contains(self::WHITESPACE, $char)) {
                 $this->offset++;
@@ -103,6 +152,9 @@ final class ContentStreamTokenizer
 
             if ($char === '%') {
                 while ($this->offset < $this->length && $this->data[$this->offset] !== "\n" && $this->data[$this->offset] !== "\r") {
+                    if ($this->offset >= $this->checkAt) {
+                        $this->charge();
+                    }
                     $this->offset++;
                 }
 
@@ -118,6 +170,9 @@ final class ContentStreamTokenizer
         $this->offset++;
         $start = $this->offset;
         while ($this->offset < $this->length) {
+            if ($this->offset >= $this->checkAt) {
+                $this->charge();
+            }
             $char = $this->data[$this->offset];
             if (str_contains(self::WHITESPACE, $char) || str_contains(self::DELIMITERS, $char)) {
                 break;
@@ -143,6 +198,11 @@ final class ContentStreamTokenizer
         $depth = 1;
         $out = '';
         while ($this->offset < $this->length) {
+            // Also bounds the decoded copy: it grows at most one byte per byte advanced over, so
+            // the memory backstop sees it growing rather than once it is whole.
+            if ($this->offset >= $this->checkAt) {
+                $this->charge();
+            }
             $char = $this->data[$this->offset++];
 
             if ($char === '\\') {
@@ -230,6 +290,9 @@ final class ContentStreamTokenizer
         $this->offset++;
         $hex = '';
         while ($this->offset < $this->length) {
+            if ($this->offset >= $this->checkAt) {
+                $this->charge();
+            }
             $char = $this->data[$this->offset++];
             if ($char === '>') {
                 break;
@@ -301,6 +364,9 @@ final class ContentStreamTokenizer
     {
         $start = $this->offset;
         while ($this->offset < $this->length) {
+            if ($this->offset >= $this->checkAt) {
+                $this->charge();
+            }
             $char = $this->data[$this->offset];
             if (str_contains(self::WHITESPACE, $char) || str_contains(self::DELIMITERS, $char)) {
                 break;
@@ -350,7 +416,13 @@ final class ContentStreamTokenizer
 
                 return;
             }
-            $search = $eiPos + 2;
+
+            // An image of nothing but candidate end markers costs one pass of this loop per two
+            // bytes, so the search is charged like any other scan.
+            $this->offset = $search = $eiPos + 2;
+            if ($this->offset >= $this->checkAt) {
+                $this->charge();
+            }
         }
 
         $this->offset = $this->length;
