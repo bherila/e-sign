@@ -193,7 +193,7 @@ The costs are real and are accepted explicitly:
 
 These are not preflight's limits, they are the deployment's: every place that reads a document
 applies the same set. Three do — `TcPdfPreflight` when an upload is inspected, `TcPdfTextLocator`
-when text is located, and `TcPdfAssembler` when geometry is re-read during import — and each
+when text is located, and `TcPdfAssembler` when a document is imported — and each
 resolves them from the same container binding rather than from a built-in default. A ceiling that
 one honoured and another defaulted would mean a deployment could accept a document at upload and
 refuse the same bytes at the next step that touched it.
@@ -203,6 +203,14 @@ accounting for the cost and can act on the difference between "too expensive her
 is broken"; a caller that supplies none is still read under the configured limits, but sees only
 the ordinary "could not be read" failure, because it never asked to account for the cost and would
 not catch an exception about it.
+
+**The import engine is the one reader that cannot be handed a budget.** tc-lib-pdf parses the
+source again with a parser it builds itself, keeping only two of the options it is given. The
+assembler covers it from outside: the geometry read and the import share one budget per document,
+whose time and memory backstops are consulted between imported pages; the import is pinned to not
+decoding page content; and what it does decode is the same bytes, through the same filters, that
+the budgeted geometry read already decoded — at a per-stream ceiling the assembler keeps equal to
+the engine's by refusing any `max_decoded_stream_bytes` above it.
 
 `tests/Feature/Preparation/DocumentReadBudgetTest.php` holds the list of readers and fails both
 when a known one stops honouring the configuration and when a new one is added that defaults.
@@ -214,7 +222,7 @@ when a known one stops honouring the configuration and when a new one is added t
 | `max_bytes` | 32 MiB | Form Request (`max:` in KB) **and** the preflight parser | An upload larger than the ceiling, before it is parsed. `size_limit_exceeded`. |
 | `max_pages` | 500 | Every page-tree walk: preflight, text extraction, assembly | A page tree with more pages than the ceiling. Surfaces as `invalid_page_geometry` rather than `page_limit_exceeded` — see issue #108. |
 | `max_objects` | 100,000 | Every parse, **while the document is read** | A document that declares or materializes more indirect objects than the ceiling. `object_limit_exceeded`. |
-| `max_decoded_stream_bytes` | 32 MiB | Preflight, per decoded stream | One stream that inflates past the ceiling. `decompression_limit_exceeded`. |
+| `max_decoded_stream_bytes` | 32 MiB | Every parse, per decoded stream | One stream that inflates past the ceiling. `decompression_limit_exceeded`. Cannot be raised above 32 MiB or set to 0: the import engine re-reads each document under that fixed ceiling, so the assembler refuses a value it could not keep. |
 | `max_decompressed_bytes` | 256 MiB | Preflight, aggregated over the document | Every decoded stream in one document added up. `decompression_limit_exceeded`. |
 | `preflight_time_budget_seconds` | 30 | Preflight, between units of work | Backstop. `time_budget_exceeded`. |
 | `preflight_memory_budget_bytes` | 256 MiB | Preflight, between units of work | Backstop. `memory_budget_exceeded`. |

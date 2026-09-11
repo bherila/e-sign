@@ -15,6 +15,7 @@ use App\Domain\Preparation\Preflight\PreflightLimits;
 use App\Domain\Preparation\TcPdf\TcPdfAssembler;
 use App\Domain\Preparation\TcPdf\TcPdfTextLocator;
 use App\Domain\Preparation\Text\TextExtractionException;
+use Com\Tecnick\Pdf\Parser\Parser;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\PdfBombFixtures;
 use Tests\Support\PdfFixtures;
@@ -217,6 +218,75 @@ final class DocumentReadBudgetTest extends TestCase
         }
 
         $this->fail($fixture.' was read in '.$looks.' looks at the budget: the work inside one operation went uncharged.');
+    }
+
+    /**
+     * A per-stream ceiling the import cannot keep is refused where it is configured.
+     *
+     * The import engine re-reads every document with its own parser, which this application cannot
+     * hand a budget or a configuration, under a fixed per-stream ceiling. A deployment ceiling above
+     * it — or 0, "no per-stream ceiling" — would accept a document at upload and have assembly refuse
+     * the same bytes, with nothing on the upload to say why.
+     *
+     * @return iterable<string, array{int}>
+     */
+    public static function ceilingsTheImportCannotKeep(): iterable
+    {
+        yield 'one byte above the engine\'s ceiling' => [Parser::DEFAULT_MAX_STREAM_SIZE + 1];
+        yield 'no per-stream ceiling at all' => [0];
+    }
+
+    #[DataProvider('ceilingsTheImportCannotKeep')]
+    public function test_a_per_stream_ceiling_the_import_cannot_keep_is_refused_where_it_is_set(int $ceiling): void
+    {
+        // The engine's own ceiling is one assembly can keep, and a document still reads under it.
+        config(['esign.documents.max_decoded_stream_bytes' => Parser::DEFAULT_MAX_STREAM_SIZE]);
+        $this->forgetResolvedLimits();
+        app(PdfAssembler::class)->assemble(PdfFixtures::bytes('multi-page-mixed-size'));
+
+        config(['esign.documents.max_decoded_stream_bytes' => $ceiling]);
+        $this->forgetResolvedLimits();
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/max_decoded_stream_bytes is '.$ceiling.'/');
+
+        app(PdfAssembler::class);
+    }
+
+    /**
+     * The import is charged to the document it imports.
+     *
+     * The import engine's work cannot be metered from inside, so its pages are units the document's
+     * backstops are consulted between. This clock reads late only while pages are being written, so
+     * the budget can be exhausted there and nowhere else: a reader that never consults it during the
+     * import assembles the document without noticing.
+     */
+    public function test_the_import_is_charged_to_the_document_it_imports(): void
+    {
+        $clock = static function (): float {
+            foreach (debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS) as $frame) {
+                if (($frame['class'] ?? null) === TcPdfAssembler::class && $frame['function'] === 'writePages') {
+                    return 1.0e9;
+                }
+            }
+
+            return 0.0;
+        };
+
+        $assembler = new TcPdfAssembler(null, resource_path('fonts'), app(PreflightLimits::class), $clock);
+
+        try {
+            $assembler->assemble(PdfFixtures::bytes('multi-page-mixed-size'));
+        } catch (AssemblyException $refused) {
+            // Leaves as what the port promises, carrying the ceiling that stopped it.
+            $stopped = $refused->getPrevious();
+            $this->assertInstanceOf(PreflightBudgetException::class, $stopped);
+            $this->assertSame(PreflightCode::TimeBudgetExceeded, $stopped->preflightCode);
+
+            return;
+        }
+
+        $this->fail('The document was imported without its budget being consulted.');
     }
 
     /**
