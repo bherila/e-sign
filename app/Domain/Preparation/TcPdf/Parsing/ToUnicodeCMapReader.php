@@ -14,15 +14,27 @@ use App\Domain\Preparation\Preflight\PreflightBudgetException;
  * the same tokenizer is used. Only `bfchar` and `bfrange` sections are interpreted:
  * they are the only ones that carry the mapping.
  */
-final readonly class ToUnicodeCMapReader
+final class ToUnicodeCMapReader
 {
+    /**
+     * Entries written to the map between two looks at the budget.
+     *
+     * Lexing is charged by the tokenizer, but a map is not the size of its source: one
+     * `bfrange` of three short tokens expands to 65,536 entries, and one operation may carry
+     * over a thousand of them. So the expansion is charged in the unit it produces, and every
+     * entry — from `bfchar`, a `bfrange`, or a `bfrange` array — goes through `record()`.
+     */
+    private const ENTRIES_PER_TICK = 4096;
+
+    private int $entries = 0;
+
     /**
      * @param  PreflightBudget  $budget  The document's. A CMap is a stream of the document being
      *                                   read, and lexing it is as much a part of that read as
      *                                   lexing a page: a font can carry a map of millions of
      *                                   entries inside one allowed stream.
      */
-    public function __construct(private PreflightBudget $budget) {}
+    public function __construct(private readonly PreflightBudget $budget) {}
 
     /**
      * @return array<int, string> Character code => UTF-8 string.
@@ -44,7 +56,25 @@ final readonly class ToUnicodeCMapReader
         return $map;
     }
 
-    /** @param array<int, string> $map */
+    /**
+     * @param  array<int, string>  $map
+     *
+     * @throws PreflightBudgetException
+     */
+    private function record(array &$map, int $code, string $text): void
+    {
+        $map[$code] = $text;
+
+        if (++$this->entries % self::ENTRIES_PER_TICK === 0) {
+            $this->budget->tick();
+        }
+    }
+
+    /**
+     * @param  array<int, string>  $map
+     *
+     * @throws PreflightBudgetException
+     */
     private function readBfChar(ContentStreamOperation $operation, array &$map): void
     {
         $operands = $operation->operands;
@@ -53,12 +83,16 @@ final readonly class ToUnicodeCMapReader
             $src = $this->codeOf($operands[$i]);
             $dst = $this->textOf($operands[$i + 1]);
             if ($src !== null && $dst !== null) {
-                $map[$src] = $dst;
+                $this->record($map, $src, $dst);
             }
         }
     }
 
-    /** @param array<int, string> $map */
+    /**
+     * @param  array<int, string>  $map
+     *
+     * @throws PreflightBudgetException
+     */
     private function readBfRange(ContentStreamOperation $operation, array &$map): void
     {
         $operands = $operation->operands;
@@ -76,7 +110,7 @@ final readonly class ToUnicodeCMapReader
                 foreach (array_values($target[1]) as $offset => $item) {
                     $text = $this->textOf($item);
                     if ($text !== null && $low + $offset <= $high) {
-                        $map[$low + $offset] = $text;
+                        $this->record($map, $low + $offset, $text);
                     }
                 }
 
@@ -89,7 +123,7 @@ final readonly class ToUnicodeCMapReader
             }
 
             for ($code = $low; $code <= $high; $code++) {
-                $map[$code] = $this->utf8($base + ($code - $low));
+                $this->record($map, $code, $this->utf8($base + ($code - $low)));
             }
         }
     }

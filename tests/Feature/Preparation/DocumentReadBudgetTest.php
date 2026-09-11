@@ -13,6 +13,7 @@ use App\Domain\Preparation\Preflight\PreflightBudgetException;
 use App\Domain\Preparation\Preflight\PreflightCode;
 use App\Domain\Preparation\Preflight\PreflightLimits;
 use App\Domain\Preparation\TcPdf\Parsing\ContentStreamTokenizer;
+use App\Domain\Preparation\TcPdf\Parsing\ToUnicodeCMapReader;
 use App\Domain\Preparation\TcPdf\TcPdfAssembler;
 use App\Domain\Preparation\TcPdf\TcPdfTextLocator;
 use App\Domain\Preparation\Text\TextExtractionException;
@@ -282,6 +283,39 @@ final class DocumentReadBudgetTest extends TestCase
         }
 
         $this->fail('A megabyte was scanned in '.$looks.' looks at the budget: the loop that scanned it went uncharged.');
+    }
+
+    /**
+     * A font's /ToUnicode map is charged for the entries it expands to, not the bytes it is lexed from.
+     *
+     * Sixteen full-width `bfrange` entries are a few hundred bytes — nothing the tokenizer's per-byte
+     * charge can see — and a million map entries once expanded. The control is a map of ordinary
+     * size, the full single-byte range, read under the same ceiling.
+     */
+    public function test_a_cmap_is_charged_for_what_it_expands_to(): void
+    {
+        $looks = 0;
+        $clock = static function () use (&$looks): float {
+            return (float) $looks++;
+        };
+        $limits = new PreflightLimits(timeBudgetSeconds: 100.0);
+
+        $ordinary = (new ToUnicodeCMapReader(new PreflightBudget($limits, $clock)))
+            ->parse("1 beginbfrange\n<00> <FF> <0000>\nendbfrange\n");
+        $this->assertCount(256, $ordinary);
+
+        $looks = 0;
+        $wide = "16 beginbfrange\n".str_repeat("<0000> <FFFF> <0041>\n", 16)."endbfrange\n";
+
+        try {
+            (new ToUnicodeCMapReader(new PreflightBudget($limits, $clock)))->parse($wide);
+        } catch (PreflightBudgetException $stopped) {
+            $this->assertSame(PreflightCode::TimeBudgetExceeded, $stopped->preflightCode);
+
+            return;
+        }
+
+        $this->fail('A '.strlen($wide).'-byte map expanded to a million entries in '.$looks.' looks at the budget.');
     }
 
     /**
