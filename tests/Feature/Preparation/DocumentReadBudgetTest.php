@@ -18,6 +18,7 @@ use App\Domain\Preparation\TcPdf\TcPdfAssembler;
 use App\Domain\Preparation\TcPdf\TcPdfTextLocator;
 use App\Domain\Preparation\Text\TextExtractionException;
 use Com\Tecnick\Pdf\Parser\Parser;
+use Com\Tecnick\Pdf\Tcpdf;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\PdfBombFixtures;
 use Tests\Support\PdfFixtures;
@@ -385,6 +386,43 @@ final class DocumentReadBudgetTest extends TestCase
         }
 
         $this->fail('The document was imported without its budget being consulted.');
+    }
+
+    /**
+     * A page that runs past a backstop is refused, the last page included.
+     *
+     * This clock reads late only once the output holds an imported page, which is a budget that ran
+     * out *during* the import of the one page of a one-page document. A look before each page never
+     * sees that: it happens before the page, and there is no page after the last.
+     */
+    public function test_the_last_imported_page_is_charged_after_it_is_imported(): void
+    {
+        $clock = static function (): float {
+            foreach (debug_backtrace() as $frame) {
+                if (($frame['class'] ?? null) === TcPdfAssembler::class && $frame['function'] === 'writePages') {
+                    /** @var Tcpdf $pdf */
+                    $pdf = $frame['args'][0];
+
+                    return $pdf->page->getPages() === [] ? 0.0 : 1.0e9;
+                }
+            }
+
+            return 0.0;
+        };
+
+        $assembler = new TcPdfAssembler(null, resource_path('fonts'), app(PreflightLimits::class), $clock);
+
+        try {
+            $assembler->assemble(PdfFixtures::bytes('single-page-letter'));
+        } catch (AssemblyException $refused) {
+            $stopped = $refused->getPrevious();
+            $this->assertInstanceOf(PreflightBudgetException::class, $stopped);
+            $this->assertSame(PreflightCode::TimeBudgetExceeded, $stopped->preflightCode);
+
+            return;
+        }
+
+        $this->fail('The only page ran past the time backstop during its import and was assembled anyway.');
     }
 
     /**

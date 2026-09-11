@@ -239,10 +239,6 @@ final readonly class TcPdfAssembler implements PdfAssembler
         $pageCount = $pdf->getSourcePageCount($sourceId);
 
         for ($pageNumber = 1; $pageNumber <= $pageCount; $pageNumber++) {
-            // The import is engine work this adapter cannot meter from inside, so the document's
-            // backstops are consulted between its units: one imported page.
-            $budget->tick();
-
             $template = $pdf->importPage($sourceId, $pageNumber, [
                 'box' => 'CropBox',
                 'respectRotation' => true,
@@ -268,6 +264,13 @@ final readonly class TcPdfAssembler implements PdfAssembler
             foreach ($byPage[$written] ?? [] as $overlay) {
                 $pdf->page->addContent($this->overlayContent($pdf, $overlay, $height));
             }
+
+            // The import is engine work this adapter cannot meter from inside, so the document's
+            // backstops are consulted between its units: one imported page. After the page, not
+            // before it, so the page that ran past a backstop is the one refused — the last page
+            // included, which a look before each page never follows. Before the first page there is
+            // nothing to look for that the geometry read, on this budget, has not just looked at.
+            $budget->tick();
         }
 
         return $written;
