@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Domain\Preparation\TcPdf\Parsing;
 
+use App\Domain\Preparation\Preflight\PreflightBudget;
+use App\Domain\Preparation\Preflight\PreflightBudgetException;
+
 /**
  * Reads the code => Unicode mapping out of a /ToUnicode CMap stream.
  *
@@ -13,12 +16,24 @@ namespace App\Domain\Preparation\TcPdf\Parsing;
  */
 final readonly class ToUnicodeCMapReader
 {
-    /** @return array<int, string> Character code => UTF-8 string. */
+    /**
+     * @param  PreflightBudget  $budget  The document's. A CMap is a stream of the document being
+     *                                   read, and lexing it is as much a part of that read as
+     *                                   lexing a page: a font can carry a map of millions of
+     *                                   entries inside one allowed stream.
+     */
+    public function __construct(private PreflightBudget $budget) {}
+
+    /**
+     * @return array<int, string> Character code => UTF-8 string.
+     *
+     * @throws PreflightBudgetException
+     */
     public function parse(string $cmap): array
     {
         $map = [];
 
-        foreach ((new ContentStreamTokenizer($cmap))->operations() as $operation) {
+        foreach ((new ContentStreamTokenizer($cmap, $this->budget))->operations() as $operation) {
             match ($operation->operator) {
                 'endbfchar' => $this->readBfChar($operation, $map),
                 'endbfrange' => $this->readBfRange($operation, $map),

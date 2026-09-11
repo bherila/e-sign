@@ -53,6 +53,16 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
     private const MAX_XOBJECT_DEPTH = 8;
 
     /**
+     * Bytes of one shown string decoded between two looks at the budget.
+     *
+     * One operator is not one unit of work: a single `Tj` operand can be as long as the stream
+     * that holds it, and turning it into codes, text and an advance costs several times its
+     * length in memory. Decoding it in slices bounds how far that work runs before the budget
+     * sees it. Even, so a slice never splits a two-byte code of a composite font.
+     */
+    private const GLYPH_BYTES_PER_TICK = 4096;
+
+    /**
      * @param  PreflightLimits  $limits  The ceilings this deployment reads documents under, used
      *                                   when a caller supplies no budget of its own. Injected
      *                                   rather than defaulted in the body so the container can
@@ -197,18 +207,21 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
             );
         }
 
-        $fonts = $this->loadFonts($graph, $resources);
+        $fonts = $this->loadFonts($graph, $resources, $budget);
 
         $state = new TextState;
         /** @var array<int, Matrix> $ctmStack */
         $ctmStack = [];
         $ctm = $baseCtm;
 
-        foreach ((new ContentStreamTokenizer($content))->operations() as $operation) {
+        foreach ((new ContentStreamTokenizer($content, $budget))->operations() as $operation) {
             // Charged per operation, which is the unit a pathological stream multiplies. One page
             // can hold millions of text-showing operators while satisfying every ceiling that
             // describes the document, so checking between pages — or even per produced run —
             // lets a single stream spend the whole budget before anything looks.
+            //
+            // Not the only charge. The tokenizer charges the tokens it reads, which an operation
+            // count cannot see, and `showArray()` charges the glyphs of one long string.
             $budget->tick();
 
             switch ($operation->operator) {
@@ -292,7 +305,7 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
                 case 'Tj':
                     $bytes = $operation->stringBytes(0);
                     if ($bytes !== null) {
-                        $this->show($state, $ctm, $fonts, $transform, $pageNumber, [$bytes], $runs);
+                        $this->show($state, $ctm, $fonts, $transform, $pageNumber, [$bytes], $runs, $budget);
                     }
                     break;
 
@@ -300,7 +313,7 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
                     $state->translateLine(0.0, -$state->leading);
                     $bytes = $operation->stringBytes(0);
                     if ($bytes !== null) {
-                        $this->show($state, $ctm, $fonts, $transform, $pageNumber, [$bytes], $runs);
+                        $this->show($state, $ctm, $fonts, $transform, $pageNumber, [$bytes], $runs, $budget);
                     }
                     break;
 
@@ -310,14 +323,14 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
                     $state->translateLine(0.0, -$state->leading);
                     $bytes = $operation->stringBytes(2);
                     if ($bytes !== null) {
-                        $this->show($state, $ctm, $fonts, $transform, $pageNumber, [$bytes], $runs);
+                        $this->show($state, $ctm, $fonts, $transform, $pageNumber, [$bytes], $runs, $budget);
                     }
                     break;
 
                 case 'TJ':
                     $items = $operation->arrayOperand(0);
                     if ($items !== null) {
-                        $this->showArray($state, $ctm, $fonts, $transform, $pageNumber, $items, $runs);
+                        $this->showArray($state, $ctm, $fonts, $transform, $pageNumber, $items, $runs, $budget);
                     }
                     break;
 
@@ -395,6 +408,7 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
         int $pageNumber,
         array $strings,
         array &$runs,
+        PreflightBudget $budget,
     ): void {
         $this->showArray(
             $state,
@@ -404,6 +418,7 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
             $pageNumber,
             array_map(static fn (string $s): array => ['str', $s], $strings),
             $runs,
+            $budget,
         );
     }
 
@@ -426,6 +441,7 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
         int $pageNumber,
         array $items,
         array &$runs,
+        PreflightBudget $budget,
     ): void {
         $font = $fonts[$state->fontResource] ?? null;
         if (! $font instanceof PdfFontModel) {
@@ -449,13 +465,18 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
                 continue;
             }
 
-            $codes = $font->codes($item[1]);
-            $text .= $font->decode($codes);
+            $length = strlen($item[1]);
+            for ($offset = 0; $offset < $length; $offset += self::GLYPH_BYTES_PER_TICK) {
+                $budget->tick();
 
-            foreach ($codes as $code) {
-                $glyphWidth = $font->width($code) / 1000.0 * $state->fontSize;
-                $wordSpacing = (! $font->composite && $code === 32) ? $state->wordSpacing : 0.0;
-                $advance += ($glyphWidth + $state->charSpacing + $wordSpacing) * $state->horizontalScale;
+                $codes = $font->codes(substr($item[1], $offset, self::GLYPH_BYTES_PER_TICK));
+                $text .= $font->decode($codes);
+
+                foreach ($codes as $code) {
+                    $glyphWidth = $font->width($code) / 1000.0 * $state->fontSize;
+                    $wordSpacing = (! $font->composite && $code === 32) ? $state->wordSpacing : 0.0;
+                    $advance += ($glyphWidth + $state->charSpacing + $wordSpacing) * $state->horizontalScale;
+                }
             }
         }
 
@@ -521,10 +542,10 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
      * @param  array<string, array<int, mixed>>  $resources
      * @return array<string, PdfFontModel>
      */
-    private function loadFonts(PdfObjectGraph $graph, array $resources): array
+    private function loadFonts(PdfObjectGraph $graph, array $resources, PreflightBudget $budget): array
     {
         $fontResources = $graph->dictEntryAsDictionary($resources, 'Font') ?? [];
-        $reader = new FontDictionaryReader($graph);
+        $reader = new FontDictionaryReader($graph, $budget);
 
         $fonts = [];
         foreach (array_keys($fontResources) as $name) {

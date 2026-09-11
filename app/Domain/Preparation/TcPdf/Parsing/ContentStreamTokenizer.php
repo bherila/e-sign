@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Domain\Preparation\TcPdf\Parsing;
 
+use App\Domain\Preparation\Preflight\PreflightBudget;
+use App\Domain\Preparation\Preflight\PreflightBudgetException;
+
 /**
  * Lexes a decoded PDF content stream into operators and their operands.
  *
@@ -25,17 +28,40 @@ final class ContentStreamTokenizer
     /** Bounded so a malformed stream cannot grow the operand list without limit. */
     private const MAX_OPERANDS = 4096;
 
+    /**
+     * Tokens read between two looks at the budget.
+     *
+     * A caller that charges per yielded operation does not see this work: a stream of
+     * operands with no operator yields nothing at all, and a single operation can carry an
+     * array of thousands of tokens. So the tokenizer charges its own work, counted in the
+     * unit it multiplies, and nested arrays and dictionaries count because they read through
+     * the same method.
+     */
+    private const TOKENS_PER_TICK = 1024;
+
     private int $offset = 0;
 
     private int $length;
 
-    public function __construct(private readonly string $data)
-    {
+    private int $tokens = 0;
+
+    /**
+     * @param  PreflightBudget  $budget  The running cost of reading the document this stream
+     *                                   belongs to. Required rather than defaulted: a content
+     *                                   stream is read after its document was parsed under a
+     *                                   budget, and lexing it is part of the same read.
+     */
+    public function __construct(
+        private readonly string $data,
+        private readonly PreflightBudget $budget,
+    ) {
         $this->length = strlen($data);
     }
 
     /**
      * @return \Generator<int, ContentStreamOperation>
+     *
+     * @throws PreflightBudgetException
      */
     public function operations(): \Generator
     {
@@ -64,6 +90,10 @@ final class ContentStreamTokenizer
     /** @return array{string, mixed}|null */
     private function nextToken(): ?array
     {
+        if (++$this->tokens % self::TOKENS_PER_TICK === 0) {
+            $this->budget->tick();
+        }
+
         $this->skipWhitespaceAndComments();
         if ($this->offset >= $this->length) {
             return null;

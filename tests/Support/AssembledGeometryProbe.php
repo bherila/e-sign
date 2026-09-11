@@ -7,6 +7,7 @@ namespace Tests\Support;
 use App\Domain\Preparation\Geometry\CoordinateTransform;
 use App\Domain\Preparation\Geometry\NativeRect;
 use App\Domain\Preparation\Geometry\UserSpacePoint;
+use App\Domain\Preparation\Preflight\PreflightBudget;
 use App\Domain\Preparation\TcPdf\Parsing\ContentStreamTokenizer;
 use App\Domain\Preparation\TcPdf\Parsing\FlattenedPage;
 use App\Domain\Preparation\TcPdf\Parsing\Matrix;
@@ -130,7 +131,7 @@ final readonly class AssembledGeometryProbe
         $stack = [];
         $out = [];
 
-        foreach ((new ContentStreamTokenizer($content))->operations() as $operation) {
+        foreach ((new ContentStreamTokenizer($content, new PreflightBudget))->operations() as $operation) {
             match ($operation->operator) {
                 'q' => $stack[] = $ctm,
                 'Q' => $ctm = array_pop($stack) ?? Matrix::identity(),
@@ -160,7 +161,7 @@ final readonly class AssembledGeometryProbe
         $pending = [];
         $out = [];
 
-        foreach ((new ContentStreamTokenizer($content))->operations() as $operation) {
+        foreach ((new ContentStreamTokenizer($content, new PreflightBudget))->operations() as $operation) {
             if ($operation->operator === 'q') {
                 $stack[] = $ctm;
 

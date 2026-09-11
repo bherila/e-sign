@@ -10,6 +10,7 @@ use App\Domain\Preparation\Contracts\PdfPreflight;
 use App\Domain\Preparation\Contracts\PdfTextLocator;
 use App\Domain\Preparation\Preflight\PreflightBudget;
 use App\Domain\Preparation\Preflight\PreflightBudgetException;
+use App\Domain\Preparation\Preflight\PreflightCode;
 use App\Domain\Preparation\Preflight\PreflightLimits;
 use App\Domain\Preparation\TcPdf\TcPdfAssembler;
 use App\Domain\Preparation\TcPdf\TcPdfTextLocator;
@@ -164,6 +165,58 @@ final class DocumentReadBudgetTest extends TestCase
         $this->expectExceptionMessageMatches('/pages could not be read/');
 
         app(PdfTextLocator::class)->extract(PdfBombFixtures::bytes('overflowing-transform'));
+    }
+
+    /**
+     * Work spent inside one operation, where a charge per operation cannot see it.
+     *
+     * Each fixture is one ordinary page, a megabyte decoded, accepted by every ceiling that
+     * describes a document (the bomb corpus declares them `accept`). The cost is spent in a unit
+     * the walk used to count once: one shown string, whose codes, text and advance cost several
+     * times its length; a run of operands that yields no operation at all; a font's /ToUnicode map,
+     * lexed before the page walk takes its first step.
+     *
+     * @return iterable<string, array{string}>
+     */
+    public static function workInsideOneOperation(): iterable
+    {
+        yield 'one shown string a megabyte long' => ['long-shown-string'];
+        yield 'half a million operands and no operator' => ['operand-flood'];
+        yield 'a font whose /ToUnicode map is a megabyte of entries' => ['cmap-flood'];
+    }
+
+    /**
+     * The budget is consulted while that work happens, not only once it is over.
+     *
+     * The clock advances one second each time the budget looks at it, so the time ceiling below is
+     * a ceiling on *looks*. That makes the property countable without a slow host or a large file:
+     * an ordinary page is read in well under a hundred looks, and before this change each fixture
+     * was read in as few — one look for the operation that did all the work.
+     */
+    #[DataProvider('workInsideOneOperation')]
+    public function test_work_inside_one_operation_is_charged_while_it_happens(string $fixture): void
+    {
+        $looks = 0;
+        $clock = static function () use (&$looks): float {
+            return (float) $looks++;
+        };
+        $limits = new PreflightLimits(timeBudgetSeconds: 100.0);
+
+        // The control: the same ceiling reads an ordinary page, so a refusal below is about the
+        // fixture and not a ceiling too low to read anything.
+        app(PdfTextLocator::class)->extract(PdfFixtures::bytes('single-page-letter'), null, new PreflightBudget($limits, $clock));
+
+        $looks = 0;
+
+        try {
+            app(PdfTextLocator::class)->extract(PdfBombFixtures::bytes($fixture), null, new PreflightBudget($limits, $clock));
+        } catch (PreflightBudgetException $stopped) {
+            $this->assertSame(PreflightCode::TimeBudgetExceeded, $stopped->preflightCode);
+
+            return;
+        }
+
+        $this->fail($fixture.' was read in '.$looks.' looks at the budget: the work inside one operation went uncharged.');
     }
 
     /**

@@ -321,6 +321,84 @@ emitBomb('deep-nesting-bomb', $writer->build($root), [
     ]);
 })();
 
+// ---------------------------------------------------------------------------
+// 7-9. Work inside one operation.
+//
+// Each of these is an ordinary-sized document: one page, one megabyte decoded, accepted by
+// every ceiling that describes a document. What they share is that the cost is spent inside a
+// single unit the text walk used to count once — one shown string, one run of operands with
+// no operator, one font's /ToUnicode map — so a budget charged only between operators saw
+// none of it. Text extraction is where each is caught.
+// ---------------------------------------------------------------------------
+
+/** A simple font, optionally with a /ToUnicode stream, and one page showing text in it. */
+function textPage(PdfFixtureWriter $writer, string $content, ?string $toUnicode = null): int
+{
+    $toUnicodeEntry = $toUnicode === null
+        ? ''
+        : ' /ToUnicode '.$writer->addStream('<< /Filter /FlateDecode >>', (string) gzcompress($toUnicode, 9)).' 0 R';
+
+    $fontObj = $writer->add(
+        '<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding'
+        .' /FirstChar 32 /LastChar 126 /Widths ['.trim(str_repeat('600 ', 95)).']'.$toUnicodeEntry.' >>'
+    );
+    $contentObj = $writer->addStream('<< /Filter /FlateDecode >>', (string) gzcompress($content, 9));
+
+    $pagesObj = $writer->reserve();
+    $pageObj = $writer->add(sprintf(
+        '<< /Type /Page /Parent %d 0 R /MediaBox [0 0 612 792] /CropBox [0 0 612 792] /Rotate 0'
+        .' /Resources << /Font << /F1 %d 0 R >> >> /Contents %d 0 R >>',
+        $pagesObj,
+        $fontObj,
+        $contentObj,
+    ));
+    $writer->put($pagesObj, '<< /Type /Pages /Kids ['.$pageObj.' 0 R] /Count 1 >>');
+
+    return $writer->add('<< /Type /Catalog /Pages '.$pagesObj.' 0 R >>');
+}
+
+$writer = new PdfFixtureWriter;
+$root = textPage($writer, "BT\n/F1 12 Tf\n72 720 Td\n(".str_repeat('A', MIB).") Tj\nET\n");
+emitBomb('long-shown-string', $writer->build($root), [
+    'description' => 'One page whose content stream shows a single one-megabyte string with one Tj.',
+    'expected_preflight' => 'accept',
+    'expected_rejections' => [],
+    'decoded_bytes_if_unbounded' => MIB,
+    'page_count' => 1,
+    'proves' => 'One text-showing operator is not one unit of work. Its glyphs are decoded under the '
+        .'document\'s budget as they are read, not after the whole string has been expanded.',
+]);
+
+$writer = new PdfFixtureWriter;
+$root = textPage($writer, str_repeat('0 ', MIB / 2));
+emitBomb('operand-flood', $writer->build($root), [
+    'description' => 'One page whose content stream is half a million numbers and no operator.',
+    'expected_preflight' => 'accept',
+    'expected_rejections' => [],
+    'decoded_bytes_if_unbounded' => MIB,
+    'page_count' => 1,
+    'proves' => 'A stream that yields no operation still costs its tokens. The tokenizer charges them '
+        .'itself, because a walk that charges per operation is never called.',
+]);
+
+$writer = new PdfFixtureWriter;
+$root = textPage(
+    $writer,
+    "BT\n/F1 12 Tf\n72 720 Td\n(A) Tj\nET\n",
+    "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n1 begincodespacerange\n<00> <FF>\n"
+    ."endcodespacerange\n100 beginbfchar\n".str_repeat("<41> <0041>\n", intdiv(MIB, 12))."endbfchar\n"
+    ."endcmap\nend\nend\n",
+);
+emitBomb('cmap-flood', $writer->build($root), [
+    'description' => 'One page shown in a font whose /ToUnicode CMap is a megabyte of bfchar entries.',
+    'expected_preflight' => 'accept',
+    'expected_rejections' => [],
+    'decoded_bytes_if_unbounded' => MIB,
+    'page_count' => 1,
+    'proves' => 'A font\'s /ToUnicode map is lexed by the same tokenizer as a page, and is charged to '
+        .'the same document: the page walk charges nothing while the fonts it needs are being read.',
+]);
+
 file_put_contents(
     BOMB_OUT_DIR.'/manifest.json',
     json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)."\n",
