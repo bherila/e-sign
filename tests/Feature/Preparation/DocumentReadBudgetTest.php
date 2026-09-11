@@ -12,6 +12,7 @@ use App\Domain\Preparation\Preflight\PreflightBudget;
 use App\Domain\Preparation\Preflight\PreflightBudgetException;
 use App\Domain\Preparation\Preflight\PreflightCode;
 use App\Domain\Preparation\Preflight\PreflightLimits;
+use App\Domain\Preparation\TcPdf\Parsing\ContentStreamTokenizer;
 use App\Domain\Preparation\TcPdf\TcPdfAssembler;
 use App\Domain\Preparation\TcPdf\TcPdfTextLocator;
 use App\Domain\Preparation\Text\TextExtractionException;
@@ -224,6 +225,63 @@ final class DocumentReadBudgetTest extends TestCase
         }
 
         $this->fail($fixture.' was read in '.$looks.' looks at the budget: the work inside one operation went uncharged.');
+    }
+
+    /**
+     * Every loop in the tokenizer that scans bytes, each given a megabyte to scan as one token.
+     *
+     * Counting tokens could not see these: each is one token or none, so a tokenizer that looked
+     * at the budget once per thousand tokens scanned the whole megabyte without looking at all.
+     * Enumerated by loop rather than by whichever shape was reported, because the property is
+     * "no loop scans unmetered", and a loop left out of this list is the next report.
+     *
+     * @return iterable<string, array{string}>
+     */
+    public static function oneTokenScans(): iterable
+    {
+        yield 'a run of whitespace' => [str_repeat(' ', 1_048_576)];
+        yield 'one comment' => ['%'.str_repeat('x', 1_048_576)];
+        yield 'one literal string' => ['('.str_repeat('x', 1_048_576).')'];
+        yield 'one hexadecimal string' => ['<'.str_repeat('4', 1_048_576).'>'];
+        yield 'one name' => ['/'.str_repeat('x', 1_048_576)];
+        yield 'one keyword' => [str_repeat('x', 1_048_576)];
+        yield 'an inline image of nothing but end-marker candidates' => ["BI\nID\n".str_repeat('EI', 524_288)];
+    }
+
+    /**
+     * The same clock as above — one second per look — so the ceiling is a ceiling on looks.
+     *
+     * The control is a hundred kilobytes of ordinary text-showing content, read well inside the
+     * ceiling: the refusals below are about bytes scanned without a look, not a ceiling too low to
+     * read a page.
+     */
+    #[DataProvider('oneTokenScans')]
+    public function test_every_byte_the_tokenizer_scans_is_charged(string $stream): void
+    {
+        $looks = 0;
+        $clock = static function () use (&$looks): float {
+            return (float) $looks++;
+        };
+        $limits = new PreflightLimits(timeBudgetSeconds: 100.0);
+
+        $ordinary = str_repeat("BT /F1 12 Tf 72 720 Td (An ordinary line of text.) Tj ET\n", 1_800);
+        foreach ((new ContentStreamTokenizer($ordinary, new PreflightBudget($limits, $clock)))->operations() as $operation) {
+            // Drained for its cost only.
+        }
+
+        $looks = 0;
+
+        try {
+            foreach ((new ContentStreamTokenizer($stream, new PreflightBudget($limits, $clock)))->operations() as $operation) {
+                // Drained for its cost only.
+            }
+        } catch (PreflightBudgetException $stopped) {
+            $this->assertSame(PreflightCode::TimeBudgetExceeded, $stopped->preflightCode);
+
+            return;
+        }
+
+        $this->fail('A megabyte was scanned in '.$looks.' looks at the budget: the loop that scanned it went uncharged.');
     }
 
     /**
