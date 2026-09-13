@@ -42,4 +42,45 @@ final readonly class PreflightLimits
         public float $timeBudgetSeconds = 30.0,
         public int $memoryBudgetBytes = 268_435_456,
     ) {}
+
+    /**
+     * The ceilings for an artifact this application generated, derived from the ones it admits
+     * uploads under.
+     *
+     * Three of the ceilings above are upload *policy*: how large a file someone may send, how
+     * many pages, how many objects. They answer "should we accept this from outside", and
+     * applying them to something we produced ourselves refuses our own work — after the signers
+     * have assented, which is the worst possible moment. The completion report is the case: it
+     * is appended at finalization, and its length follows the envelope's recipients and events,
+     * so under `max_pages=1` every agreement failed on a report the sender never chose.
+     *
+     * The aggregate decoded ceiling is policy too, for the same reason: it says how much a sender's
+     * file may expand to. An artifact of ours expands to its inputs — each admitted under that
+     * ceiling — plus the streams the engine writes itself (page placement, form wrappers,
+     * overlays). An allowance of "the inputs' ceilings added up" left no room for the second part,
+     * so a source admitted at the ceiling could be rebuilt and then refused on read-back. There is
+     * no honest number for that overhead, so there is no count ceiling.
+     *
+     * What still applies bounds the *work* of reading, whatever is in hand: the per-stream decode
+     * ceiling, and the time and memory backstops.
+     *
+     * Structure is bounded by construction rather than by policy. Pages: the caller passes what it
+     * actually wrote, which is a self-check, not a limit on the deployment. Objects: none, because
+     * the artifact holds its inputs' objects — each admitted under `max_objects` — plus the fixed
+     * per-page overhead the engine adds.
+     *
+     * @param  int|null  $pages  Pages actually written, when the caller knows; null for none.
+     */
+    public function forGenerated(?int $pages = null): self
+    {
+        return new self(
+            maxBytes: 0,
+            maxPages: $pages ?? 0,
+            maxObjects: 0,
+            maxDecodedStreamBytes: $this->maxDecodedStreamBytes,
+            maxDecompressedBytes: 0,
+            timeBudgetSeconds: $this->timeBudgetSeconds,
+            memoryBudgetBytes: $this->memoryBudgetBytes,
+        );
+    }
 }

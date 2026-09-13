@@ -81,6 +81,9 @@ return [
         'max_bytes' => (int) env('ESIGN_DOCUMENTS_MAX_BYTES', 33_554_432),
         'max_pages' => (int) env('ESIGN_DOCUMENTS_MAX_PAGES', 500),
         'max_objects' => (int) env('ESIGN_DOCUMENTS_MAX_OBJECTS', 100_000),
+        // At most 32 MiB, and not 0. The PDF import engine re-reads every
+        // document under that fixed per-stream ceiling and cannot be given
+        // another, so the assembler refuses any value it could not keep.
         'max_decoded_stream_bytes' => (int) env('ESIGN_DOCUMENTS_MAX_DECODED_STREAM_BYTES', 33_554_432),
 
         // Every decoded stream in one document, added up. 8x the upload ceiling:

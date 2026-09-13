@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Preparation\TcPdf\Parsing;
 
+use App\Domain\Preparation\Preflight\PreflightBudget;
 use App\Domain\Preparation\Text\TextExtractionException;
 
 /**
@@ -31,7 +32,12 @@ final readonly class FontDictionaryReader
         0x9E => 0x017E, 0x9F => 0x0178,
     ];
 
-    public function __construct(private PdfObjectGraph $graph) {}
+    /**
+     * @param  PreflightBudget  $budget  The document's, charged for everything a font dictionary
+     *                                   expands to: a /ToUnicode map's entries and a CIDFont's
+     *                                   /W widths alike.
+     */
+    public function __construct(private PdfObjectGraph $graph, private PreflightBudget $budget) {}
 
     /**
      * @param  array<string, array<int, mixed>>  $fontDict
@@ -171,6 +177,7 @@ final readonly class FontDictionaryReader
                 foreach ($next[1] as $item) {
                     if (is_array($item) && ($item[0] ?? null) === 'numeric') {
                         $widths[$start + $offset] = (float) $item[1];
+                        $this->budget->expand();
                         $offset++;
                     }
                 }
@@ -187,8 +194,11 @@ final readonly class FontDictionaryReader
                 $end = (int) $next[1];
                 $width = (float) $third[1];
                 if ($end >= $start && $end - $start <= 65_535) {
+                    // One triple of three tokens is up to 65,536 assignments, and a /W array can
+                    // hold many: charged in the unit produced, like a CMap range.
                     for ($cid = $start; $cid <= $end; $cid++) {
                         $widths[$cid] = $width;
+                        $this->budget->expand();
                     }
                 }
                 $index += 3;
@@ -234,7 +244,7 @@ final readonly class FontDictionaryReader
 
         $cmap = $this->graph->streamData($ref);
 
-        return $cmap === null ? [] : (new ToUnicodeCMapReader)->parse($cmap);
+        return $cmap === null ? [] : (new ToUnicodeCMapReader($this->budget))->parse($cmap);
     }
 
     /**

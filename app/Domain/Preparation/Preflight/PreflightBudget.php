@@ -214,11 +214,126 @@ final class PreflightBudget
     }
 
     /**
-     * The backstops, checked between units of work.
+     * Refuse a document larger than the byte ceiling, before it is read.
+     *
+     * Raised at the document-read boundary rather than inside preflight, so a caller that reads
+     * a document without running preflight first — the Firma facade's placement path did — is
+     * held to the same ceiling as an upload.
      *
      * @throws PreflightBudgetException
      */
-    public function tick(): void
+    public function exhaustBytes(int $size): never
+    {
+        throw new PreflightBudgetException(
+            PreflightCode::SizeLimitExceeded,
+            sprintf(
+                'The file is %d bytes; the limit is %d bytes. Split the document or reduce '
+                .'embedded image resolution before uploading.',
+                $size,
+                $this->limits->maxBytes,
+            ),
+        );
+    }
+
+    /**
+     * Refuse a page tree that reaches more pages than the ceiling allows.
+     *
+     * Raised by the page-tree walk as it reaches the page past the ceiling, so a long document
+     * is refused as long rather than as a page tree that could not be read — which sends
+     * whoever uploaded it to fix the wrong thing.
+     *
+     * @throws PreflightBudgetException
+     */
+    public function exhaustPages(): never
+    {
+        throw new PreflightBudgetException(
+            PreflightCode::PageLimitExceeded,
+            sprintf(
+                'This PDF has more pages than the %d-page limit for one document. Split the document into '
+                .'smaller files and upload it again.',
+                $this->limits->maxPages,
+            ),
+        );
+    }
+
+    /**
+     * Bytes scanned between two looks at the backstops.
+     *
+     * Public because a site that advances a byte at a time batches its reports rather than
+     * calling {@see scan()} per byte; it may advance this far before reporting, and no further.
+     */
+    public const SCAN_BYTES_PER_TICK = 4096;
+
+    /** Entries materialised between two looks at the backstops. */
+    private const EXPAND_ENTRIES_PER_TICK = 4096;
+
+    private int $scannedBytes = 0;
+
+    private int $nextScanTick = self::SCAN_BYTES_PER_TICK;
+
+    private int $expandedEntries = 0;
+
+    private int $nextExpandTick = self::EXPAND_ENTRIES_PER_TICK;
+
+    /**
+     * Bytes read or advanced over: a tokenizer's scan, a shown string's glyphs.
+     *
+     * One of the three ways work is reported here, and the reason they exist: a site knows what
+     * it just did, and this class alone decides what that costs and when to look at the
+     * ceilings. A site that counts its own units and decides its own interval is a site that can
+     * be forgotten — which is what a content stream, a /ToUnicode map and a /W array each were
+     * in turn.
+     *
+     * @throws PreflightBudgetException
+     */
+    public function scan(int $bytes): void
+    {
+        $this->scannedBytes += max(0, $bytes);
+
+        if ($this->scannedBytes >= $this->nextScanTick) {
+            $this->nextScanTick = $this->scannedBytes + self::SCAN_BYTES_PER_TICK;
+            $this->tick();
+        }
+    }
+
+    /**
+     * Entries materialised from a compact source: a CMap range, a /W range, a decoded glyph run.
+     *
+     * Charged in the unit produced rather than the unit read, because the two are not
+     * proportional: three tokens of `<0000> <FFFF> <0041>` are 65,536 entries, and a `/W` triple
+     * of `0 65535 500` is another 65,536.
+     *
+     * @throws PreflightBudgetException
+     */
+    public function expand(int $entries = 1): void
+    {
+        $this->expandedEntries += max(0, $entries);
+
+        if ($this->expandedEntries >= $this->nextExpandTick) {
+            $this->nextExpandTick = $this->expandedEntries + self::EXPAND_ENTRIES_PER_TICK;
+            $this->tick();
+        }
+    }
+
+    /**
+     * One coarse unit finished: an object, a page, an operation, an imported page.
+     *
+     * Reported after the unit, not before it, so the unit that ran past a backstop is the one
+     * refused rather than the one after it.
+     *
+     * @throws PreflightBudgetException
+     */
+    public function step(): void
+    {
+        $this->tick();
+    }
+
+    /**
+     * The backstops themselves.
+     *
+     * @throws PreflightBudgetException
+     */
+    private function tick(): void
     {
         if ($this->limits->timeBudgetSeconds > 0.0 && $this->elapsedSeconds() > $this->limits->timeBudgetSeconds) {
             throw new PreflightBudgetException(

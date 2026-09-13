@@ -15,12 +15,15 @@ use App\Domain\Preparation\Contracts\PdfAssembler;
 use App\Domain\Preparation\Contracts\PdfPreflight;
 use App\Domain\Preparation\Geometry\PageGeometry;
 use App\Domain\Preparation\Geometry\PageRotation;
-use App\Domain\Preparation\TcPdf\Parsing\PageTreeReader;
-use App\Domain\Preparation\TcPdf\Parsing\PdfObjectGraph;
+use App\Domain\Preparation\Preflight\PreflightBudget;
+use App\Domain\Preparation\Preflight\PreflightBudgetException;
+use App\Domain\Preparation\Preflight\PreflightLimits;
 use Com\Tecnick\Pdf\Exception;
 use Com\Tecnick\Pdf\Import\ImportException;
 use Com\Tecnick\Pdf\Import\ImportUnsupportedFeatureException;
+use Com\Tecnick\Pdf\Parser\Parser;
 use Com\Tecnick\Pdf\Tcpdf;
+use InvalidArgumentException;
 use Throwable;
 
 /**
@@ -61,11 +64,39 @@ final readonly class TcPdfAssembler implements PdfAssembler
      * @param  string|null  $fontDirectory  Where the bundled text metrics live. Null resolves to
      *                                      the repository's `resources/fonts`, which is what the
      *                                      service provider passes explicitly.
+     * @param  PreflightLimits  $limits  This deployment's ceilings. Every read of one input
+     *                                   document — its geometry and its import — is charged to one
+     *                                   budget built from them.
+     * @param  (\Closure(): float)|null  $clock  Handed to every budget this adapter builds, as
+     *                                           {@see PreflightBudget} takes it: so a test can see
+     *                                           the import consult the budget without sleeping.
+     *
+     * @throws InvalidArgumentException When the per-stream ceiling is one the import cannot keep.
      */
     public function __construct(
         private ?PdfPreflight $preflight = new TcPdfPreflight,
         private ?string $fontDirectory = null,
-    ) {}
+        private PreflightLimits $limits = new PreflightLimits,
+        private ?\Closure $clock = null,
+    ) {
+        // The import engine parses its source again with a parser this adapter cannot reach:
+        // tc-lib-pdf builds it inside `SourceDocument`, and keeps only `decode_streams` and
+        // `ignore_filter_errors` from the options it is given, so neither a budget nor this
+        // deployment's configuration gets through. That parser decodes what it must under a fixed
+        // per-stream ceiling. A deployment ceiling above it — or 0, "no per-stream ceiling" — would
+        // accept a document at upload and have the import refuse the same bytes. A ceiling this
+        // adapter cannot keep is refused where it is configured, not on the first document to need
+        // it.
+        if ($limits->maxDecodedStreamBytes <= 0 || $limits->maxDecodedStreamBytes > Parser::DEFAULT_MAX_STREAM_SIZE) {
+            throw new InvalidArgumentException(sprintf(
+                'max_decoded_stream_bytes is %d; it must be between 1 and %d. The PDF import engine re-reads '
+                .'every document under that fixed per-stream ceiling, so any other value would admit documents '
+                .'that assembly then refuses.',
+                $limits->maxDecodedStreamBytes,
+                Parser::DEFAULT_MAX_STREAM_SIZE,
+            ));
+        }
+    }
 
     /**
      * @param  array<int, PageOverlay>  $overlays
@@ -76,14 +107,26 @@ final readonly class TcPdfAssembler implements PdfAssembler
         $this->assertAcceptable($pdfBytes);
 
         foreach ($appendedDocuments as $appended) {
-            $this->assertAcceptable($appended);
+            // Generated: the port takes appended documents to be artifacts this application
+            // produced (the completion report), so upload policy does not decide whether they may
+            // be appended. Every hazard check still does.
+            $this->assertAcceptable($appended, generated: true);
         }
 
         $startedAt = microtime(true);
         memory_reset_peak_usage();
         $memoryBefore = memory_get_peak_usage(true);
 
-        $sourcePages = $this->readGeometry($pdfBytes);
+        // One budget per input document, built when that document's own work begins and shared by
+        // every read of it: its geometry read and its import. Built then rather than all at once,
+        // because the backstops measure from the moment a budget exists — so a budget built before
+        // its document's turn is charged for whatever happened in between. Reading every appended
+        // document's geometry up front did exactly that: in finalization the completion report's
+        // budget carried the whole source import, and a review PDF near a backstop could make the
+        // small report exceed a ceiling of its own, after assent. The output is this adapter's own
+        // product and is read back under a budget sized to what it was made from (`outputBudget()`).
+        $sourceBudget = $this->budget();
+        $sourcePages = $this->readGeometry($pdfBytes, $sourceBudget);
         if ($sourcePages === []) {
             throw new AssemblyException('The source document does not contain any pages.');
         }
@@ -101,16 +144,27 @@ final readonly class TcPdfAssembler implements PdfAssembler
         $pdf = new Tcpdf('pt', true, false, true);
 
         try {
-            $written = 0;
+            $written = $this->writePages($pdf, $pdfBytes, $sourcePages, $byPage, 0, $sourceBudget);
 
-            foreach ([[$pdfBytes, $sourcePages], ...$this->appendedWithGeometry($appendedDocuments)] as [$bytes, $geometry]) {
-                $written = $this->writePages($pdf, $bytes, $geometry, $byPage, $written);
+            foreach ($appendedDocuments as $appended) {
+                // Read and imported in one turn, on a budget that starts here, and on a generated
+                // artifact's ceilings: the report's length is the envelope's, not the uploader's.
+                $budget = $this->generatedBudget();
+                $geometry = $this->readGeometry($appended, $budget);
+                $written = $this->writePages($pdf, $appended, $geometry, $byPage, $written, $budget);
             }
 
             $result = $pdf->getOutPDFString();
             $warnings = $pdf->getWarnings();
         } catch (AssemblyException $exception) {
             throw $exception;
+        } catch (PreflightBudgetException $exception) {
+            // Outside this port's contract, like every other failure below, so it leaves as the
+            // failure the port promises. The message still names the ceiling.
+            throw new AssemblyException(
+                'The document could not be re-assembled within this deployment\'s limits: '.$exception->getMessage(),
+                previous: $exception,
+            );
         } catch (ImportUnsupportedFeatureException $exception) {
             throw new UnsupportedSourceException(
                 'The import engine refused this document: '.$exception->getMessage(),
@@ -126,7 +180,7 @@ final readonly class TcPdfAssembler implements PdfAssembler
         return new AssembledDocument(
             $result,
             $sourcePages,
-            $this->readGeometry($result),
+            $this->readGeometry($result, $this->generatedBudget($written)),
             array_values($warnings),
             microtime(true) - $startedAt,
             max(0, memory_get_peak_usage(true) - $memoryBefore),
@@ -134,31 +188,48 @@ final readonly class TcPdfAssembler implements PdfAssembler
     }
 
     /**
+     * @param  bool  $generated  True for an artifact this application produced. It is inspected
+     *                           in full — an unsafe document must not reach the importer by a
+     *                           different door — under {@see PdfPreflight::forGenerated()}, the same
+     *                           limits it is later read under. Filtering an upload report for the
+     *                           codes that looked like policy was a second definition of
+     *                           "generated", and it had already missed one.
+     *
      * @throws UnsupportedSourceException
      */
-    private function assertAcceptable(string $pdfBytes): void
+    private function assertAcceptable(string $pdfBytes, bool $generated = false): void
     {
         if (! $this->preflight instanceof PdfPreflight) {
             return;
         }
 
-        $report = $this->preflight->inspect($pdfBytes);
+        $preflight = $generated ? $this->preflight->forGenerated() : $this->preflight;
+        $report = $preflight->inspect($pdfBytes);
 
         if (! $report->isAccepted()) {
             throw new UnsupportedSourceException($report->rejectionMessage());
         }
     }
 
-    /**
-     * @param  array<int, string>  $appendedDocuments
-     * @return list<array{string, array<int, PageGeometry>}>
-     */
-    private function appendedWithGeometry(array $appendedDocuments): array
+    /** A fresh budget for one document, on this deployment's limits. */
+    private function budget(): PreflightBudget
     {
-        return array_values(array_map(
-            fn (string $bytes): array => [$bytes, $this->readGeometry($bytes)],
-            $appendedDocuments,
-        ));
+        return new PreflightBudget($this->limits, $this->clock);
+    }
+
+    /**
+     * A fresh budget for one artifact this application generated: an appended completion report,
+     * or this adapter's own output.
+     *
+     * What that means for each ceiling is {@see PreflightLimits::forGenerated()}; the short of it
+     * is that upload policy does not decide whether we may read our own work, while every ceiling
+     * that bounds the cost of reading still does.
+     *
+     * @param  int|null  $pages  Pages written, when this is the output and the count is known.
+     */
+    private function generatedBudget(?int $pages = null): PreflightBudget
+    {
+        return new PreflightBudget($this->limits->forGenerated($pages), $this->clock);
     }
 
     /**
@@ -168,11 +239,19 @@ final readonly class TcPdfAssembler implements PdfAssembler
      * @param  array<int, PageGeometry>  $geometry
      * @param  array<int, array<int, PageOverlay>>  $byPage
      * @param  int  $written  Output pages already written.
+     * @param  PreflightBudget  $budget  The document's, already charged for reading its geometry.
      * @return int Output pages written after this document.
+     *
+     * @throws PreflightBudgetException
      */
-    private function writePages(Tcpdf $pdf, string $bytes, array $geometry, array $byPage, int $written): int
+    private function writePages(Tcpdf $pdf, string $bytes, array $geometry, array $byPage, int $written, PreflightBudget $budget): int
     {
-        $sourceId = $pdf->setImportSourceData($bytes);
+        // Pinned rather than left to the engine's default: the import's own parse must not decode
+        // page content, because nothing can charge it for that. What the importer does decode —
+        // whatever its parser needs to read the object graph, and a page's /Contents array when it
+        // joins one — is these same bytes through the same filters that the geometry read decoded
+        // under this budget, at a per-stream ceiling the constructor keeps equal to the engine's.
+        $sourceId = $pdf->setImportSourceData($bytes, ['decode_streams' => false]);
         $pageCount = $pdf->getSourcePageCount($sourceId);
 
         for ($pageNumber = 1; $pageNumber <= $pageCount; $pageNumber++) {
@@ -201,6 +280,13 @@ final readonly class TcPdfAssembler implements PdfAssembler
             foreach ($byPage[$written] ?? [] as $overlay) {
                 $pdf->page->addContent($this->overlayContent($pdf, $overlay, $height));
             }
+
+            // The import is engine work this adapter cannot meter from inside, so the document's
+            // backstops are consulted between its units: one imported page. After the page, not
+            // before it, so the page that ran past a backstop is the one refused — the last page
+            // included, which a look before each page never follows. Before the first page there is
+            // nothing to look for that the geometry read, on this budget, has not just looked at.
+            $budget->step();
         }
 
         return $written;
@@ -368,14 +454,16 @@ final readonly class TcPdfAssembler implements PdfAssembler
     /**
      * @return array<int, PageGeometry>
      */
-    private function readGeometry(string $pdfBytes): array
+    private function readGeometry(string $pdfBytes, PreflightBudget $budget): array
     {
+        // The document's budget, from the configured limits. This is a second read of bytes
+        // preflight has already inspected, and it was the one site that parsed without any budget
+        // at all and walked to the page-tree reader's built-in ceiling — so a deployment that
+        // raised `max_pages` could import a document and then fail to read its geometry.
         try {
-            $graph = PdfObjectGraph::parse($pdfBytes);
-
             return array_map(
                 static fn ($page): PageGeometry => $page->geometry,
-                (new PageTreeReader($graph))->pages(),
+                DocumentRead::on($pdfBytes, $budget)->pages(),
             );
         } catch (Throwable $exception) {
             throw new AssemblyException('Page geometry could not be read: '.$exception->getMessage(), previous: $exception);

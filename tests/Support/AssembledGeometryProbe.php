@@ -7,10 +7,12 @@ namespace Tests\Support;
 use App\Domain\Preparation\Geometry\CoordinateTransform;
 use App\Domain\Preparation\Geometry\NativeRect;
 use App\Domain\Preparation\Geometry\UserSpacePoint;
+use App\Domain\Preparation\Preflight\PreflightBudget;
+use App\Domain\Preparation\Preflight\PreflightLimits;
+use App\Domain\Preparation\TcPdf\DocumentRead;
 use App\Domain\Preparation\TcPdf\Parsing\ContentStreamTokenizer;
 use App\Domain\Preparation\TcPdf\Parsing\FlattenedPage;
 use App\Domain\Preparation\TcPdf\Parsing\Matrix;
-use App\Domain\Preparation\TcPdf\Parsing\PageTreeReader;
 use App\Domain\Preparation\TcPdf\Parsing\PdfObjectGraph;
 
 /**
@@ -29,10 +31,16 @@ final readonly class AssembledGeometryProbe
     /** @var array<int, FlattenedPage> */
     private array $pages;
 
+    private PreflightBudget $budget;
+
     public function __construct(string $pdfBytes)
     {
-        $this->graph = PdfObjectGraph::parse($pdfBytes);
-        $this->pages = (new PageTreeReader($this->graph))->pages();
+        // Through the same boundary as the application's own readers: the probe reads a document
+        // too, and a probe that parsed its own way would be the one reader proving nothing.
+        $read = DocumentRead::under($pdfBytes, new PreflightLimits);
+        $this->graph = $read->graph();
+        $this->pages = $read->pages();
+        $this->budget = $read->budget;
     }
 
     /**
@@ -130,7 +138,7 @@ final readonly class AssembledGeometryProbe
         $stack = [];
         $out = [];
 
-        foreach ((new ContentStreamTokenizer($content))->operations() as $operation) {
+        foreach ((new ContentStreamTokenizer($content, $this->budget))->operations() as $operation) {
             match ($operation->operator) {
                 'q' => $stack[] = $ctm,
                 'Q' => $ctm = array_pop($stack) ?? Matrix::identity(),
@@ -160,7 +168,7 @@ final readonly class AssembledGeometryProbe
         $pending = [];
         $out = [];
 
-        foreach ((new ContentStreamTokenizer($content))->operations() as $operation) {
+        foreach ((new ContentStreamTokenizer($content, $this->budget))->operations() as $operation) {
             if ($operation->operator === 'q') {
                 $stack[] = $ctm;
 

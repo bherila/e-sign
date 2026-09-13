@@ -68,7 +68,7 @@ final class BoundedPdfParser extends Parser
      */
     protected function getXrefData(int $offset = 0, array $xref = []): array
     {
-        $this->budget->tick();
+        $this->budget->step();
 
         $data = parent::getXrefData($offset, $xref);
 
@@ -111,7 +111,7 @@ final class BoundedPdfParser extends Parser
      */
     protected function getIndirectObject(string $obj_ref, int $offset = 0, bool $decoding = true): array
     {
-        $this->budget->tick();
+        $this->budget->step();
         $this->budget->countObject($obj_ref);
 
         return parent::getIndirectObject($obj_ref, $offset, $decoding);
@@ -127,7 +127,7 @@ final class BoundedPdfParser extends Parser
      */
     protected function getDecodedStream(array $filters, string $stream, array $params = []): array
     {
-        $this->budget->tick();
+        $this->budget->step();
 
         if ($filters === []) {
             // Nothing can expand: the payload is already in the file, and the file is

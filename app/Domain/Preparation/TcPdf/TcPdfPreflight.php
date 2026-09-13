@@ -16,7 +16,6 @@ use App\Domain\Preparation\Preflight\PreflightReport;
 use App\Domain\Preparation\Preflight\PreflightSeverity;
 use App\Domain\Preparation\TcPdf\Parsing\BoundedPdfParser;
 use App\Domain\Preparation\TcPdf\Parsing\MalformedPageTreeException;
-use App\Domain\Preparation\TcPdf\Parsing\PageTreeReader;
 use App\Domain\Preparation\TcPdf\Parsing\PdfObjectGraph;
 
 /**
@@ -52,34 +51,25 @@ final readonly class TcPdfPreflight implements PdfPreflight
         private ?\Closure $clock = null,
     ) {}
 
+    public function forGenerated(): PdfPreflight
+    {
+        return new self($this->limits->forGenerated(), $this->clock);
+    }
+
     public function inspect(string $pdfBytes): PreflightReport
     {
-        $budget = new PreflightBudget($this->limits, $this->clock);
+        // The read owns admission and the parse; this class owns what the document is allowed to
+        // *be*. The byte ceiling is therefore no longer checked here: it is the read's, so a
+        // caller that never runs preflight is held to it too.
+        $read = DocumentRead::under($pdfBytes, $this->limits, $this->clock);
+        $budget = $read->budget;
 
         $findings = [];
         $pages = [];
         $objectCount = 0;
 
-        if (strlen($pdfBytes) > $this->limits->maxBytes) {
-            return $this->report(
-                [PreflightFinding::reject(
-                    PreflightCode::SizeLimitExceeded,
-                    sprintf(
-                        'The file is %d bytes; the limit is %d bytes. Split the document or reduce '
-                        .'embedded image resolution before uploading.',
-                        strlen($pdfBytes),
-                        $this->limits->maxBytes,
-                    ),
-                )],
-                [],
-                $pdfBytes,
-                0,
-                $budget,
-            );
-        }
-
         try {
-            $graph = PdfObjectGraph::parse($pdfBytes, $budget);
+            $graph = $read->graph();
         } catch (PreflightBudgetException $exception) {
             return $this->report(
                 [PreflightFinding::reject($exception->preflightCode, $exception->getMessage())],
@@ -133,9 +123,12 @@ final readonly class TcPdfPreflight implements PdfPreflight
                 $findings[] = $finding;
             }
 
-            $flattened = (new PageTreeReader($graph))->pages($this->limits->maxPages);
+            // A page count over the ceiling is refused by the budget, and so leaves through the
+            // budget's catch below as `page_limit_exceeded` — not as a page tree that could not
+            // be read, which is what it used to be reported as.
+            $flattened = $read->pages();
             foreach ($flattened as $page) {
-                $budget->tick();
+                $budget->step();
                 $pages[] = $page->geometry;
 
                 if ($page->geometry->userUnit !== 1.0) {
@@ -216,7 +209,7 @@ final readonly class TcPdfPreflight implements PdfPreflight
         $codes = [];
 
         foreach ($graph->objectRefs() as $ref) {
-            $budget->tick();
+            $budget->step();
 
             foreach ($graph->object($ref) as $entry) {
                 $this->scanEntry($graph, $entry, $codes, 0);

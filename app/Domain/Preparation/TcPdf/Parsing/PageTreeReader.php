@@ -8,6 +8,8 @@ use App\Domain\Preparation\Geometry\InvalidGeometryException;
 use App\Domain\Preparation\Geometry\PageBox;
 use App\Domain\Preparation\Geometry\PageGeometry;
 use App\Domain\Preparation\Geometry\PageRotation;
+use App\Domain\Preparation\Preflight\PreflightBudget;
+use App\Domain\Preparation\Preflight\PreflightBudgetException;
 
 /**
  * Walks the /Pages tree and produces one flattened, geometry-resolved page per leaf.
@@ -24,11 +26,15 @@ final readonly class PageTreeReader
     public function __construct(private PdfObjectGraph $graph) {}
 
     /**
+     * @param  PreflightBudget  $budget  The document's. Its page ceiling is the one walked to, and a
+     *                                   tree that goes past it is refused by the budget, as every
+     *                                   other ceiling is — not as a malformed tree.
      * @return array<int, FlattenedPage>
      *
-     * @throws MalformedPageTreeException
+     * @throws MalformedPageTreeException When the tree does not describe pages.
+     * @throws PreflightBudgetException When it describes more pages than the ceiling allows.
      */
-    public function pages(int $maxPages = 500): array
+    public function pages(PreflightBudget $budget): array
     {
         $rootRef = $this->graph->rootRef();
         if ($rootRef === null) {
@@ -51,7 +57,7 @@ final readonly class PageTreeReader
 
         $pages = [];
         $seen = [];
-        $this->walk($pagesRef ?? '', $pagesDict, [], $pages, $seen, $maxPages, 0);
+        $this->walk($pagesRef ?? '', $pagesDict, [], $pages, $seen, $budget, 0);
 
         return $pages;
     }
@@ -68,7 +74,7 @@ final readonly class PageTreeReader
         array $inherited,
         array &$pages,
         array &$seen,
-        int $maxPages,
+        PreflightBudget $budget,
         int $depth,
     ): void {
         if ($depth > 64) {
@@ -92,11 +98,14 @@ final readonly class PageTreeReader
         $kids = $this->graph->dictEntryAsArray($node, 'Kids');
 
         if ($type === 'Page' || ($kids === null && $type !== 'Pages')) {
-            if (count($pages) >= $maxPages) {
-                throw new MalformedPageTreeException('The document exceeds the '.$maxPages.'-page limit.');
+            // 0 is "no page ceiling", as it is for every other ceiling. A generated artifact is
+            // read that way: its page count is ours, not a policy about what may be uploaded.
+            if ($budget->limits->maxPages > 0 && count($pages) >= $budget->limits->maxPages) {
+                $budget->exhaustPages();
             }
 
             $pages[] = $this->flatten(count($pages) + 1, $node, $inherited);
+            $budget->step();
 
             return;
         }
@@ -116,7 +125,7 @@ final readonly class PageTreeReader
                 throw new MalformedPageTreeException('The /Kids entry '.$kidRef.' is not a dictionary.');
             }
 
-            $this->walk($kidRef, $kidDict, $inherited, $pages, $seen, $maxPages, $depth + 1);
+            $this->walk($kidRef, $kidDict, $inherited, $pages, $seen, $budget, $depth + 1);
         }
     }
 

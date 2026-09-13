@@ -167,7 +167,7 @@ final class PdfPreflightTest extends TestCase
 
         $report = $preflight->inspect(PdfFixtures::bytes('multi-page-mixed-size'));
 
-        $this->assertSame(['invalid_page_geometry'], $report->rejectionCodes());
+        $this->assertSame(['page_limit_exceeded'], $report->rejectionCodes());
         $this->assertStringContainsString('2-page limit', $report->rejectionMessage());
     }
 
