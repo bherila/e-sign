@@ -24,7 +24,13 @@ interface PdfAssembler
      * @param  array<int, string>  $appendedDocuments  Whole PDFs whose pages are appended after
      *                                                 the source's, in the order given. Their
      *                                                 pages are numbered after the source's, so
-     *                                                 an overlay can address them too.
+     *                                                 an overlay can address them too. These are
+     *                                                 artifacts this application generated — the
+     *                                                 completion report — not documents a sender
+     *                                                 uploaded, and they are admitted as such:
+     *                                                 inspected for hazards like anything else,
+     *                                                 but not held to the ceilings that say what
+     *                                                 a sender may upload.
      *
      * @throws AssemblyException When the source cannot be imported.
      */

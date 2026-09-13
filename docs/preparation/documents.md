@@ -215,11 +215,19 @@ import is pinned to not decoding page content; and what it does decode is the sa
 the same filters, that the budgeted geometry read already decoded — at a per-stream ceiling the
 assembler keeps equal to the engine's by refusing any `max_decoded_stream_bytes` above it.
 
-**The assembled output is not an upload, and is not held to one upload's ceilings.** It is read
-back for its page geometry under a budget sized to what it was made from: exactly the pages the
-assembler wrote, and for objects and decoded bytes the sum of its inputs' allowances. Finalization
-appends the completion report to a document admitted on its own, after every signer has assented,
-so a document admitted at `max_pages` must still take the report's pages.
+**What this application generates is not an upload.** `max_bytes`, `max_pages` and `max_objects`
+are upload policy: they answer "should we accept this from outside". The completion report and the
+assembled output are ours, and both arrive at finalization *after* every signer has assented, so
+applying upload policy to them refuses our own work at the worst possible moment — under
+`max_pages=1`, every agreement failed on a report whose length the sender never chose.
+
+`PreflightLimits::forGenerated()` is the one place that says what a generated artifact is read
+under: the resource ceilings still apply (per-stream decode, the aggregate decoded ceiling
+multiplied by the documents the artifact holds, time, memory), while structure is bounded by
+construction — pages are the count actually written, and objects are the inputs' objects, each
+admitted under `max_objects`, plus the engine's fixed per-page overhead. A generated artifact is
+still inspected for hazards; only the upload-policy rejections (`page_limit_exceeded`,
+`size_limit_exceeded`) are tolerated for it.
 
 **One boundary admits and parses a document: `DocumentRead`.** Preflight, text extraction and
 assembly all read documents, and admission (is this document allowed to be read at all) and

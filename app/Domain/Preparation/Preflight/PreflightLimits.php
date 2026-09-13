@@ -42,4 +42,44 @@ final readonly class PreflightLimits
         public float $timeBudgetSeconds = 30.0,
         public int $memoryBudgetBytes = 268_435_456,
     ) {}
+
+    /**
+     * The ceilings for an artifact this application generated, derived from the ones it admits
+     * uploads under.
+     *
+     * Three of the ceilings above are upload *policy*: how large a file someone may send, how
+     * many pages, how many objects. They answer "should we accept this from outside", and
+     * applying them to something we produced ourselves refuses our own work — after the signers
+     * have assented, which is the worst possible moment. The completion report is the case: it
+     * is appended at finalization, and its length follows the envelope's recipients and events,
+     * so under `max_pages=1` every agreement failed on a report the sender never chose.
+     *
+     * The rest are resource ceilings: they bound the cost of *reading* whatever is in hand, and
+     * they still apply. The aggregate decoded ceiling is multiplied by the number of admitted
+     * documents the artifact was made from, since it holds all of them.
+     *
+     * Structure is bounded by construction rather than by policy. Pages: the caller passes what
+     * it actually wrote, which is a self-check, not a limit on the deployment. Objects: none,
+     * because the artifact holds its inputs' objects — each admitted under `max_objects` — plus
+     * the fixed per-page overhead the engine adds (catalog, page tree, page, form, content),
+     * which is why counting it against one upload's object ceiling rejected a source that was
+     * admitted at that ceiling.
+     *
+     * @param  int  $documents  How many admitted documents the artifact was made from.
+     * @param  int|null  $pages  Pages actually written, when the caller knows; null for none.
+     */
+    public function forGenerated(int $documents = 1, ?int $pages = null): self
+    {
+        return new self(
+            maxBytes: 0,
+            maxPages: $pages ?? 0,
+            maxObjects: 0,
+            maxDecodedStreamBytes: $this->maxDecodedStreamBytes,
+            maxDecompressedBytes: $this->maxDecompressedBytes > 0
+                ? $this->maxDecompressedBytes * max(1, $documents)
+                : $this->maxDecompressedBytes,
+            timeBudgetSeconds: $this->timeBudgetSeconds,
+            memoryBudgetBytes: $this->memoryBudgetBytes,
+        );
+    }
 }

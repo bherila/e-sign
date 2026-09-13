@@ -484,6 +484,52 @@ final class DocumentReadBudgetTest extends TestCase
     }
 
     /**
+     * A generated artifact is admitted as one, however long it is.
+     *
+     * The completion report is appended at finalization, after every signer has assented, and its
+     * length follows the envelope's recipients and events. Admitting it through the ceilings that
+     * say what a *sender* may upload made a long report refuse an agreement nobody could fix: at
+     * `max_pages=1`, the multi-page report failed every envelope. Here a one-page upload — at the
+     * ceiling, and legitimately so — takes a three-page appended artifact.
+     */
+    public function test_a_generated_artifact_is_not_held_to_the_upload_page_ceiling(): void
+    {
+        config(['esign.documents.max_pages' => 1]);
+        $this->forgetResolvedLimits();
+
+        $assembled = app(PdfAssembler::class)->assemble(
+            PdfFixtures::bytes('single-page-letter'),
+            [],
+            [PdfFixtures::bytes('multi-page-mixed-size')],
+        );
+
+        $this->assertCount(1, $assembled->sourcePages);
+        $this->assertCount(4, $assembled->outputPages);
+    }
+
+    /**
+     * Rebuilding a document adds the engine's own objects, and they are not the uploader's.
+     *
+     * This is the review path — `ReviewNormalizer` assembles with nothing appended — so the output
+     * was made from exactly one admitted document. tc-lib-pdf still writes its own catalog, page
+     * tree, page, form and content objects around the imported ones, so holding the output to the
+     * ceiling its single input was admitted under rejects a source that was accepted minutes
+     * earlier. The ceiling here is the source's own object count, which is the boundary case.
+     */
+    public function test_a_source_at_the_object_ceiling_can_still_be_rebuilt(): void
+    {
+        $bytes = PdfFixtures::bytes('multi-page-mixed-size');
+        $objects = app(PdfPreflight::class)->inspect($bytes)->metrics->objectCount;
+
+        config(['esign.documents.max_objects' => $objects]);
+        $this->forgetResolvedLimits();
+
+        $assembled = app(PdfAssembler::class)->assemble($bytes);
+
+        $this->assertCount(3, $assembled->outputPages);
+    }
+
+    /**
      * The assembled output is held to what it was made from, not to one upload's ceilings.
      *
      * Finalization appends the completion report to a document that was admitted on its own. A

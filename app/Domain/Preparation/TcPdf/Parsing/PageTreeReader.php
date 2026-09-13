@@ -98,7 +98,9 @@ final readonly class PageTreeReader
         $kids = $this->graph->dictEntryAsArray($node, 'Kids');
 
         if ($type === 'Page' || ($kids === null && $type !== 'Pages')) {
-            if (count($pages) >= $budget->limits->maxPages) {
+            // 0 is "no page ceiling", as it is for every other ceiling. A generated artifact is
+            // read that way: its page count is ours, not a policy about what may be uploaded.
+            if ($budget->limits->maxPages > 0 && count($pages) >= $budget->limits->maxPages) {
                 $budget->exhaustPages();
             }
 

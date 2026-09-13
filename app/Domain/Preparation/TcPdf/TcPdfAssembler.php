@@ -17,6 +17,7 @@ use App\Domain\Preparation\Geometry\PageGeometry;
 use App\Domain\Preparation\Geometry\PageRotation;
 use App\Domain\Preparation\Preflight\PreflightBudget;
 use App\Domain\Preparation\Preflight\PreflightBudgetException;
+use App\Domain\Preparation\Preflight\PreflightCode;
 use App\Domain\Preparation\Preflight\PreflightLimits;
 use Com\Tecnick\Pdf\Exception;
 use Com\Tecnick\Pdf\Import\ImportException;
@@ -107,7 +108,10 @@ final readonly class TcPdfAssembler implements PdfAssembler
         $this->assertAcceptable($pdfBytes);
 
         foreach ($appendedDocuments as $appended) {
-            $this->assertAcceptable($appended);
+            // Generated: the port takes appended documents to be artifacts this application
+            // produced (the completion report), so upload policy does not decide whether they may
+            // be appended. Every hazard check still does.
+            $this->assertAcceptable($appended, generated: true);
         }
 
         $startedAt = microtime(true);
@@ -144,8 +148,9 @@ final readonly class TcPdfAssembler implements PdfAssembler
             $written = $this->writePages($pdf, $pdfBytes, $sourcePages, $byPage, 0, $sourceBudget);
 
             foreach ($appendedDocuments as $appended) {
-                // Read and imported in one turn, on a budget that starts here.
-                $budget = $this->budget();
+                // Read and imported in one turn, on a budget that starts here, and on a generated
+                // artifact's ceilings: the report's length is the envelope's, not the uploader's.
+                $budget = $this->generatedBudget();
                 $geometry = $this->readGeometry($appended, $budget);
                 $written = $this->writePages($pdf, $appended, $geometry, $byPage, $written, $budget);
             }
@@ -176,7 +181,7 @@ final readonly class TcPdfAssembler implements PdfAssembler
         return new AssembledDocument(
             $result,
             $sourcePages,
-            $this->readGeometry($result, $this->outputBudget(count($appendedDocuments) + 1, $written)),
+            $this->readGeometry($result, $this->generatedBudget($written, count($appendedDocuments) + 1)),
             array_values($warnings),
             microtime(true) - $startedAt,
             max(0, memory_get_peak_usage(true) - $memoryBefore),
@@ -184,9 +189,27 @@ final readonly class TcPdfAssembler implements PdfAssembler
     }
 
     /**
+     * The rejections that are upload policy rather than a statement about the document.
+     *
+     * Everything else preflight rejects — encrypted, already signed, XFA, JavaScript, an embedded
+     * file, a launch action, an unreadable page tree — is a reason not to import these bytes at
+     * all, whoever produced them.
+     */
+    private const UPLOAD_POLICY_CODES = [
+        PreflightCode::PageLimitExceeded->value,
+        PreflightCode::SizeLimitExceeded->value,
+    ];
+
+    /**
+     * @param  bool  $generated  True for an artifact this application produced. It is still
+     *                           inspected — an unsafe document must not reach the importer by a
+     *                           different door — but it is not held to the ceilings that say what
+     *                           a *sender* may upload. Those would refuse our own completion
+     *                           report at finalization, after every signer has assented.
+     *
      * @throws UnsupportedSourceException
      */
-    private function assertAcceptable(string $pdfBytes): void
+    private function assertAcceptable(string $pdfBytes, bool $generated = false): void
     {
         if (! $this->preflight instanceof PdfPreflight) {
             return;
@@ -194,9 +217,15 @@ final readonly class TcPdfAssembler implements PdfAssembler
 
         $report = $this->preflight->inspect($pdfBytes);
 
-        if (! $report->isAccepted()) {
-            throw new UnsupportedSourceException($report->rejectionMessage());
+        if ($report->isAccepted()) {
+            return;
         }
+
+        if ($generated && array_diff($report->rejectionCodes(), self::UPLOAD_POLICY_CODES) === []) {
+            return;
+        }
+
+        throw new UnsupportedSourceException($report->rejectionMessage());
     }
 
     /** A fresh budget for one document, on this deployment's limits. */
@@ -206,34 +235,19 @@ final readonly class TcPdfAssembler implements PdfAssembler
     }
 
     /**
-     * The budget the output is read back under.
+     * A fresh budget for one artifact this application generated: an appended completion report,
+     * or this adapter's own output.
      *
-     * The output is not an upload. It is `$documents` documents, each admitted under this
-     * deployment's limits, written onto `$pages` pages — and in finalization one of them is the
-     * completion report, appended after every signer has assented. Held to one upload's ceilings,
-     * a document admitted at the page ceiling would be refused at finalization for the report's
-     * page, with the assent already given; so would one near the object or decoded-byte ceiling.
+     * What that means for each ceiling is {@see PreflightLimits::forGenerated()}; the short of it
+     * is that upload policy does not decide whether we may read our own work, while every ceiling
+     * that bounds the cost of reading still does.
      *
-     * So the counted ceilings are what the output was made from: exactly the pages this adapter
-     * wrote, and for objects and decoded bytes the sum of its inputs' allowances. Overlays add a
-     * few objects per field and are not separately counted; they fit inside the allowance of the
-     * appended report, which uses a small part of its own. A ceiling of 0, "no ceiling", stays 0.
-     * The per-stream ceiling and the backstops are unchanged: no stream is larger for having been
-     * copied, and a backstop bounds one read, whatever is being read.
+     * @param  int|null  $pages  Pages written, when this is the output and the count is known.
+     * @param  int  $documents  Admitted documents the artifact was made from.
      */
-    private function outputBudget(int $documents, int $pages): PreflightBudget
+    private function generatedBudget(?int $pages = null, int $documents = 1): PreflightBudget
     {
-        $summed = static fn (int $ceiling): int => $ceiling > 0 ? $ceiling * $documents : $ceiling;
-
-        return new PreflightBudget(new PreflightLimits(
-            maxBytes: $summed($this->limits->maxBytes),
-            maxPages: $pages,
-            maxObjects: $summed($this->limits->maxObjects),
-            maxDecodedStreamBytes: $this->limits->maxDecodedStreamBytes,
-            maxDecompressedBytes: $summed($this->limits->maxDecompressedBytes),
-            timeBudgetSeconds: $this->limits->timeBudgetSeconds,
-            memoryBudgetBytes: $this->limits->memoryBudgetBytes,
-        ), $this->clock);
+        return new PreflightBudget($this->limits->forGenerated($documents, $pages), $this->clock);
     }
 
     /**
