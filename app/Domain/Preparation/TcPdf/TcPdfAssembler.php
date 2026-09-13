@@ -114,9 +114,14 @@ final readonly class TcPdfAssembler implements PdfAssembler
         memory_reset_peak_usage();
         $memoryBefore = memory_get_peak_usage(true);
 
-        // One budget per input document, shared by every read of it: the geometry read here and
-        // the import in `writePages()`. The output is this adapter's own product and is read back
-        // under a budget of its own, sized to what it was made from (`outputBudget()`).
+        // One budget per input document, built when that document's own work begins and shared by
+        // every read of it: its geometry read and its import. Built then rather than all at once,
+        // because the backstops measure from the moment a budget exists — so a budget built before
+        // its document's turn is charged for whatever happened in between. Reading every appended
+        // document's geometry up front did exactly that: in finalization the completion report's
+        // budget carried the whole source import, and a review PDF near a backstop could make the
+        // small report exceed a ceiling of its own, after assent. The output is this adapter's own
+        // product and is read back under a budget sized to what it was made from (`outputBudget()`).
         $sourceBudget = $this->budget();
         $sourcePages = $this->readGeometry($pdfBytes, $sourceBudget);
         if ($sourcePages === []) {
@@ -136,11 +141,13 @@ final readonly class TcPdfAssembler implements PdfAssembler
         $pdf = new Tcpdf('pt', true, false, true);
 
         try {
-            $written = 0;
+            $written = $this->writePages($pdf, $pdfBytes, $sourcePages, $byPage, 0, $sourceBudget);
 
-            $documents = [[$pdfBytes, $sourcePages, $sourceBudget], ...$this->appendedWithGeometry($appendedDocuments)];
-            foreach ($documents as [$bytes, $geometry, $budget]) {
-                $written = $this->writePages($pdf, $bytes, $geometry, $byPage, $written, $budget);
+            foreach ($appendedDocuments as $appended) {
+                // Read and imported in one turn, on a budget that starts here.
+                $budget = $this->budget();
+                $geometry = $this->readGeometry($appended, $budget);
+                $written = $this->writePages($pdf, $appended, $geometry, $byPage, $written, $budget);
             }
 
             $result = $pdf->getOutPDFString();
@@ -169,7 +176,7 @@ final readonly class TcPdfAssembler implements PdfAssembler
         return new AssembledDocument(
             $result,
             $sourcePages,
-            $this->readGeometry($result, $this->outputBudget(count($documents), $written)),
+            $this->readGeometry($result, $this->outputBudget(count($appendedDocuments) + 1, $written)),
             array_values($warnings),
             microtime(true) - $startedAt,
             max(0, memory_get_peak_usage(true) - $memoryBefore),
@@ -190,22 +197,6 @@ final readonly class TcPdfAssembler implements PdfAssembler
         if (! $report->isAccepted()) {
             throw new UnsupportedSourceException($report->rejectionMessage());
         }
-    }
-
-    /**
-     * @param  array<int, string>  $appendedDocuments
-     * @return list<array{string, array<int, PageGeometry>, PreflightBudget}>
-     */
-    private function appendedWithGeometry(array $appendedDocuments): array
-    {
-        return array_values(array_map(
-            function (string $bytes): array {
-                $budget = $this->budget();
-
-                return [$bytes, $this->readGeometry($bytes, $budget), $budget];
-            },
-            $appendedDocuments,
-        ));
     }
 
     /** A fresh budget for one document, on this deployment's limits. */

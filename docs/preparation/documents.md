@@ -208,7 +208,9 @@ not catch an exception about it.
 **The import engine is the one reader that cannot be handed a budget.** tc-lib-pdf parses the
 source again with a parser it builds itself, keeping only two of the options it is given. The
 assembler covers it from outside: the geometry read and the import share one budget per document,
-whose time and memory backstops are consulted after each imported page (the last included); the
+built when that document's own work begins — the backstops measure from the moment a budget
+exists, so reading every appended document up front charged the completion report for the source's
+import — whose time and memory backstops are consulted after each imported page (the last included); the
 import is pinned to not decoding page content; and what it does decode is the same bytes, through
 the same filters, that the budgeted geometry read already decoded — at a per-stream ceiling the
 assembler keeps equal to the engine's by refusing any `max_decoded_stream_bytes` above it.

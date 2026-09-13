@@ -427,6 +427,63 @@ final class DocumentReadBudgetTest extends TestCase
     }
 
     /**
+     * A document's budget starts with that document's work, not before it.
+     *
+     * The time and memory backstops measure from the moment a budget is built, so a budget built
+     * early is charged for whatever happens in between. Assembly used to read every appended
+     * document's geometry — building each one's budget — before importing the source, so in
+     * finalization the completion report's budget carried the whole source import, and a review
+     * PDF near the backstop could make the small report exceed a ceiling of its own. Both
+     * documents fit; together, charged to each other, they did not.
+     *
+     * The clock records what the call stack was doing at each look, which makes the lifetime
+     * visible: between building one document's budget and the next, that document's pages must
+     * have been imported.
+     */
+    public function test_each_document_budget_starts_with_its_own_work(): void
+    {
+        /** @var list<string> $events */
+        $events = [];
+        $clock = static function () use (&$events): float {
+            foreach (debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS) as $frame) {
+                if (($frame['class'] ?? null) === PreflightBudget::class && $frame['function'] === '__construct') {
+                    $events[] = 'budget';
+
+                    return 0.0;
+                }
+
+                if (($frame['class'] ?? null) === TcPdfAssembler::class && $frame['function'] === 'writePages') {
+                    $events[] = 'import';
+
+                    return 0.0;
+                }
+            }
+
+            return 0.0;
+        };
+
+        $assembler = new TcPdfAssembler(null, resource_path('fonts'), app(PreflightLimits::class), $clock);
+        $assembler->assemble(
+            PdfFixtures::bytes('multi-page-mixed-size'),
+            [],
+            [PdfFixtures::bytes('single-page-letter')],
+        );
+
+        $budgets = array_keys($events, 'budget', true);
+        $this->assertGreaterThan(1, count($budgets), 'The appended document did not get a budget of its own.');
+
+        for ($i = 1; $i < count($budgets); $i++) {
+            $between = array_slice($events, $budgets[$i - 1], $budgets[$i] - $budgets[$i - 1]);
+            $this->assertContains(
+                'import',
+                $between,
+                'A document\'s budget was built before the previous document had been imported, so it is '
+                .'charged for work that is not its own.',
+            );
+        }
+    }
+
+    /**
      * The assembled output is held to what it was made from, not to one upload's ceilings.
      *
      * Finalization appends the completion report to a document that was admitted on its own. A
