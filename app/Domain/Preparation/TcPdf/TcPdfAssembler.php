@@ -18,8 +18,6 @@ use App\Domain\Preparation\Geometry\PageRotation;
 use App\Domain\Preparation\Preflight\PreflightBudget;
 use App\Domain\Preparation\Preflight\PreflightBudgetException;
 use App\Domain\Preparation\Preflight\PreflightLimits;
-use App\Domain\Preparation\TcPdf\Parsing\PageTreeReader;
-use App\Domain\Preparation\TcPdf\Parsing\PdfObjectGraph;
 use Com\Tecnick\Pdf\Exception;
 use Com\Tecnick\Pdf\Import\ImportException;
 use Com\Tecnick\Pdf\Import\ImportUnsupportedFeatureException;
@@ -476,11 +474,9 @@ final readonly class TcPdfAssembler implements PdfAssembler
         // at all and walked to the page-tree reader's built-in ceiling — so a deployment that
         // raised `max_pages` could import a document and then fail to read its geometry.
         try {
-            $graph = PdfObjectGraph::parse($pdfBytes, $budget);
-
             return array_map(
                 static fn ($page): PageGeometry => $page->geometry,
-                (new PageTreeReader($graph))->pages($budget),
+                DocumentRead::on($pdfBytes, $budget)->pages(),
             );
         } catch (Throwable $exception) {
             throw new AssemblyException('Page geometry could not be read: '.$exception->getMessage(), previous: $exception);

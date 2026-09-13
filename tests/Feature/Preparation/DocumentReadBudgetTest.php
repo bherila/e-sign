@@ -470,13 +470,71 @@ final class DocumentReadBudgetTest extends TestCase
                 $offenders[] = $path.': parses without a budget';
             }
 
-            // `pages()` with no argument walks to the page-tree reader's own default.
-            if (preg_match('/->pages\(\s*\)/', $source) === 1) {
-                $offenders[] = $path.': walks the page tree without a ceiling';
+        }
+
+        $this->assertSame([], $offenders, implode("\n", $offenders));
+
+        // The page-tree walk is reached through one call, in the boundary below, and it must hand
+        // over that read's budget: `pages()` with no argument would walk to the page-tree reader's
+        // own built-in ceiling instead of this deployment's.
+        $this->assertStringContainsString(
+            '->pages($this->budget)',
+            (string) file_get_contents(base_path('app/Domain/Preparation/TcPdf/DocumentRead.php')),
+        );
+    }
+
+    /**
+     * Reading a document happens at one boundary, so admission cannot be skipped by not asking.
+     *
+     * The byte ceiling used to live inside preflight, which made it a ceiling on *callers who ran
+     * preflight*. `DocumentRead` is where a document is admitted and parsed, so a reader that
+     * bypasses preflight — the facade's placement path does — is held to it too. A parse outside
+     * that boundary is how the next ceiling goes missing, so it is refused in the source.
+     */
+    public function test_only_the_document_read_boundary_parses_a_document(): void
+    {
+        $offenders = [];
+
+        foreach ($this->domainSources() as $path => $source) {
+            if (str_ends_with($path, 'TcPdf/DocumentRead.php')) {
+                continue;
+            }
+
+            if (str_contains($source, 'PdfObjectGraph::parse(')) {
+                $offenders[] = $path.': parses outside DocumentRead';
+            }
+
+            if (preg_match('/new PageTreeReader\(/', $source) === 1) {
+                $offenders[] = $path.': walks a page tree outside DocumentRead';
             }
         }
 
         $this->assertSame([], $offenders, implode("\n", $offenders));
+    }
+
+    /**
+     * The byte ceiling applies to whoever reads the document, not to whoever ran preflight.
+     *
+     * Both cells matter: the caller with a budget is told which ceiling stopped it, and the one
+     * without gets the ordinary unreadable-document answer. Neither gets a full parse of a
+     * document the deployment says is too large to read.
+     */
+    public function test_a_document_over_the_byte_ceiling_is_refused_by_extraction(): void
+    {
+        $bytes = PdfFixtures::bytes('multi-page-mixed-size');
+        $limits = new PreflightLimits(maxBytes: strlen($bytes) - 1);
+        $locator = new TcPdfTextLocator($limits);
+
+        try {
+            $locator->extract($bytes, null, new PreflightBudget($limits));
+            $this->fail('A document over the byte ceiling was parsed for a caller with a budget.');
+        } catch (PreflightBudgetException $refused) {
+            $this->assertSame(PreflightCode::SizeLimitExceeded, $refused->preflightCode);
+        }
+
+        $this->expectException(TextExtractionException::class);
+
+        $locator->extract($bytes);
     }
 
     /** @return iterable<string, string> */

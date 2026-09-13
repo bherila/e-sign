@@ -219,6 +219,13 @@ assembler wrote, and for objects and decoded bytes the sum of its inputs' allowa
 appends the completion report to a document admitted on its own, after every signer has assented,
 so a document admitted at `max_pages` must still take the report's pages.
 
+**One boundary admits and parses a document: `DocumentRead`.** Preflight, text extraction and
+assembly all read documents, and admission (is this document allowed to be read at all) and
+accounting (whose budget pays) are the two decisions that must not be made per caller. The byte
+ceiling used to live inside preflight, which made it a ceiling on callers who *ran* preflight —
+text extraction called straight from the Firma facade parsed a document of any size. It is now
+applied where the document is admitted, before the parse, and the parse happens once per read.
+
 **Work is reported to the budget, and the budget decides what it costs.** A site says what it just
 did, in one of three units, and `PreflightBudget` alone holds the intervals and looks at the
 ceilings:
@@ -242,7 +249,7 @@ when a known one stops honouring the configuration and when a new one is added t
 
 | Setting | Default | Enforced by | What it rejects |
 |---|---|---|---|
-| `max_bytes` | 32 MiB | Form Request (`max:` in KB) **and** the preflight parser | An upload larger than the ceiling, before it is parsed. `size_limit_exceeded`. |
+| `max_bytes` | 32 MiB | Form Request (`max:` in KB) **and** `DocumentRead`, on every read | A document larger than the ceiling, before it is parsed. `size_limit_exceeded`. |
 | `max_pages` | 500 | Every page-tree walk of an input document: preflight, text extraction, assembly | A page tree with more pages than the ceiling. `page_limit_exceeded`. The assembled output (a document plus its completion report) is held to the pages actually written, not to this. |
 | `max_objects` | 100,000 | Every parse, **while the document is read** | A document that declares or materializes more indirect objects than the ceiling. `object_limit_exceeded`. |
 | `max_decoded_stream_bytes` | 32 MiB | Every parse, per decoded stream | One stream that inflates past the ceiling. `decompression_limit_exceeded`. Cannot be raised above 32 MiB or set to 0: the import engine re-reads each document under that fixed ceiling, so the assembler refuses a value it could not keep. |

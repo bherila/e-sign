@@ -18,7 +18,6 @@ use App\Domain\Preparation\TcPdf\Parsing\FlattenedPage;
 use App\Domain\Preparation\TcPdf\Parsing\FontDictionaryReader;
 use App\Domain\Preparation\TcPdf\Parsing\MalformedPageTreeException;
 use App\Domain\Preparation\TcPdf\Parsing\Matrix;
-use App\Domain\Preparation\TcPdf\Parsing\PageTreeReader;
 use App\Domain\Preparation\TcPdf\Parsing\PdfFontModel;
 use App\Domain\Preparation\TcPdf\Parsing\PdfObjectGraph;
 use App\Domain\Preparation\TcPdf\Parsing\TextState;
@@ -79,14 +78,17 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
      */
     public function extract(string $pdfBytes, ?int $page = null, ?PreflightBudget $budget = null): array
     {
-        // One budget for this read, and every ceiling applied below comes from it. When the
-        // caller supplies none this method owns one, which is not the same as being unbounded:
-        // it means nobody outside is accounting for the cost, so nobody outside is told about it
+        // One read of this document, which owns its admission and its parse. When the caller
+        // supplies no budget the read owns one, which is not the same as being unbounded: it
+        // means nobody outside is accounting for the cost, so nobody outside is told about it
         // either. See the catch below.
-        $ceiling = $budget ?? new PreflightBudget($this->limits);
+        $read = $budget instanceof PreflightBudget
+            ? DocumentRead::on($pdfBytes, $budget)
+            : DocumentRead::under($pdfBytes, $this->limits);
+        $ceiling = $read->budget;
 
         try {
-            $graph = $this->parse($pdfBytes, $ceiling);
+            $graph = $this->parse($read);
 
             if ($graph->isEncrypted()) {
                 throw new TextExtractionException('Text cannot be extracted from an encrypted document.');
@@ -96,7 +98,7 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
 
             // The budget's page ceiling, so a document over it is refused as a ceiling — reported
             // to whoever owns the budget, by the catch below — and never as a broken page tree.
-            foreach ((new PageTreeReader($graph))->pages($ceiling) as $flattened) {
+            foreach ($read->pages() as $flattened) {
                 $pageNumber = $flattened->geometry->pageNumber;
                 if ($page !== null && $pageNumber !== $page) {
                     continue;
@@ -140,10 +142,10 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
      * @throws TextExtractionException
      * @throws PreflightBudgetException
      */
-    private function parse(string $pdfBytes, PreflightBudget $budget): PdfObjectGraph
+    private function parse(DocumentRead $read): PdfObjectGraph
     {
         try {
-            return PdfObjectGraph::parse($pdfBytes, $budget);
+            return $read->graph();
         } catch (PreflightBudgetException $exhausted) {
             // Answered by the caller of `extract()`, which knows whose budget this was. Letting
             // the catch below flatten it would report a decompression bomb as a corrupt file.

@@ -214,6 +214,28 @@ final class PreflightBudget
     }
 
     /**
+     * Refuse a document larger than the byte ceiling, before it is read.
+     *
+     * Raised at the document-read boundary rather than inside preflight, so a caller that reads
+     * a document without running preflight first — the Firma facade's placement path did — is
+     * held to the same ceiling as an upload.
+     *
+     * @throws PreflightBudgetException
+     */
+    public function exhaustBytes(int $size): never
+    {
+        throw new PreflightBudgetException(
+            PreflightCode::SizeLimitExceeded,
+            sprintf(
+                'The file is %d bytes; the limit is %d bytes. Split the document or reduce '
+                .'embedded image resolution before uploading.',
+                $size,
+                $this->limits->maxBytes,
+            ),
+        );
+    }
+
+    /**
      * Refuse a page tree that reaches more pages than the ceiling allows.
      *
      * Raised by the page-tree walk as it reaches the page past the ceiling, so a long document
