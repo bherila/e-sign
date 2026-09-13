@@ -4,8 +4,14 @@ Self-hosted preparation, electronic signing, cryptographic sealing, and retentio
 agreements, built as an independently deployable Laravel application with a documented native
 API and a versioned Firma-compatible HTTP/webhook facade.
 
-**Status:** scaffold. Nothing here signs a document yet. The build order, acceptance gates, and
-open questions live in [docs/HANDOFF.md](docs/HANDOFF.md) and the GitHub issues.
+**Status:** pre-release, not yet deployed anywhere. The sealing pipeline, signer flow, evidence
+model, native API, Firma-compatible facade, delivery outbox and deployment profiles are built and
+tested (Stages 0, 1, 3, 4 and 5 are complete by their child issues). Anchor placement in the
+editor (Stage 2, #23) is in progress, the first consumer has landed its provider boundary
+(#42) with the staged pilot (#43) still ahead, and no release has been cut. The build order,
+acceptance gates, and open questions live in [docs/HANDOFF.md](docs/HANDOFF.md) and the GitHub
+issues; [docs/assurance.md](docs/assurance.md) says what an executed document does and does
+not prove.
 
 "BWH eSign" is a working label, not a cleared trademark.
 
