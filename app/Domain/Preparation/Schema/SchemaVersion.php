@@ -9,7 +9,7 @@ use InvalidArgumentException;
 /**
  * The `schema_version` of a field document, and the policy for accepting one.
  *
- * Policy (docs/preparation/field-schema.md):
+ * Policy (docs/preparation/anchors.md):
  *
  * - An additive change — a new optional property, a new field type, a new prefill variable —
  *   bumps the **minor** version. A reader of a later minor version may encounter properties it
@@ -27,7 +27,7 @@ final readonly class SchemaVersion
      * The version this build implements and writes.
      *
      * 1.1 adds the optional anchor members `placement`, `required` and `tolerance`, and the
-     * service-written `resolved` receipt (docs/preparation/field-schema.md). They are additive and
+     * service-written `resolved` receipt (docs/preparation/anchors.md). They are additive and
      * optional, which is exactly the case the policy above says bumps the minor version: a 1.0
      * reader validating with `additionalProperties: false` must not be handed a document that
      * still calls itself 1.0 and carries members its contract does not declare.

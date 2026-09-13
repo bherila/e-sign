@@ -81,7 +81,7 @@ enum ValidationCode: string
      * rather than rounded. Rounding it would be a *transformation*, and two implementations that
      * transform can disagree about the result — which is a disagreement about the document's
      * digest, and that digest is what every attestation binds
-     * (docs/preparation/field-schema.md).
+     * (docs/preparation/anchors.md).
      */
     case CoordinateTooPrecise = 'coordinate_too_precise';
 
@@ -90,12 +90,36 @@ enum ValidationCode: string
      *
      * The compatibility option for an absent anchor is narrow on purpose: it says "this box may
      * legitimately not exist in this document", which can only be true of a box nobody has to
-     * fill in. See docs/preparation/field-schema.md.
+     * fill in. See docs/preparation/anchors.md.
      */
     case AnchorOptionalOnRequiredField = 'anchor_optional_on_required_field';
 
     /** A `cross_check` anchor resolved further than its tolerance from the declared rectangle. */
     case AnchorCrossCheckFailed = 'anchor_cross_check_failed';
+
+    /** A required anchor's text does not occur anywhere in scope. */
+    case AnchorNotFound = 'anchor_not_found';
+
+    /** An `occurrence` of `sole` matched more than once. Ambiguity is never resolved by guessing. */
+    case AnchorAmbiguous = 'anchor_ambiguous';
+
+    /** An `occurrence` index beyond the number of matches in scope. */
+    case AnchorOccurrenceOutOfRange = 'anchor_occurrence_out_of_range';
+
+    /** The document's positioned text could not be extracted, so no anchor in it can be resolved. */
+    case AnchorTextUnreadable = 'anchor_text_unreadable';
+
+    /** An anchor resolved to a rectangle that does not fit on the page it was found on. */
+    case AnchorResolvedOffPage = 'anchor_resolved_off_page';
+
+    /**
+     * A resolution receipt that the resolver could not have produced.
+     *
+     * Not a caller's error in the ordinary case: it means this service wrote a receipt that
+     * contradicts the request it answers, which is a bug in resolution rather than in the
+     * document. See `Anchoring\ReceiptVerifier`.
+     */
+    case AnchorReceiptInconsistent = 'anchor_receipt_inconsistent';
 
     /**
      * An anchor option that promises behaviour this deployment does not perform yet.

@@ -8,6 +8,7 @@ use App\Domain\Preparation\Contracts\PdfTextLocator;
 use App\Domain\Preparation\Geometry\CoordinateTransform;
 use App\Domain\Preparation\Geometry\InvalidGeometryException;
 use App\Domain\Preparation\Geometry\NativeRect;
+use App\Domain\Preparation\Geometry\PageGeometry;
 use App\Domain\Preparation\Geometry\UserSpacePoint;
 use App\Domain\Preparation\Preflight\PreflightBudget;
 use App\Domain\Preparation\Preflight\PreflightBudgetException;
@@ -78,16 +79,7 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
      */
     public function extract(string $pdfBytes, ?int $page = null, ?PreflightBudget $budget = null): array
     {
-        // One read of this document, which owns its admission and its parse. When the caller
-        // supplies no budget the read owns one, which is not the same as being unbounded: it
-        // means nobody outside is accounting for the cost, so nobody outside is told about it
-        // either. See the catch below.
-        $read = $budget instanceof PreflightBudget
-            ? DocumentRead::on($pdfBytes, $budget)
-            : DocumentRead::under($pdfBytes, $this->limits);
-        $ceiling = $read->budget;
-
-        try {
+        return $this->reading($pdfBytes, $budget, function (DocumentRead $read) use ($page): array {
             $graph = $this->parse($read);
 
             if ($graph->isEncrypted()) {
@@ -97,19 +89,64 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
             $runs = [];
 
             // The budget's page ceiling, so a document over it is refused as a ceiling — reported
-            // to whoever owns the budget, by the catch below — and never as a broken page tree.
+            // to whoever owns the budget, by `reading()` — and never as a broken page tree.
             foreach ($read->pages() as $flattened) {
                 $pageNumber = $flattened->geometry->pageNumber;
                 if ($page !== null && $pageNumber !== $page) {
                     continue;
                 }
 
-                foreach ($this->extractPage($graph, $flattened, $ceiling) as $run) {
+                foreach ($this->extractPage($graph, $flattened, $read->budget) as $run) {
                     $runs[] = $run;
                 }
             }
 
             return $runs;
+        });
+    }
+
+    /**
+     * @return array<int, PageGeometry>
+     */
+    public function pages(string $pdfBytes, ?PreflightBudget $budget = null): array
+    {
+        return $this->reading($pdfBytes, $budget, function (DocumentRead $read): array {
+            $this->parse($read);
+
+            return array_map(
+                static fn (FlattenedPage $flattened): PageGeometry => $flattened->geometry,
+                $read->pages(),
+            );
+        });
+    }
+
+    /**
+     * One read of one document, under the rules both public methods promise.
+     *
+     * Held in one place because they are one rule. `extract()` and `pages()` each answering a
+     * ceiling or an unreadable page tree in their own words is two handlers that must stay
+     * identical, and two such handlers drift.
+     *
+     * @template T
+     *
+     * @param  \Closure(DocumentRead): T  $work
+     * @return T
+     *
+     * @throws TextExtractionException
+     * @throws PreflightBudgetException Only to a caller that supplied the budget.
+     */
+    private function reading(string $pdfBytes, ?PreflightBudget $budget, \Closure $work): mixed
+    {
+        // One read of this document, which owns its admission and its parse. When the caller
+        // supplies no budget the read owns one, which is not the same as being unbounded: it
+        // means nobody outside is accounting for the cost, so nobody outside is told about it
+        // either. See the catch below.
+        $read = $budget instanceof PreflightBudget
+            ? DocumentRead::on($pdfBytes, $budget)
+            : DocumentRead::under($pdfBytes, $this->limits);
+
+        try {
+            return $work($read);
         } catch (PreflightBudgetException $exhausted) {
             // Whose ceiling it was decides who hears about it. A caller that supplied a budget
             // opted into accounting for this document's cost and can tell "too expensive" from

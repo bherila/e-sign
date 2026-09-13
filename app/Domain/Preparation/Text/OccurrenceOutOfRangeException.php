@@ -15,6 +15,6 @@ final class OccurrenceOutOfRangeException extends AnchorResolutionException
             $anchor->occurrence->describe(),
             $matches,
             $matches === 1 ? 'match was' : 'matches were',
-        ));
+        ), $matches);
     }
 }
