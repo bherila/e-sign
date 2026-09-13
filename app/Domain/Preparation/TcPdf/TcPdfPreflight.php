@@ -138,7 +138,7 @@ final readonly class TcPdfPreflight implements PdfPreflight
             // be read, which is what it used to be reported as.
             $flattened = (new PageTreeReader($graph))->pages($budget);
             foreach ($flattened as $page) {
-                $budget->tick();
+                $budget->step();
                 $pages[] = $page->geometry;
 
                 if ($page->geometry->userUnit !== 1.0) {
@@ -219,7 +219,7 @@ final readonly class TcPdfPreflight implements PdfPreflight
         $codes = [];
 
         foreach ($graph->objectRefs() as $ref) {
-            $budget->tick();
+            $budget->step();
 
             foreach ($graph->object($ref) as $entry) {
                 $this->scanEntry($graph, $entry, $codes, 0);

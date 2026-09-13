@@ -399,6 +399,53 @@ emitBomb('cmap-flood', $writer->build($root), [
         .'the same document: the page walk charges nothing while the fonts it needs are being read.',
 ]);
 
+/**
+ * A Type0 (composite) font whose CIDFont descendant carries the given /W array, and one page
+ * showing a two-byte code in it. The /W array is the payload: `cFirst cLast w` triples are three
+ * tokens each and expand to one width per CID in the range.
+ */
+function type0Page(PdfFixtureWriter $writer, string $widths): int
+{
+    $descendantObj = $writer->add(
+        '<< /Type /Font /Subtype /CIDFontType2 /BaseFont /Synthetic'
+        .' /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >>'
+        .' /DW 1000 /W ['.$widths.'] >>'
+    );
+    $fontObj = $writer->add(sprintf(
+        '<< /Type /Font /Subtype /Type0 /BaseFont /Synthetic /Encoding /Identity-H'
+        .' /DescendantFonts [%d 0 R] >>',
+        $descendantObj,
+    ));
+
+    $content = "BT\n/F1 12 Tf\n72 720 Td\n<0041> Tj\nET\n";
+    $contentObj = $writer->addStream('<< /Filter /FlateDecode >>', (string) gzcompress($content, 9));
+
+    $pagesObj = $writer->reserve();
+    $pageObj = $writer->add(sprintf(
+        '<< /Type /Page /Parent %d 0 R /MediaBox [0 0 612 792] /CropBox [0 0 612 792] /Rotate 0'
+        .' /Resources << /Font << /F1 %d 0 R >> >> /Contents %d 0 R >>',
+        $pagesObj,
+        $fontObj,
+        $contentObj,
+    ));
+    $writer->put($pagesObj, '<< /Type /Pages /Kids ['.$pageObj.' 0 R] /Count 1 >>');
+
+    return $writer->add('<< /Type /Catalog /Pages '.$pagesObj.' 0 R >>');
+}
+
+$writer = new PdfFixtureWriter;
+$root = type0Page($writer, trim(str_repeat('0 65535 500 ', 16)));
+emitBomb('cid-width-flood', $writer->build($root), [
+    'description' => 'One page in a Type0 font whose /W array is sixteen full-width CID ranges.',
+    'expected_preflight' => 'accept',
+    'expected_rejections' => [],
+    'decoded_bytes_if_unbounded' => 0,
+    'page_count' => 1,
+    'proves' => 'A font dictionary is charged for what it expands to, not the bytes it was read from: '
+        .'sixteen three-token triples are a million width assignments, and preflight never reads a '
+        .'font at all, so only the document\'s budget can stop it.',
+]);
+
 file_put_contents(
     BOMB_OUT_DIR.'/manifest.json',
     json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)."\n",

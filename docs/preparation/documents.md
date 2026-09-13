@@ -219,6 +219,22 @@ assembler wrote, and for objects and decoded bytes the sum of its inputs' allowa
 appends the completion report to a document admitted on its own, after every signer has assented,
 so a document admitted at `max_pages` must still take the report's pages.
 
+**Work is reported to the budget, and the budget decides what it costs.** A site says what it just
+did, in one of three units, and `PreflightBudget` alone holds the intervals and looks at the
+ceilings:
+
+| Report | Unit | Reported by |
+|---|---|---|
+| `scan($bytes)` | bytes read or advanced over | the content-stream tokenizer, a shown string's glyphs |
+| `expand($entries)` | entries materialised from a compact source | `/ToUnicode` CMap ranges, a CIDFont's `/W` ranges |
+| `step()` | one coarse unit finished | an object, a page, an operation, an imported page |
+
+The unit matters because the cheap form and the expensive form of the same input are not
+proportional: `<0000> <FFFF> <0041>` is three tokens and 65,536 map entries, and a `/W` triple of
+`0 65535 500` is three tokens and 65,536 widths. A site that counted its own units and chose its own
+interval is a site that can be forgotten, which is what a content stream, a `/ToUnicode` map and a
+`/W` array each were in turn.
+
 `tests/Feature/Preparation/DocumentReadBudgetTest.php` holds the list of readers and fails both
 when a known one stops honouring the configuration and when a new one is added that defaults.
 

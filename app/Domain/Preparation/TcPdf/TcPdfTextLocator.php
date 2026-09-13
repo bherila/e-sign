@@ -58,9 +58,10 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
      * One operator is not one unit of work: a single `Tj` operand can be as long as the stream
      * that holds it, and turning it into codes, text and an advance costs several times its
      * length in memory. Decoding it in slices bounds how far that work runs before the budget
-     * sees it. Even, so a slice never splits a two-byte code of a composite font.
+     * sees it. Even, so a slice never splits a two-byte code of a composite font, and the
+     * budget's own interval so a slice is one report.
      */
-    private const GLYPH_BYTES_PER_TICK = 4096;
+    private const GLYPH_BYTES_PER_TICK = PreflightBudget::SCAN_BYTES_PER_TICK;
 
     /**
      * @param  PreflightLimits  $limits  The ceilings this deployment reads documents under, used
@@ -218,9 +219,9 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
             // describes the document, so checking between pages — or even per produced run —
             // lets a single stream spend the whole budget before anything looks.
             //
-            // Not the only charge. The tokenizer charges the tokens it reads, which an operation
-            // count cannot see, and `showArray()` charges the glyphs of one long string.
-            $budget->tick();
+            // Not the only charge. The tokenizer reports the bytes it scans, which an operation
+            // count cannot see, and `showArray()` reports the glyphs of one long string.
+            $budget->step();
 
             switch ($operation->operator) {
                 case 'q':
@@ -465,9 +466,10 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
 
             $length = strlen($item[1]);
             for ($offset = 0; $offset < $length; $offset += self::GLYPH_BYTES_PER_TICK) {
-                $budget->tick();
+                $slice = substr($item[1], $offset, self::GLYPH_BYTES_PER_TICK);
+                $budget->scan(strlen($slice));
 
-                $codes = $font->codes(substr($item[1], $offset, self::GLYPH_BYTES_PER_TICK));
+                $codes = $font->codes($slice);
                 $text .= $font->decode($codes);
 
                 foreach ($codes as $code) {

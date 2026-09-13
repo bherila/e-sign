@@ -28,27 +28,21 @@ final class ContentStreamTokenizer
     /** Bounded so a malformed stream cannot grow the operand list without limit. */
     private const MAX_OPERANDS = 4096;
 
-    /**
-     * Bytes advanced over between two looks at the budget.
-     *
-     * A caller that charges per yielded operation does not see this work: a stream of
-     * operands with no operator yields nothing at all, and a single operation can carry an
-     * array of thousands of tokens. So the tokenizer charges its own work.
-     *
-     * The unit is the byte, not the token, because a token is not a bounded amount of work:
-     * one comment, one run of whitespace, or one string can be the whole stream. Every loop
-     * that advances the offset looks at it, so no loop — however few tokens it yields — scans
-     * more than this many bytes without the budget being consulted. Every token consumes at
-     * least one byte, so tokens are bounded by the same count.
-     */
-    private const BYTES_PER_TICK = 4096;
-
     private int $offset = 0;
 
     private int $length;
 
-    /** The offset at which the budget is next consulted. */
-    private int $checkAt = self::BYTES_PER_TICK;
+    /**
+     * The offset at which the bytes scanned so far are reported to the budget.
+     *
+     * Reported in batches rather than per byte, because a comparison per byte is what a
+     * scanning loop can afford and a method call per byte is not. The batch is the budget's
+     * interval, so the tokenizer decides only *that* it advanced, never what advancing costs.
+     */
+    private int $checkAt = PreflightBudget::SCAN_BYTES_PER_TICK;
+
+    /** The offset already reported. */
+    private int $charged = 0;
 
     /**
      * @param  PreflightBudget  $budget  The running cost of reading the document this stream
@@ -115,17 +109,18 @@ final class ContentStreamTokenizer
     }
 
     /**
-     * Consult the budget, and schedule the next look.
+     * Report the bytes advanced over since the last report.
      *
      * Every loop that advances the offset compares it with `$checkAt` inline and calls this
-     * when it is reached; the comparison is per byte, the call is per `BYTES_PER_TICK`.
+     * when it is reached.
      *
      * @throws PreflightBudgetException
      */
     private function charge(): void
     {
-        $this->budget->tick();
-        $this->checkAt = $this->offset + self::BYTES_PER_TICK;
+        $this->budget->scan($this->offset - $this->charged);
+        $this->charged = $this->offset;
+        $this->checkAt = $this->offset + PreflightBudget::SCAN_BYTES_PER_TICK;
     }
 
     /** @return array{string, mixed} */

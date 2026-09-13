@@ -193,6 +193,7 @@ final class DocumentReadBudgetTest extends TestCase
         yield 'one shown string a megabyte long' => ['long-shown-string'];
         yield 'half a million operands and no operator' => ['operand-flood'];
         yield 'a font whose /ToUnicode map is a megabyte of entries' => ['cmap-flood'];
+        yield 'a font whose /W array expands to a million widths' => ['cid-width-flood'];
     }
 
     /**

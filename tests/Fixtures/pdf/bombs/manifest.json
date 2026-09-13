@@ -102,5 +102,16 @@
         "name": "cmap-flood",
         "file": "cmap-flood.pdf",
         "bytes": 3453
+    },
+    {
+        "description": "One page in a Type0 font whose /W array is sixteen full-width CID ranges.",
+        "expected_preflight": "accept",
+        "expected_rejections": [],
+        "decoded_bytes_if_unbounded": 0,
+        "page_count": 1,
+        "proves": "A font dictionary is charged for what it expands to, not the bytes it was read from: sixteen three-token triples are a million width assignments, and preflight never reads a font at all, so only the document's budget can stop it.",
+        "name": "cid-width-flood",
+        "file": "cid-width-flood.pdf",
+        "bytes": 1147
     }
 ]

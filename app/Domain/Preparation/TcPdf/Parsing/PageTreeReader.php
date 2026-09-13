@@ -103,6 +103,7 @@ final readonly class PageTreeReader
             }
 
             $pages[] = $this->flatten(count($pages) + 1, $node, $inherited);
+            $budget->step();
 
             return;
         }

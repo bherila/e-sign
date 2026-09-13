@@ -14,27 +14,15 @@ use App\Domain\Preparation\Preflight\PreflightBudgetException;
  * the same tokenizer is used. Only `bfchar` and `bfrange` sections are interpreted:
  * they are the only ones that carry the mapping.
  */
-final class ToUnicodeCMapReader
+final readonly class ToUnicodeCMapReader
 {
-    /**
-     * Entries written to the map between two looks at the budget.
-     *
-     * Lexing is charged by the tokenizer, but a map is not the size of its source: one
-     * `bfrange` of three short tokens expands to 65,536 entries, and one operation may carry
-     * over a thousand of them. So the expansion is charged in the unit it produces, and every
-     * entry — from `bfchar`, a `bfrange`, or a `bfrange` array — goes through `record()`.
-     */
-    private const ENTRIES_PER_TICK = 4096;
-
-    private int $entries = 0;
-
     /**
      * @param  PreflightBudget  $budget  The document's. A CMap is a stream of the document being
      *                                   read, and lexing it is as much a part of that read as
      *                                   lexing a page: a font can carry a map of millions of
      *                                   entries inside one allowed stream.
      */
-    public function __construct(private readonly PreflightBudget $budget) {}
+    public function __construct(private PreflightBudget $budget) {}
 
     /**
      * @return array<int, string> Character code => UTF-8 string.
@@ -64,10 +52,7 @@ final class ToUnicodeCMapReader
     private function record(array &$map, int $code, string $text): void
     {
         $map[$code] = $text;
-
-        if (++$this->entries % self::ENTRIES_PER_TICK === 0) {
-            $this->budget->tick();
-        }
+        $this->budget->expand();
     }
 
     /**

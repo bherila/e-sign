@@ -301,7 +301,7 @@ final readonly class TcPdfAssembler implements PdfAssembler
             // before it, so the page that ran past a backstop is the one refused — the last page
             // included, which a look before each page never follows. Before the first page there is
             // nothing to look for that the geometry read, on this budget, has not just looked at.
-            $budget->tick();
+            $budget->step();
         }
 
         return $written;
