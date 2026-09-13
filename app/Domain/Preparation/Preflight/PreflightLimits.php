@@ -54,30 +54,31 @@ final readonly class PreflightLimits
      * is appended at finalization, and its length follows the envelope's recipients and events,
      * so under `max_pages=1` every agreement failed on a report the sender never chose.
      *
-     * The rest are resource ceilings: they bound the cost of *reading* whatever is in hand, and
-     * they still apply. The aggregate decoded ceiling is multiplied by the number of admitted
-     * documents the artifact was made from, since it holds all of them.
+     * The aggregate decoded ceiling is policy too, for the same reason: it says how much a sender's
+     * file may expand to. An artifact of ours expands to its inputs — each admitted under that
+     * ceiling — plus the streams the engine writes itself (page placement, form wrappers,
+     * overlays). An allowance of "the inputs' ceilings added up" left no room for the second part,
+     * so a source admitted at the ceiling could be rebuilt and then refused on read-back. There is
+     * no honest number for that overhead, so there is no count ceiling.
      *
-     * Structure is bounded by construction rather than by policy. Pages: the caller passes what
-     * it actually wrote, which is a self-check, not a limit on the deployment. Objects: none,
-     * because the artifact holds its inputs' objects — each admitted under `max_objects` — plus
-     * the fixed per-page overhead the engine adds (catalog, page tree, page, form, content),
-     * which is why counting it against one upload's object ceiling rejected a source that was
-     * admitted at that ceiling.
+     * What still applies bounds the *work* of reading, whatever is in hand: the per-stream decode
+     * ceiling, and the time and memory backstops.
      *
-     * @param  int  $documents  How many admitted documents the artifact was made from.
+     * Structure is bounded by construction rather than by policy. Pages: the caller passes what it
+     * actually wrote, which is a self-check, not a limit on the deployment. Objects: none, because
+     * the artifact holds its inputs' objects — each admitted under `max_objects` — plus the fixed
+     * per-page overhead the engine adds.
+     *
      * @param  int|null  $pages  Pages actually written, when the caller knows; null for none.
      */
-    public function forGenerated(int $documents = 1, ?int $pages = null): self
+    public function forGenerated(?int $pages = null): self
     {
         return new self(
             maxBytes: 0,
             maxPages: $pages ?? 0,
             maxObjects: 0,
             maxDecodedStreamBytes: $this->maxDecodedStreamBytes,
-            maxDecompressedBytes: $this->maxDecompressedBytes > 0
-                ? $this->maxDecompressedBytes * max(1, $documents)
-                : $this->maxDecompressedBytes,
+            maxDecompressedBytes: 0,
             timeBudgetSeconds: $this->timeBudgetSeconds,
             memoryBudgetBytes: $this->memoryBudgetBytes,
         );

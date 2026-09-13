@@ -17,7 +17,6 @@ use App\Domain\Preparation\Geometry\PageGeometry;
 use App\Domain\Preparation\Geometry\PageRotation;
 use App\Domain\Preparation\Preflight\PreflightBudget;
 use App\Domain\Preparation\Preflight\PreflightBudgetException;
-use App\Domain\Preparation\Preflight\PreflightCode;
 use App\Domain\Preparation\Preflight\PreflightLimits;
 use Com\Tecnick\Pdf\Exception;
 use Com\Tecnick\Pdf\Import\ImportException;
@@ -181,7 +180,7 @@ final readonly class TcPdfAssembler implements PdfAssembler
         return new AssembledDocument(
             $result,
             $sourcePages,
-            $this->readGeometry($result, $this->generatedBudget($written, count($appendedDocuments) + 1)),
+            $this->readGeometry($result, $this->generatedBudget($written)),
             array_values($warnings),
             microtime(true) - $startedAt,
             max(0, memory_get_peak_usage(true) - $memoryBefore),
@@ -189,23 +188,12 @@ final readonly class TcPdfAssembler implements PdfAssembler
     }
 
     /**
-     * The rejections that are upload policy rather than a statement about the document.
-     *
-     * Everything else preflight rejects — encrypted, already signed, XFA, JavaScript, an embedded
-     * file, a launch action, an unreadable page tree — is a reason not to import these bytes at
-     * all, whoever produced them.
-     */
-    private const UPLOAD_POLICY_CODES = [
-        PreflightCode::PageLimitExceeded->value,
-        PreflightCode::SizeLimitExceeded->value,
-    ];
-
-    /**
-     * @param  bool  $generated  True for an artifact this application produced. It is still
-     *                           inspected — an unsafe document must not reach the importer by a
-     *                           different door — but it is not held to the ceilings that say what
-     *                           a *sender* may upload. Those would refuse our own completion
-     *                           report at finalization, after every signer has assented.
+     * @param  bool  $generated  True for an artifact this application produced. It is inspected
+     *                           in full — an unsafe document must not reach the importer by a
+     *                           different door — under {@see PdfPreflight::forGenerated()}, the same
+     *                           limits it is later read under. Filtering an upload report for the
+     *                           codes that looked like policy was a second definition of
+     *                           "generated", and it had already missed one.
      *
      * @throws UnsupportedSourceException
      */
@@ -215,17 +203,12 @@ final readonly class TcPdfAssembler implements PdfAssembler
             return;
         }
 
-        $report = $this->preflight->inspect($pdfBytes);
+        $preflight = $generated ? $this->preflight->forGenerated() : $this->preflight;
+        $report = $preflight->inspect($pdfBytes);
 
-        if ($report->isAccepted()) {
-            return;
+        if (! $report->isAccepted()) {
+            throw new UnsupportedSourceException($report->rejectionMessage());
         }
-
-        if ($generated && array_diff($report->rejectionCodes(), self::UPLOAD_POLICY_CODES) === []) {
-            return;
-        }
-
-        throw new UnsupportedSourceException($report->rejectionMessage());
     }
 
     /** A fresh budget for one document, on this deployment's limits. */
@@ -243,11 +226,10 @@ final readonly class TcPdfAssembler implements PdfAssembler
      * that bounds the cost of reading still does.
      *
      * @param  int|null  $pages  Pages written, when this is the output and the count is known.
-     * @param  int  $documents  Admitted documents the artifact was made from.
      */
-    private function generatedBudget(?int $pages = null, int $documents = 1): PreflightBudget
+    private function generatedBudget(?int $pages = null): PreflightBudget
     {
-        return new PreflightBudget($this->limits->forGenerated($documents, $pages), $this->clock);
+        return new PreflightBudget($this->limits->forGenerated($pages), $this->clock);
     }
 
     /**

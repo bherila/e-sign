@@ -221,13 +221,16 @@ assembled output are ours, and both arrive at finalization *after* every signer 
 applying upload policy to them refuses our own work at the worst possible moment — under
 `max_pages=1`, every agreement failed on a report whose length the sender never chose.
 
-`PreflightLimits::forGenerated()` is the one place that says what a generated artifact is read
-under: the resource ceilings still apply (per-stream decode, the aggregate decoded ceiling
-multiplied by the documents the artifact holds, time, memory), while structure is bounded by
-construction — pages are the count actually written, and objects are the inputs' objects, each
-admitted under `max_objects`, plus the engine's fixed per-page overhead. A generated artifact is
-still inspected for hazards; only the upload-policy rejections (`page_limit_exceeded`,
-`size_limit_exceeded`) are tolerated for it.
+`PreflightLimits::forGenerated()` is the one definition of what a generated artifact is held to,
+and it is used both to admit one (`PdfPreflight::forGenerated()`, the full hazard inspection under
+those limits) and to read one. Upload policy is lifted: `max_bytes`, `max_pages`, `max_objects` and
+the aggregate `max_decompressed_bytes`, since our artifact expands to its admitted inputs plus the
+streams the engine writes itself, and there is no honest number for the second part. What bounds
+the work of reading still applies: the per-stream decode ceiling and the time and memory
+backstops. Pages are checked against the count actually written.
+
+Cooperative metering has a known limit: it bounds only work a loop reports. Hard process-level
+bounds on document reads are tracked separately as the structural answer to that class.
 
 **One boundary admits and parses a document: `DocumentRead`.** Preflight, text extraction and
 assembly all read documents, and admission (is this document allowed to be read at all) and

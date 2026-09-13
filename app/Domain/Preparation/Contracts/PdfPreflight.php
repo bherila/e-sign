@@ -23,4 +23,14 @@ interface PdfPreflight
      * @param  string  $pdfBytes  The uploaded bytes, exactly as received.
      */
     public function inspect(string $pdfBytes): PreflightReport;
+
+    /**
+     * The same inspection, under the limits for an artifact this application generated.
+     *
+     * Every hazard check is unchanged; only upload policy — how large, how many pages, how many
+     * objects, how much decoded data a *sender* may submit — is lifted. One definition of
+     * "generated", so the ceilings a generated document is admitted under and the ceilings it is
+     * read under cannot disagree.
+     */
+    public function forGenerated(): PdfPreflight;
 }

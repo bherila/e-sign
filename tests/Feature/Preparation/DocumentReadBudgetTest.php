@@ -12,6 +12,7 @@ use App\Domain\Preparation\Preflight\PreflightBudget;
 use App\Domain\Preparation\Preflight\PreflightBudgetException;
 use App\Domain\Preparation\Preflight\PreflightCode;
 use App\Domain\Preparation\Preflight\PreflightLimits;
+use App\Domain\Preparation\TcPdf\DocumentRead;
 use App\Domain\Preparation\TcPdf\Parsing\ContentStreamTokenizer;
 use App\Domain\Preparation\TcPdf\Parsing\ToUnicodeCMapReader;
 use App\Domain\Preparation\TcPdf\TcPdfAssembler;
@@ -522,6 +523,56 @@ final class DocumentReadBudgetTest extends TestCase
         $objects = app(PdfPreflight::class)->inspect($bytes)->metrics->objectCount;
 
         config(['esign.documents.max_objects' => $objects]);
+        $this->forgetResolvedLimits();
+
+        $assembled = app(PdfAssembler::class)->assemble($bytes);
+
+        $this->assertCount(3, $assembled->outputPages);
+    }
+
+    /**
+     * A generated artifact is admitted under the generated limits, not an upload report filtered.
+     *
+     * Admission used to run the ordinary upload preflight and then ignore the rejections that
+     * looked like policy — page count and size — which was a second definition of "generated"
+     * that had already missed one. A report with more objects than a lowered `max_objects` was
+     * still refused after assent. The appended artifact here has more objects than the ceiling;
+     * the source is under it.
+     */
+    public function test_a_generated_artifact_is_not_held_to_the_upload_object_ceiling(): void
+    {
+        $source = PdfFixtures::bytes('single-page-letter');
+        $appended = PdfFixtures::bytes('multi-page-mixed-size');
+
+        $sourceObjects = app(PdfPreflight::class)->inspect($source)->metrics->objectCount;
+        $appendedObjects = app(PdfPreflight::class)->inspect($appended)->metrics->objectCount;
+        $this->assertGreaterThan($sourceObjects, $appendedObjects, 'The premise needs an appended artifact larger than the source.');
+
+        config(['esign.documents.max_objects' => $sourceObjects]);
+        $this->forgetResolvedLimits();
+
+        $assembled = app(PdfAssembler::class)->assemble($source, [], [$appended]);
+
+        $this->assertCount(4, $assembled->outputPages);
+    }
+
+    /**
+     * Rebuilding a document writes streams of its own, and they are not the sender's to pay for.
+     *
+     * Page placement and form wrappers are decoded on read-back alongside the imported content, so
+     * an output allowance of "the inputs' decoded ceilings added up" refused a source admitted
+     * exactly at the ceiling. The ceiling here is the source's own decoded total, on the review path.
+     */
+    public function test_a_source_at_the_decoded_ceiling_can_still_be_rebuilt(): void
+    {
+        $bytes = PdfFixtures::bytes('multi-page-mixed-size');
+
+        $read = DocumentRead::under($bytes, new PreflightLimits);
+        $read->pages();
+        $decoded = $read->budget->decodedBytes();
+        $this->assertGreaterThan(0, $decoded, 'The premise needs a source with decoded streams.');
+
+        config(['esign.documents.max_decompressed_bytes' => $decoded]);
         $this->forgetResolvedLimits();
 
         $assembled = app(PdfAssembler::class)->assemble($bytes);

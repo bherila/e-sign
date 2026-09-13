@@ -51,6 +51,11 @@ final readonly class TcPdfPreflight implements PdfPreflight
         private ?\Closure $clock = null,
     ) {}
 
+    public function forGenerated(): PdfPreflight
+    {
+        return new self($this->limits->forGenerated(), $this->clock);
+    }
+
     public function inspect(string $pdfBytes): PreflightReport
     {
         // The read owns admission and the parse; this class owns what the document is allowed to
