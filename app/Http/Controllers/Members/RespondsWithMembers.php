@@ -66,6 +66,7 @@ trait RespondsWithMembers
             ], $members->openInvitations($workspace)),
             'urls' => [
                 'self' => route('members.index', ['workspace' => $workspace->public_id]),
+                'dashboard' => route('dashboard'),
                 'invitations' => route('members.invitations.store', ['workspace' => $workspace->public_id]),
                 // Templates: the page puts a member's or an invitation's public id where
                 // `placeholder` stands. The placeholder is a valid ULID so the route can build them.

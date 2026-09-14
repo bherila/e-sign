@@ -5,6 +5,8 @@ declare(strict_types=1);
 use App\Http\Controllers\Members\InvitationRedemptionController;
 use App\Http\Controllers\Members\MembersController;
 use App\Http\Controllers\Members\WorkspaceInvitationController;
+use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
+use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -16,11 +18,20 @@ use Illuminate\Support\Facades\Route;
 | the workspace through membership, so a workspace the caller is not in is a
 | 404. Every rule about who may grant what lives in WorkspaceMembers.
 |
-| Invitation links carry a 64-hex-character token. Following one (GET) shows
-| it and changes nothing; accepting it is a POST, so a mail scanner or a link
-| preview can never join anybody to a workspace.
+| Invitation links carry a 64-hex-character token, and that token must never
+| reach the session store. The link route therefore runs WITHOUT the `web`
+| group: no session starts, so neither `url.intended` nor the previous-URL
+| record can hold it. It moves the token into an encrypted cookie and
+| redirects to /invitations/accept. Showing that page changes nothing;
+| accepting is a POST, so a mail scanner or a link preview can never join
+| anybody to a workspace.
 |
 */
+
+Route::get('/invitations/{token}', [InvitationRedemptionController::class, 'land'])
+    ->middleware([EncryptCookies::class, AddQueuedCookiesToResponse::class])
+    ->where('token', '[0-9a-f]{64}')
+    ->name('invitations.show');
 
 Route::middleware(['web', 'auth'])->group(function (): void {
     Route::prefix('workspaces/{workspace}')
@@ -38,11 +49,9 @@ Route::middleware(['web', 'auth'])->group(function (): void {
                 ->name('invitations.destroy');
         });
 
-    Route::get('/invitations/{token}', [InvitationRedemptionController::class, 'show'])
-        ->where('token', '[0-9a-f]{64}')
-        ->name('invitations.show');
-    Route::post('/invitations/{token}', [InvitationRedemptionController::class, 'store'])
-        ->where('token', '[0-9a-f]{64}')
+    Route::get('/invitations/accept', [InvitationRedemptionController::class, 'show'])
+        ->name('invitations.accept');
+    Route::post('/invitations/accept', [InvitationRedemptionController::class, 'store'])
         ->middleware('throttle:invitation-redemptions')
         ->name('invitations.redeem');
 });

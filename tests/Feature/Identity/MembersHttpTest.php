@@ -8,6 +8,7 @@ use App\Domain\Identity\Enums\WorkspaceRole;
 use App\Domain\Identity\Models\Workspace;
 use App\Domain\Identity\Models\WorkspaceMembership;
 use App\Domain\Identity\Services\WorkspaceMembers;
+use App\Http\Controllers\Members\InvitationRedemptionController;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Support\DocumentWorkspace;
@@ -96,6 +97,25 @@ final class MembersHttpTest extends TestCase
         $this->assertStringContainsString('no-store', (string) $response->headers->get('Cache-Control'));
     }
 
+    /**
+     * A link is rooted at the configured origin, never the request's (#125 review).
+     *
+     * Without a trusted-hosts list a request can name any Host, and a link built from it would hand
+     * a live token to that origin the moment an administrator copied and followed it.
+     */
+    public function test_an_invitation_link_is_rooted_at_the_configured_origin_not_the_request_host(): void
+    {
+        config(['app.url' => 'https://esign.example.test']);
+
+        $url = (string) $this->actingAs($this->admin)
+            ->withHeader('Host', 'attacker.example.test')
+            ->postJson($this->workspaceUrl('/invitations'), ['role' => 'sender'])
+            ->assertCreated()
+            ->json('url');
+
+        $this->assertMatchesRegularExpression('#\Ahttps://esign\.example\.test/invitations/[0-9a-f]{64}\z#', $url);
+    }
+
     public function test_a_refusal_carries_the_services_code_and_status(): void
     {
         $this->actingAs($this->admin)
@@ -149,40 +169,76 @@ final class MembersHttpTest extends TestCase
 
     // ------------------------------------------------------------------------ following a link
 
-    public function test_following_a_link_shows_it_and_changes_nothing_until_accepted(): void
+    /**
+     * The token never reaches the session store (#125 review).
+     *
+     * Following the link runs without a session, moves the token into an encrypted cookie and
+     * redirects to a URL with no token in it. Remembering the link as `url.intended`, or as the
+     * previous URL, would have written a live credential into a plaintext sessions table.
+     */
+    public function test_following_a_link_moves_the_token_into_a_cookie_and_never_into_the_session(): void
+    {
+        [, $token] = app(WorkspaceMembers::class)->invite($this->workspace, $this->owner, WorkspaceRole::Auditor);
+
+        $response = $this->get('/invitations/'.$token)
+            ->assertRedirect(route('invitations.accept'))
+            ->assertCookie(InvitationRedemptionController::COOKIE, $token)
+            ->assertHeader('Referrer-Policy', 'no-referrer');
+
+        $this->assertStringContainsString('no-store', (string) $response->headers->get('Cache-Control'));
+        $this->assertNull($response->getCookie((string) config('session.cookie'), false), 'The link started a session.');
+        $this->assertStringNotContainsString($token, (string) json_encode(session()->all()));
+    }
+
+    public function test_accepting_joins_the_signed_in_person_and_clears_the_cookie(): void
     {
         [$invitation, $token] = app(WorkspaceMembers::class)->invite($this->workspace, $this->owner, WorkspaceRole::Auditor);
         $newcomer = User::factory()->create(['name' => 'Example Newcomer']);
 
         $this->actingAs($newcomer)
-            ->get('/invitations/'.$token)
+            ->withCookie(InvitationRedemptionController::COOKIE, $token)
+            ->get('/invitations/accept')
             ->assertOk()
             ->assertSee('Join Synthetic Workspace')
             ->assertSee('Example Newcomer')
-            ->assertHeader('Referrer-Policy', 'no-referrer');
+            ->assertDontSee($token);
 
+        // Showing the invitation changed nothing.
         $this->assertFalse(WorkspaceMembership::query()->where('user_id', $newcomer->getKey())->exists());
         $this->assertNull($invitation->fresh()?->redeemed_at);
 
         $this->actingAs($newcomer)
-            ->post('/invitations/'.$token)
+            ->withCookie(InvitationRedemptionController::COOKIE, $token)
+            ->post('/invitations/accept')
             ->assertRedirect(route('dashboard'))
-            ->assertSessionHas('status', 'You joined Synthetic Workspace as Auditor.');
+            ->assertSessionHas('status', 'You joined Synthetic Workspace as Auditor.')
+            ->assertCookieExpired(InvitationRedemptionController::COOKIE);
 
         $this->assertSame(WorkspaceRole::Auditor, $this->membershipOf($newcomer)->role);
 
         $this->actingAs($newcomer)
-            ->get('/invitations/'.$token)
+            ->withCookie(InvitationRedemptionController::COOKIE, $token)
+            ->get('/invitations/accept')
             ->assertNotFound()
             ->assertSee('This invitation cannot be used');
     }
 
-    public function test_a_guest_is_sent_to_sign_in_and_brought_back_to_the_link(): void
+    public function test_a_guest_is_brought_back_to_a_url_without_the_token(): void
     {
         [, $token] = app(WorkspaceMembers::class)->invite($this->workspace, $this->owner, WorkspaceRole::Sender);
 
-        $this->get('/invitations/'.$token)->assertRedirect(route('login'));
-        $this->assertStringEndsWith('/invitations/'.$token, (string) session('url.intended'));
+        $this->withCookie(InvitationRedemptionController::COOKIE, $token)
+            ->get('/invitations/accept')
+            ->assertRedirect(route('login'));
+
+        $this->assertStringEndsWith('/invitations/accept', (string) session('url.intended'));
+        $this->assertStringNotContainsString($token, (string) json_encode(session()->all()));
+    }
+
+    public function test_without_the_cookie_there_is_nothing_to_accept(): void
+    {
+        $this->actingAs($this->sender)->get('/invitations/accept')->assertNotFound()->assertSee('This invitation cannot be used');
+        $this->actingAs($this->sender)->post('/invitations/accept')->assertRedirect(route('invitations.accept'));
     }
 
     public function test_an_existing_member_is_told_why_and_the_link_stays_usable(): void
@@ -190,8 +246,9 @@ final class MembersHttpTest extends TestCase
         [$invitation, $token] = app(WorkspaceMembers::class)->invite($this->workspace, $this->owner, WorkspaceRole::Admin);
 
         $this->actingAs($this->sender)
-            ->post('/invitations/'.$token)
-            ->assertRedirect('/invitations/'.$token)
+            ->withCookie(InvitationRedemptionController::COOKIE, $token)
+            ->post('/invitations/accept')
+            ->assertRedirect(route('invitations.accept'))
             ->assertSessionHasErrors('invitation');
 
         $this->assertTrue($invitation->fresh()?->isOpen());

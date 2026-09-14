@@ -15,6 +15,8 @@ use App\Models\User;
 use Carbon\CarbonImmutable;
 use Closure;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\DocumentWorkspace;
 use Tests\TestCase;
@@ -151,6 +153,35 @@ final class WorkspaceMembersTest extends TestCase
         $this->assertOutcome(MembershipChangeRefused::ALREADY_MEMBER, fn () => $this->members->redeem($token, $this->sender));
 
         $this->assertSame(WorkspaceRole::Sender, $this->workspace->memberships()->where('user_id', $this->sender->getKey())->sole()->role);
+        $this->assertTrue($invitation->fresh()?->isOpen());
+    }
+
+    /**
+     * Two invitations to one workspace, redeemed by one person at the same moment (#125 review).
+     *
+     * Each transaction sees no membership, so the loser's insert hits the unique index. That is the
+     * documented refusal rather than a 500, and the losing invitation stays open. The race is forced
+     * by inserting the winner's row at the instant the loser creates its own.
+     */
+    public function test_a_redemption_that_loses_a_race_is_refused_and_leaves_its_invitation_open(): void
+    {
+        [$invitation, $token] = $this->members->invite($this->workspace, $this->admin, WorkspaceRole::Sender);
+        $newcomer = User::factory()->create();
+
+        WorkspaceMembership::creating(function (WorkspaceMembership $membership) use ($newcomer): void {
+            if ($membership->user_id === $newcomer->getKey()) {
+                DB::table('workspace_memberships')->insert([
+                    'public_id' => (string) Str::ulid(),
+                    'workspace_id' => $membership->workspace_id,
+                    'user_id' => $newcomer->getKey(),
+                    'role' => WorkspaceRole::Auditor->value,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
+        });
+
+        $this->assertOutcome(MembershipChangeRefused::ALREADY_MEMBER, fn () => $this->members->redeem($token, $newcomer));
         $this->assertTrue($invitation->fresh()?->isOpen());
     }
 

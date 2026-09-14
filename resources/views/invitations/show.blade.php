@@ -24,7 +24,7 @@
         <p class="mb-6">You are already a member of this workspace, so there is nothing to accept.</p>
         <a href="{{ route('dashboard') }}" class="underline underline-offset-4">Go to your workspaces</a>
       @else
-        <form method="POST" action="{{ route('invitations.redeem', ['token' => $token]) }}">
+        <form method="POST" action="{{ route('invitations.redeem') }}">
           @csrf
           <button type="submit" class="rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">Accept invitation</button>
         </form>

@@ -17,20 +17,55 @@ use RuntimeException;
 /**
  * Following an invitation link, and accepting it (issue #110).
  *
- * Both routes sit behind `auth`, so a person who is not signed in is sent to sign in and brought
- * back here afterwards; the membership then binds to whichever account they signed in as.
+ * The token must never reach the session store. Sessions are commonly a plaintext database table,
+ * and both `url.intended` (set when a guest is sent to sign in) and the session's record of the
+ * previous URL would otherwise hold the full link — a live credential anyone with a read-only copy
+ * of that table could use. So the link itself is handled without a session at all: it moves the
+ * token into a short-lived, encrypted, HTTP-only cookie scoped to `/invitations` and redirects to
+ * `/invitations/accept`, which has no token in it. Only that page, and accepting on it, need a
+ * signed-in person; a guest is sent to sign in and brought back to it.
  *
- * GET is harmless (AGENTS.md): showing the invitation reads it and changes nothing, so a mail
- * scanner or a link preview cannot accept an invitation for anybody. Accepting is the POST.
+ * GET is harmless (AGENTS.md): following the link and showing the invitation change nothing, so a
+ * mail scanner or a link preview cannot accept an invitation for anybody. Accepting is the POST.
  */
 class InvitationRedemptionController extends Controller
 {
+    public const COOKIE = 'esign_invitation';
+
+    /** Long enough to sign in, short enough that a forgotten tab does not keep a credential. */
+    public const COOKIE_MINUTES = 30;
+
     public function __construct(private readonly WorkspaceMembers $members) {}
 
-    public function show(Request $request, string $token): Response
+    /**
+     * GET /invitations/{token}. Registered without the session middleware.
+     */
+    public function land(string $token): RedirectResponse
+    {
+        return redirect()
+            ->route('invitations.accept')
+            ->withCookie(cookie(
+                self::COOKIE,
+                $token,
+                self::COOKIE_MINUTES,
+                '/invitations',
+                is_string(config('session.domain')) ? config('session.domain') : null,
+                (bool) config('session.secure'),
+                true,
+                false,
+                'lax',
+            ))
+            ->header('Cache-Control', 'no-store');
+    }
+
+    /**
+     * GET /invitations/accept.
+     */
+    public function show(Request $request): Response
     {
         $user = $this->currentUser($request);
-        $invitation = $this->members->openInvitationFor($token);
+        $token = $this->token($request);
+        $invitation = $token === null ? null : $this->members->openInvitationFor($token);
         $workspace = $invitation?->workspace;
 
         $alreadyMember = $invitation !== null && WorkspaceMembership::query()
@@ -40,29 +75,44 @@ class InvitationRedemptionController extends Controller
 
         return response()
             ->view('invitations.show', [
-                'token' => $token,
                 'invitation' => $workspace === null ? null : $invitation,
                 'workspace' => $workspace,
                 'account' => $user,
                 'alreadyMember' => $alreadyMember,
             ], $workspace === null ? 404 : 200)
-            // The token is in the URL; nothing about this page may be kept by a cache.
             ->header('Cache-Control', 'no-store');
     }
 
-    public function store(Request $request, string $token): RedirectResponse
+    /**
+     * POST /invitations/accept.
+     */
+    public function store(Request $request): RedirectResponse
     {
+        $token = $this->token($request);
+
+        if ($token === null) {
+            return redirect()->route('invitations.accept');
+        }
+
         try {
             $membership = $this->members->redeem($token, $this->currentUser($request));
         } catch (MembershipChangeRefused $refusal) {
             return redirect()
-                ->route('invitations.show', ['token' => $token])
+                ->route('invitations.accept')
                 ->withErrors(['invitation' => $refusal->getMessage()]);
         }
 
         return redirect()
             ->route('dashboard')
-            ->with('status', 'You joined '.$membership->workspace?->name.' as '.$membership->role->label().'.');
+            ->with('status', 'You joined '.$membership->workspace?->name.' as '.$membership->role->label().'.')
+            ->withoutCookie(self::COOKIE, '/invitations', is_string(config('session.domain')) ? config('session.domain') : null);
+    }
+
+    private function token(Request $request): ?string
+    {
+        $value = $request->cookie(self::COOKIE);
+
+        return is_string($value) && WorkspaceMembers::isWellFormedToken($value) ? $value : null;
     }
 
     private function currentUser(Request $request): User

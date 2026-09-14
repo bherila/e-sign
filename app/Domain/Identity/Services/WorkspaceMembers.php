@@ -14,6 +14,7 @@ use App\Domain\Identity\Models\WorkspaceMembership;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -28,9 +29,12 @@ use Illuminate\Support\Facades\DB;
  *   ({@see WorkspacePermission::ManageMembers}), checked here as well as at the HTTP boundary.
  * - **Ownership stays with owners.** Only an owner grants `owner`, and only an owner changes or
  *   removes an owner's membership.
- * - **A workspace always has an owner.** The last one cannot be demoted or removed, checked
- *   under a lock on the workspace's owner rows so two concurrent changes cannot each see
- *   another owner and leave none.
+ * - **A workspace always has an owner.** The last one cannot be demoted or removed.
+ * - **Authority is decided under the same locks as the change.** Every change locks the
+ *   workspace's owner rows, then the actor's and the target's membership rows together in id
+ *   order, and only then reads the actor's role. An actor demoted by a concurrent request cannot
+ *   finish a change on the authority they just lost, and two changes cannot each see another
+ *   owner and leave none. One lock order everywhere is what keeps that from deadlocking.
  * - **Removing access removes only access.** A membership row is deleted and nothing else;
  *   the schema's RESTRICT foreign keys keep every envelope, artifact and audit event.
  * - **Every change is audited**, once, and a change that changes nothing writes nothing.
@@ -93,15 +97,18 @@ final readonly class WorkspaceMembers
      */
     public function invite(Workspace $workspace, User $actor, WorkspaceRole $role): array
     {
-        $this->assertManages($workspace, $actor);
-
-        if ($role === WorkspaceRole::Owner) {
-            $this->assertOwner($workspace, $actor);
-        }
-
         $token = bin2hex(random_bytes(32));
 
         $invitation = DB::transaction(function () use ($workspace, $actor, $role, $token): WorkspaceInvitation {
+            $this->lockedOwners($workspace);
+            [$actorRole] = $this->lockedActorAndTarget($workspace, $actor);
+
+            $this->assertManages($actorRole);
+
+            if ($role === WorkspaceRole::Owner) {
+                $this->assertOwner($actorRole);
+            }
+
             $invitation = WorkspaceInvitation::create([
                 'workspace_id' => $workspace->getKey(),
                 'role' => $role,
@@ -127,9 +134,12 @@ final readonly class WorkspaceMembers
      */
     public function revokeInvitation(Workspace $workspace, User $actor, WorkspaceInvitation $invitation): void
     {
-        $this->assertManages($workspace, $actor);
-
         DB::transaction(function () use ($workspace, $actor, $invitation): void {
+            $this->lockedOwners($workspace);
+            [$actorRole] = $this->lockedActorAndTarget($workspace, $actor);
+
+            $this->assertManages($actorRole);
+
             $locked = WorkspaceInvitation::query()
                 ->where('workspace_id', $workspace->getKey())
                 ->whereKey($invitation->getKey())
@@ -206,11 +216,18 @@ final readonly class WorkspaceMembers
                 throw MembershipChangeRefused::alreadyMember();
             }
 
-            $membership = WorkspaceMembership::create([
-                'workspace_id' => $invitation->workspace_id,
-                'user_id' => $user->getKey(),
-                'role' => $invitation->role,
-            ]);
+            try {
+                $membership = WorkspaceMembership::create([
+                    'workspace_id' => $invitation->workspace_id,
+                    'user_id' => $user->getKey(),
+                    'role' => $invitation->role,
+                ]);
+            } catch (UniqueConstraintViolationException) {
+                // Two different invitations to one workspace, redeemed by the same person at the
+                // same moment: each saw no membership. The loser is the documented refusal, and
+                // rolling this transaction back leaves its invitation open.
+                throw MembershipChangeRefused::alreadyMember();
+            }
 
             $invitation->forceFill(['redeemed_at' => CarbonImmutable::now(), 'redeemed_by' => $user->getKey()])->save();
 
@@ -229,18 +246,24 @@ final readonly class WorkspaceMembers
      */
     public function changeRole(Workspace $workspace, User $actor, WorkspaceMembership $membership, WorkspaceRole $role): WorkspaceMembership
     {
-        $this->assertManages($workspace, $actor);
-
         return DB::transaction(function () use ($workspace, $actor, $membership, $role): WorkspaceMembership {
             $owners = $this->lockedOwners($workspace);
-            $locked = $this->lockedMembership($workspace, $membership);
+            [$actorRole, $locked] = $this->lockedActorAndTarget($workspace, $actor, $membership);
+
+            $this->assertManages($actorRole);
+
+            // Gone since the page was read, or never in this workspace: either way there is
+            // nothing here this actor may change.
+            if (! $locked instanceof WorkspaceMembership) {
+                throw MembershipChangeRefused::notPermitted();
+            }
 
             if ($locked->role === $role) {
                 return $locked;
             }
 
             if ($locked->role === WorkspaceRole::Owner || $role === WorkspaceRole::Owner) {
-                $this->assertOwner($workspace, $actor);
+                $this->assertOwner($actorRole);
             }
 
             if ($locked->role === WorkspaceRole::Owner && count($owners) <= 1) {
@@ -265,14 +288,18 @@ final readonly class WorkspaceMembers
      */
     public function remove(Workspace $workspace, User $actor, WorkspaceMembership $membership): void
     {
-        $this->assertManages($workspace, $actor);
-
         DB::transaction(function () use ($workspace, $actor, $membership): void {
             $owners = $this->lockedOwners($workspace);
-            $locked = $this->lockedMembership($workspace, $membership);
+            [$actorRole, $locked] = $this->lockedActorAndTarget($workspace, $actor, $membership);
+
+            $this->assertManages($actorRole);
+
+            if (! $locked instanceof WorkspaceMembership) {
+                throw MembershipChangeRefused::notPermitted();
+            }
 
             if ($locked->role === WorkspaceRole::Owner) {
-                $this->assertOwner($workspace, $actor);
+                $this->assertOwner($actorRole);
 
                 if (count($owners) <= 1) {
                     throw MembershipChangeRefused::lastOwner();
@@ -300,10 +327,7 @@ final readonly class WorkspaceMembers
     }
 
     /**
-     * The workspace's owner rows, locked, in id order.
-     *
-     * Taken before the target row, always in the same order, so two changes that each touch an
-     * owner serialise instead of each counting the other and leaving the workspace with none.
+     * The workspace's owner rows, locked, in id order. Always the first lock a change takes.
      *
      * @return list<WorkspaceMembership>
      */
@@ -319,31 +343,41 @@ final readonly class WorkspaceMembers
     }
 
     /**
-     * @throws MembershipChangeRefused
+     * The actor's current role and the target membership, from one locking read in id order.
+     *
+     * Read fresh, never from `Workspace::membershipFor()`'s per-instance cache, and under the lock,
+     * so the role that authorises a change is the role the actor holds when the change commits.
+     *
+     * @return array{0: WorkspaceRole|null, 1: WorkspaceMembership|null}
      */
-    private function lockedMembership(Workspace $workspace, WorkspaceMembership $membership): WorkspaceMembership
+    private function lockedActorAndTarget(Workspace $workspace, User $actor, ?WorkspaceMembership $target = null): array
     {
-        $locked = WorkspaceMembership::query()
+        /** @var Collection<int, WorkspaceMembership> $rows */
+        $rows = WorkspaceMembership::query()
             ->where('workspace_id', $workspace->getKey())
-            ->whereKey($membership->getKey())
+            ->where(static function ($query) use ($actor, $target): void {
+                $query->where('user_id', $actor->getKey());
+
+                if ($target instanceof WorkspaceMembership) {
+                    $query->orWhere('id', $target->getKey());
+                }
+            })
+            ->orderBy('id')
             ->lockForUpdate()
-            ->first();
+            ->get();
 
-        // Gone since the page was read, or never in this workspace: either way there is nothing
-        // here this actor may change.
-        if (! $locked instanceof WorkspaceMembership) {
-            throw MembershipChangeRefused::notPermitted();
-        }
-
-        return $locked;
+        return [
+            $rows->firstWhere('user_id', $actor->getKey())?->role,
+            $target instanceof WorkspaceMembership ? $rows->firstWhere('id', $target->getKey()) : null,
+        ];
     }
 
     /**
      * @throws MembershipChangeRefused
      */
-    private function assertManages(Workspace $workspace, User $actor): void
+    private function assertManages(?WorkspaceRole $actorRole): void
     {
-        if (! $this->currentRole($workspace, $actor)?->can(WorkspacePermission::ManageMembers)) {
+        if (! $actorRole?->can(WorkspacePermission::ManageMembers)) {
             throw MembershipChangeRefused::notPermitted();
         }
     }
@@ -351,23 +385,10 @@ final readonly class WorkspaceMembers
     /**
      * @throws MembershipChangeRefused
      */
-    private function assertOwner(Workspace $workspace, User $actor): void
+    private function assertOwner(?WorkspaceRole $actorRole): void
     {
-        if ($this->currentRole($workspace, $actor) !== WorkspaceRole::Owner) {
+        if ($actorRole !== WorkspaceRole::Owner) {
             throw MembershipChangeRefused::ownerOnly();
         }
-    }
-
-    /**
-     * Read fresh, never from `Workspace::membershipFor()`'s per-instance cache: an actor demoted a
-     * moment ago must not keep an authority the cache still remembers.
-     */
-    private function currentRole(Workspace $workspace, User $actor): ?WorkspaceRole
-    {
-        return WorkspaceMembership::query()
-            ->where('workspace_id', $workspace->getKey())
-            ->where('user_id', $actor->getKey())
-            ->first()
-            ?->role;
     }
 }

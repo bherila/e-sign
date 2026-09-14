@@ -35,7 +35,7 @@ export interface MembersState {
   roles: RoleOption[];
   members: MemberRow[];
   invitations: InvitationRow[];
-  urls: { self: string; invitations: string; member: string; invitation: string; placeholder: string };
+  urls: { self: string; dashboard: string; invitations: string; member: string; invitation: string; placeholder: string };
 }
 
 export interface MembersPanelProps {
@@ -102,7 +102,9 @@ export default function MembersPanel({ initial }: MembersPanelProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inviteRole, setInviteRole] = useState('sender');
-  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  // The link and the role it was issued for travel together, so the label can never describe a
+  // role the selector moved to after the link was created.
+  const [issued, setIssued] = useState<{ url: string; roleLabel: string } | null>(null);
   const [copied, setCopied] = useState(false);
 
   const labelFor = (value: string): string => state.roles.find((role) => role.value === value)?.label ?? value;
@@ -142,29 +144,43 @@ export default function MembersPanel({ initial }: MembersPanelProps) {
 
   function invite(): void {
     setCopied(false);
-    setInviteUrl(null);
+    setIssued(null);
+    const roleLabel = labelFor(inviteRole);
 
     void run(async () => {
       const created = await requestJson<{ url: string; state: MembersState }>(state.urls.invitations, 'POST', {
         role: inviteRole,
       });
-      setInviteUrl(created.url);
+      setIssued({ url: created.url, roleLabel });
 
       return created.state;
     });
   }
 
   async function copyInvite(): Promise<void> {
-    if (inviteUrl === null) {
+    if (issued === null) {
       return;
     }
 
     try {
-      await navigator.clipboard.writeText(inviteUrl);
+      await navigator.clipboard.writeText(issued.url);
       setCopied(true);
     } catch {
       setCopied(false);
     }
+  }
+
+  // The viewer demoted or removed themselves. Every control below would only be refused now, so
+  // the page stops offering them.
+  if (state.viewer.role !== 'owner' && state.viewer.role !== 'admin') {
+    return (
+      <div role="status" className="flex flex-col gap-2">
+        <p>You no longer manage the members of {state.workspace.name}, so there is nothing more to change here.</p>
+        <a href={state.urls.dashboard} className="underline underline-offset-4">
+          Go to your workspaces
+        </a>
+      </div>
+    );
   }
 
   return (
@@ -252,7 +268,11 @@ export default function MembersPanel({ initial }: MembersPanelProps) {
               className="rounded-md border bg-background px-2 py-1 text-sm"
               value={inviteRole}
               disabled={busy}
-              onChange={(event) => setInviteRole(event.target.value)}
+              onChange={(event) => {
+                setInviteRole(event.target.value);
+                setIssued(null);
+                setCopied(false);
+              }}
             >
               {state.roles
                 .filter((role) => role.grantable)
@@ -268,11 +288,11 @@ export default function MembersPanel({ initial }: MembersPanelProps) {
           </Button>
         </div>
 
-        {inviteUrl !== null ? (
+        {issued !== null ? (
           <div className="flex flex-col gap-1">
-            <Label htmlFor="invite-url">Invitation link for a new {labelFor(inviteRole)}</Label>
+            <Label htmlFor="invite-url">Invitation link for a new {issued.roleLabel}</Label>
             <div className="flex gap-2">
-              <Input id="invite-url" readOnly value={inviteUrl} onFocus={(event) => event.currentTarget.select()} />
+              <Input id="invite-url" readOnly value={issued.url} onFocus={(event) => event.currentTarget.select()} />
               <Button variant="outline" onClick={() => void copyInvite()}>
                 {copied ? 'Copied' : 'Copy'}
               </Button>

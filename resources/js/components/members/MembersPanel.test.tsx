@@ -29,6 +29,7 @@ function state(overrides: Partial<MembersState> = {}): MembersState {
     invitations: [],
     urls: {
       self: '/workspaces/ws/members',
+      dashboard: '/dashboard',
       invitations: '/workspaces/ws/invitations',
       member: `/workspaces/ws/members/${PLACEHOLDER}`,
       invitation: `/workspaces/ws/invitations/${PLACEHOLDER}`,
@@ -120,5 +121,33 @@ describe('MembersPanel', () => {
 
     const [, init] = fetchMock().mock.calls[0] as [string, RequestInit];
     expect(JSON.parse(String(init.body))).toEqual({ role: 'auditor' });
+  });
+
+  it('forgets a generated link as soon as the role selector changes', async () => {
+    respond(201, { url: 'https://esign.example.test/invitations/' + 'b'.repeat(64), state: state() });
+
+    render(<MembersPanel initial={state()} />);
+    fireEvent.change(screen.getByLabelText('Role for the new member'), { target: { value: 'admin' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create invitation link' }));
+    expect(await screen.findByLabelText('Invitation link for a new Administrator')).toBeTruthy();
+
+    // A label that followed the selector would now call an administrator link an auditor one.
+    fireEvent.change(screen.getByLabelText('Role for the new member'), { target: { value: 'auditor' } });
+
+    expect(screen.queryByLabelText(/Invitation link for a new/)).toBeNull();
+  });
+
+  it('stops offering controls once the viewer no longer manages members', async () => {
+    respond(200, { ...state(), viewer: { role: 'sender', isOwner: false } });
+
+    render(<MembersPanel initial={state()} />);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Role for Example Admin' }), { target: { value: 'sender' } });
+
+    expect(await screen.findByRole('status')).toHaveProperty(
+      'textContent',
+      expect.stringContaining('You no longer manage the members of Synthetic Workspace'),
+    );
+    expect(screen.queryAllByRole('combobox')).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: 'Create invitation link' })).toBeNull();
   });
 });
