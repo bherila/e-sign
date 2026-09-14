@@ -6,12 +6,11 @@ what it records, and what it refuses.
 
 The document shape is [field-schema.md](field-schema.md); this is the semantics behind it.
 
-> **Publishing resolves anchors; sending does not yet.** Publishing a template version resolves
-> every anchor against the revision it snapshots ([templates.md](templates.md)). Sending does not
-> resolve yet. So the two anchor options whose promise only send-time resolution can keep —
-> `placement: "cross_check"` and `anchor.required: false` — are still refused at the service
-> boundary with `anchor_resolution_unavailable`. See `Schema\AnchorResolutionGate`, which names the
-> branch that removes it.
+> **Where resolution runs.** Publishing a template version resolves every anchor against the
+> revision it snapshots ([templates.md](templates.md)), as an early warning while a sender can still
+> fix it. Sending an envelope resolves again, authoritatively, because an envelope does not have to
+> come from a template: the resolved rectangles, and any field an absent optional anchor omitted, are
+> stored in the same statement as the transition to `sent`, and nothing re-resolves afterwards.
 
 ## What resolution is
 

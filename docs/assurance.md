@@ -204,7 +204,7 @@ A digest whose subject is unstated proves nothing, so each is named:
 | Digest | Covers |
 |---|---|
 | `document_sha256` | the complete bytes of the reviewed document revision as retained, and as every attestation binds it — **not** the executed PDF |
-| `field_schema_sha256` | the canonical JSON of the field schema copied onto the envelope at creation |
+| `field_schema_sha256` | the canonical JSON of the field schema copied onto the envelope at creation, with its anchors resolved at send — the form every attestation binds |
 | `material_values_sha256` | the canonical encoding of the shared agreement content; signer-specific values are excluded by design |
 | `field_value_sha256:<id>` | the canonical JSON encoding of one stored field value |
 | `attestation_sha256:<id>` | one acceptance — envelope and recipient ids, the document/schema/material digests, the consent version displayed, the session it was given in, the server acceptance time, the verification method, minimized client evidence, and the previous acceptance's digest |

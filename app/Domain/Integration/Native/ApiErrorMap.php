@@ -6,6 +6,7 @@ namespace App\Domain\Integration\Native;
 
 use App\Domain\Delivery\Outbound\Exceptions\DestinationRefusedException;
 use App\Domain\Delivery\Webhooks\Exceptions\UnknownEventNameException;
+use App\Domain\Preparation\Anchoring\AnchorDocumentUnavailable;
 use App\Domain\Preparation\Schema\InvalidFieldSchemaException;
 use App\Domain\Preparation\Schema\ValidationError;
 use App\Domain\Preparation\Templates\TemplateStateException;
@@ -69,6 +70,15 @@ final class ApiErrorMap
                 ['subject' => $exception->subject, 'expected_version' => $exception->expectedVersion],
             ),
 
+            // Not a validation failure: the field set is fine and the document could not be read on
+            // the service side. A 422 would tell the caller to correct a document that needs no
+            // correcting, and would land in the bucket clients never retry.
+            $exception instanceof AnchorDocumentUnavailable => ApiException::of(
+                ErrorCode::DocumentUnavailable,
+                $exception->getMessage(),
+                ['retryable' => true],
+            ),
+
             // Every reason at once, because send is the last cheap moment to fix any of them.
             $exception instanceof SendPreconditionsFailed => ApiException::of(
                 ErrorCode::SendPreconditionsFailed,
@@ -85,8 +95,8 @@ final class ApiErrorMap
             // The structured errors when the snapshot carried any — a schema that does not import
             // brings the importer's own list. Without them a caller reading
             // `reason: invalid_field_schema` has to guess which of a dozen rules it broke, and the
-            // codes that say something specific — `coordinate_too_precise`,
-            // `anchor_resolution_unavailable` — would survive only inside a sentence.
+            // codes that say something specific — `coordinate_too_precise`, the anchor codes — would
+            // survive only inside a sentence.
             $exception instanceof InvalidEnvelopeSnapshot => ApiException::of(
                 ErrorCode::InvalidSnapshot,
                 $exception->getMessage(),
@@ -101,8 +111,7 @@ final class ApiErrorMap
 
             // Every structured error, not only the first one flattened into a sentence. Codes
             // are API surface and a client is expected to branch on them — `coordinate_too_precise`
-            // and `anchor_resolution_unavailable` in particular say something a caller can act on
-            // that "invalid_field_schema" does not.
+            // in particular says something a caller can act on that "invalid_field_schema" does not.
             $exception instanceof InvalidFieldSchemaException => ApiException::of(
                 ErrorCode::InvalidSnapshot,
                 $exception->getMessage(),

@@ -15,7 +15,6 @@ use App\Domain\Preparation\Anchoring\RevisionAnchorResolver;
 use App\Domain\Preparation\Documents\Models\Document;
 use App\Domain\Preparation\Documents\Models\DocumentRevision;
 use App\Domain\Preparation\Documents\PreflightPageSizes;
-use App\Domain\Preparation\Schema\AnchorResolutionGate;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\FieldSchemaValidator;
 use App\Domain\Preparation\Schema\InvalidFieldSchemaException;
@@ -362,10 +361,9 @@ final readonly class TemplateService
      * from a template at all. What publishing buys is the early failure, and a published version
      * whose rectangles are already concrete.
      *
-     * An *optional* anchor that is absent would be reported here and left unresolved rather than
-     * omitted: which fields an envelope leaves out is a fact about that envelope, recorded when it
-     * is sent. Until send-time resolution lifts {@see AnchorResolutionGate}, an optional anchor
-     * cannot be stored in a draft at all.
+     * An *optional* anchor that is absent is reported here and left unresolved rather than
+     * omitted: which fields an envelope leaves out is a fact about that envelope, recorded on it
+     * when it is sent.
      *
      * @throws TemplateStateException When the template is retired or the version is already published.
      * @throws InvalidFieldSchemaException When an anchor cannot be resolved, with one entry per
@@ -636,9 +634,6 @@ final readonly class TemplateService
         if ($result->hasErrors()) {
             throw new InvalidFieldSchemaException($result);
         }
-
-        // Deleted with AnchorResolutionGate when send-time resolution lands.
-        AnchorResolutionGate::assertAvailable($fieldSchema);
 
         return FieldSchemaDocument::fromArray($fieldSchema);
     }

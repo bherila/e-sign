@@ -124,6 +124,7 @@ human reading a log, and `details` appears only when there is something structur
 | `unknown_event_name` | 422 | An event name that is neither in the profile nor prefixed `esign.` |
 | `too_many_requests` | 429 | Too many **failed** authentications from this client address in the last minute; `Retry-After` says how long |
 | `unsupported` | 501 | Declared here and not implemented in this build — never a successful no-op |
+| `document_unavailable` | 503 | The envelope's document could not be read to resolve its anchors at send; nothing changed, and `details.retryable` is `true` |
 | `internal_error` | 500 | Something unanticipated; the detail is in the server's log, not in your body |
 
 A `409` is never retried into success by the same request. A `422` usually is, after you fix

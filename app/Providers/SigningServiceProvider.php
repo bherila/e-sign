@@ -7,16 +7,19 @@ namespace App\Providers;
 use App\Domain\Evidence\Contracts\PdfSealer;
 use App\Domain\Signing\Assurance\ConfiguredSealAssurancePolicyCheck;
 use App\Domain\Signing\Assurance\SealMaterialAssurancePolicyCheck;
+use App\Domain\Signing\Contracts\AnchorResolution;
 use App\Domain\Signing\Contracts\AssurancePolicyCheck;
 use App\Domain\Signing\Contracts\EnvelopeEventSink;
 use App\Domain\Signing\Envelopes\AuditEnvelopeEventSink;
+use App\Domain\Signing\Envelopes\EnvelopeAnchorResolution;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
 
 /**
- * Wires the Signing module's two ports.
+ * Wires the Signing module's ports.
  *
- * Both defaults are deliberate rather than placeholders:
+ * `AnchorResolution` is bound to `EnvelopeAnchorResolution`, which delegates to
+ * `Preparation\Anchoring`. The other two defaults are deliberate rather than placeholders:
  *
  * - {@see AuditEnvelopeEventSink} writes each transition to the append-only
  *   `esign_audit_events` store, inside the transaction that made it. It is the module's own
@@ -41,6 +44,10 @@ final class SigningServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->bind(EnvelopeEventSink::class, AuditEnvelopeEventSink::class);
+
+        // Send-time anchor resolution. No null implementation exists, deliberately: an envelope
+        // sent with unresolved anchors has fields with no agreed position.
+        $this->app->bind(AnchorResolution::class, EnvelopeAnchorResolution::class);
 
         $this->app->bind(
             AssurancePolicyCheck::class,
