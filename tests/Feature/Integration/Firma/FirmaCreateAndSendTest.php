@@ -15,6 +15,7 @@ use Illuminate\Filesystem\FilesystemManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use Mockery;
+use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
 use Tests\Support\FirmaFacadeScenario;
 use Tests\Support\PdfFixtures;
@@ -245,6 +246,88 @@ class FirmaCreateAndSendTest extends TestCase
         $this->assertEqualsWithDelta(582.4, $field->rect->y, 0.01);
         $this->assertEqualsWithDelta(170.0, $field->rect->width, 0.01);
         $this->assertEqualsWithDelta(36.0, $field->rect->height, 0.01);
+    }
+
+    /**
+     * An anchor's corner and offset survive the send.
+     *
+     * Sending resolves every anchor again from what the schema stores. The facade stored only the
+     * text and the occurrence, so a field placed from any corner but top-left, or with any offset,
+     * was re-placed at the bare top-left corner of its text when the request was sent — after the
+     * create response had reported where the caller asked for it.
+     *
+     * @return iterable<string, array{string, float, float}>
+     */
+    public static function anchorCorners(): iterable
+    {
+        // "Signature:" occupies x = 72, y = 582.4, 72 × 12 pt on the letter page.
+        yield 'top_left' => ['top_left', 72.0, 582.4];
+        yield 'top_right' => ['top_right', 144.0, 582.4];
+        yield 'bottom_left' => ['bottom_left', 72.0, 594.4];
+        yield 'bottom_right' => ['bottom_right', 144.0, 594.4];
+    }
+
+    #[DataProvider('anchorCorners')]
+    public function test_an_anchors_corner_and_offset_survive_the_send(string $origin, float $cornerX, float $cornerY): void
+    {
+        [, $issued] = $this->scenario();
+
+        $response = $this->postJson(self::BASE.'/create-and-send', [
+            'name' => 'Synthetic anchored with an offset',
+            'document' => base64_encode(PdfFixtures::bytes('single-page-letter')),
+            'recipients' => [['first_name' => 'Dana', 'email' => 'dana@buyer.example.test', 'order' => 1]],
+            'fields' => [[
+                'type' => 'signature',
+                'page_number' => 1,
+                'anchor' => ['text' => 'Signature:', 'origin' => $origin, 'offset_x' => 10.0, 'offset_y' => 5.0],
+                'position' => ['x' => 0.0, 'y' => 0.0, 'width' => 27.0, 'height' => 4.5],
+            ]],
+        ], FirmaFacadeScenario::headers($issued))->assertStatus(201);
+
+        $envelope = Envelope::query()->where('public_id', $response->json('id'))->firstOrFail();
+        $field = $envelope->fieldSchema()->fields[0];
+
+        $this->assertSame(EnvelopeState::Sent, $envelope->state);
+        $this->assertNotNull($field->anchor?->resolved, 'Send resolved the anchor; this is not the create-time rectangle left alone.');
+
+        // 10% of 612 pt across and 5% of 792 pt down, from the requested corner.
+        $this->assertEqualsWithDelta($cornerX + 61.2, $field->rect->x, 0.0005);
+        $this->assertEqualsWithDelta($cornerY + 39.6, $field->rect->y, 0.0005);
+    }
+
+    /**
+     * An offset finer than the schema keeps lands on the same rectangle in a draft and once sent.
+     *
+     * The draft is placed when the request is created; the sent envelope is placed again at send,
+     * from the stored offset. Placing the first from a more precise offset than the one stored would
+     * let the two disagree in the last decimal the schema keeps.
+     */
+    public function test_a_fractional_offset_lands_on_the_same_rectangle_in_a_draft_and_once_sent(): void
+    {
+        [, $issued] = $this->scenario();
+
+        $body = [
+            'name' => 'Synthetic anchored with a fractional offset',
+            'document' => base64_encode(PdfFixtures::bytes('single-page-letter')),
+            'recipients' => [['first_name' => 'Dana', 'email' => 'dana@buyer.example.test', 'order' => 1]],
+            'fields' => [[
+                'type' => 'signature',
+                'page_number' => 1,
+                'anchor' => ['text' => '  Signature:  ', 'origin' => 'bottom_right', 'offset_x' => 3.3333, 'offset_y' => 1.2345],
+                'position' => ['x' => 0.0, 'y' => 0.0, 'width' => 27.0, 'height' => 4.5],
+            ]],
+        ];
+
+        $draft = $this->postJson(self::BASE, $body, FirmaFacadeScenario::headers($issued))->assertStatus(201);
+        $sent = $this->postJson(self::BASE.'/create-and-send', $body, FirmaFacadeScenario::headers($issued))->assertStatus(201);
+
+        $draftField = Envelope::query()->where('public_id', $draft->json('id'))->firstOrFail()->fieldSchema()->fields[0];
+        $sentEnvelope = Envelope::query()->where('public_id', $sent->json('id'))->firstOrFail();
+
+        $this->assertSame(EnvelopeState::Sent, $sentEnvelope->state);
+        $this->assertSame($draftField->rect->toArray(), $sentEnvelope->fieldSchema()->fields[0]->rect->toArray());
+        // The text is stored as it was searched for, so send looks for the same string.
+        $this->assertSame('Signature:', $draftField->anchor?->text);
     }
 
     /**

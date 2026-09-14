@@ -239,10 +239,12 @@ final readonly class FieldPlacement
             $position = self::position($field, $index);
             $rect = $this->rect($page, $position, $index);
             $anchor = is_array($field['anchor'] ?? null) ? $field['anchor'] : null;
+            $resolved = null;
 
             if ($anchor !== null) {
                 $runs ??= $this->extract($documentBytes);
-                $rect = $this->anchoredRect($runs, $page, $anchor, $rect, $pageNumber, $index);
+                $resolved = $this->anchored($runs, $page, $anchor, $rect, $pageNumber, $index);
+                $rect = $resolved->resolvedRect;
             }
 
             $id = self::identifier($field, $index, $ids);
@@ -274,11 +276,8 @@ final readonly class FieldPlacement
                 $definition['alias'] = self::normaliseVariableName($variableName);
             }
 
-            if ($anchor !== null) {
-                $definition['anchor'] = [
-                    'text' => (string) $anchor['text'],
-                    'occurrence' => self::occurrenceValue($anchor),
-                ];
+            if ($anchor !== null && $resolved instanceof ResolvedAnchor) {
+                $definition['anchor'] = self::storedAnchor($resolved->anchor, $anchor);
             }
 
             $placed[] = $definition;
@@ -453,19 +452,54 @@ final readonly class FieldPlacement
     }
 
     /**
+     * The anchor as the schema stores it: everything sending needs to place the field again.
+     *
+     * Sending resolves every anchor afresh from what the schema holds (docs/preparation/anchors.md),
+     * never from the rectangle computed here. An anchor stored without its corner and offset is
+     * re-placed at the bare top-left corner of its text, so the field moves between the create
+     * response and the envelope anybody signs. So the stored anchor is the one the rectangle was
+     * computed from: its trimmed text, its corner, and its offset in native points at the precision
+     * the schema keeps. A default corner and a zero offset are omitted, as the canonical form omits
+     * them.
+     *
+     * @param  array<string, mixed>  $request  The caller's `anchor` object.
+     * @return array<string, mixed>
+     */
+    private static function storedAnchor(Anchor $anchor, array $request): array
+    {
+        $stored = [
+            'text' => $anchor->text,
+            'occurrence' => self::occurrenceValue($request),
+        ];
+
+        if ($anchor->origin !== AnchorOrigin::TopLeft) {
+            $stored['origin'] = $anchor->origin->value;
+        }
+
+        if ($anchor->offsetX !== 0.0 || $anchor->offsetY !== 0.0) {
+            $stored['offset'] = [
+                'dx' => CanonicalNumber::encode($anchor->offsetX),
+                'dy' => CanonicalNumber::encode($anchor->offsetY),
+            ];
+        }
+
+        return $stored;
+    }
+
+    /**
      * @param  array<int, TextRun>  $runs
      * @param  array<string, mixed>  $anchor
      *
      * @throws FirmaException
      */
-    private function anchoredRect(
+    private function anchored(
         array $runs,
         PageGeometry $page,
         array $anchor,
         NativeRect $sized,
         int $pageNumber,
         int $index,
-    ): NativeRect {
+    ): ResolvedAnchor {
         $text = trim((string) ($anchor['text'] ?? ''));
 
         if ($text === '') {
@@ -481,18 +515,23 @@ final readonly class FieldPlacement
         $offsetPercentX = self::offset($anchor, 'offset_x', $index);
         $offsetPercentY = self::offset($anchor, 'offset_y', $index);
 
+        // Rounded to the precision the schema stores, before anything is placed with them: send
+        // re-places the field from the stored offset, and a rectangle computed here from a more
+        // precise one could differ from the rectangle the signers are shown.
         $resolved = $this->resolve($runs, new Anchor(
             text: $text,
             occurrence: self::occurrence($anchor, $index),
             page: $pageNumber,
-            offsetX: $offsetPercentX / 100.0 * $page->nativeWidth(),
-            offsetY: $offsetPercentY / 100.0 * $page->nativeHeight(),
+            offsetX: CanonicalNumber::round($offsetPercentX / 100.0 * $page->nativeWidth()),
+            offsetY: CanonicalNumber::round($offsetPercentY / 100.0 * $page->nativeHeight()),
             width: $sized->width,
             height: $sized->height,
             origin: self::origin($anchor, $index),
         ), $index);
 
-        return self::assertOnPage($resolved->resolvedRect, $page, $index);
+        self::assertOnPage($resolved->resolvedRect, $page, $index);
+
+        return $resolved;
     }
 
     /**
