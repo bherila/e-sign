@@ -102,12 +102,27 @@ Two of its checks are proxies, not direct observations, and it says so in its ow
 
 ## Cron
 
-Exactly two lines, both every minute:
+Exactly two lines, both every minute, each with its own memory limit (no ini file next to the
+application reaches the CLI) and a `# JOB:` id:
 
 ```cron
-* * * * * cd /home/USER/bwh-esign && php artisan schedule:run >> /dev/null 2>&1
-* * * * * cd /home/USER/bwh-esign && php artisan esign:queue:work-bounded >> /dev/null 2>&1
+* * * * * cd "$HOME/bwh-esign" && /path/to/php -d memory_limit=1G artisan schedule:run > /dev/null 2>&1 # JOB:bwh-esign-scheduler
+* * * * * cd "$HOME/bwh-esign" && /path/to/php -d memory_limit=1G artisan esign:queue:work-bounded > /dev/null 2>&1 # JOB:bwh-esign-queue-worker
 ```
+
+**The deploy workflow installs them.** `.github/workflows/deploy.yml` runs
+`scripts/deploy/install-cron.sh` on the host after every deploy. It replaces only this
+application's lines: those running from its directory, in any spelling, or carrying one of
+its job ids. Every other line on the account is left as it was. It takes a lock, refuses to
+rewrite anything when `crontab -l` fails, keeps the previous crontab under
+`~/.crontab-backups`, installs from a file and reads it back. A fresh account therefore gets
+its cron on the first deploy, and a hand edit to these two lines lasts only until the next
+deploy. Change them in the workflow instead. `scripts/deploy/test-install-cron.sh` runs before
+the install, so a regression in the script fails the deploy instead of touching the crontab.
+
+The same deploy then runs `esign:doctor` on the host. It also confirms through `/health/ready`
+that web requests read documents in a child process (`document_isolation` is `ok`), and
+fails otherwise.
 
 **Edit crontabs via a file, never a pipeline through `crontab`.** `crontab -l | ... | crontab -`
 silently replaces the *entire* crontab — every other job already on the account, not just this
@@ -169,13 +184,18 @@ proposal for sealing a large synthetic PDF, not a number derived from a producti
 with real measurements can replace it. `-1` (memory) and `0` (execution time) both mean
 "unlimited" to PHP and are treated as satisfying any minimum.
 
-For the **CLI** SAPI the cron lines run under, put the limit on the cron line itself
-(`php -d memory_limit=… artisan …`): no ini file next to the application is read by the CLI.
+For the **CLI** SAPI the cron lines run under, the limit is on each cron line itself
+(`-d memory_limit=1G`, above), because no ini file next to the application is read by the CLI.
 The web SAPI's own limits govern request-time work (uploads, the editor) and are configured
-separately. Under a **LiteSpeed** web SAPI, `.user.ini` is commonly ignored; `public/.htaccess`
-sets `memory_limit` with `php_value` inside `<IfModule LiteSpeed>`, which LiteSpeed does honour.
-Either way, verify the running values through the vhost rather than from a file — see also the
-CLI-vs-web split `esign:doctor`'s `web_php_version` check exists to catch in the first place.
+separately. Under a **LiteSpeed** web SAPI, `.user.ini` is silently ignored. Instead,
+`public/.htaccess` sets `memory_limit` with `php_value` inside `<IfModule LiteSpeed>`, which
+LiteSpeed does honour.
+
+The deploy verifies the web value rather than trusting a file:
+`scripts/deploy/verify-web-php.sh` writes a one-line PHP file with an unguessable name into
+`public/`, fetches it through the site's URL, and always deletes it. The deploy fails when the
+vhost runs another PHP version or a `memory_limit` below 1024M. See also the CLI-vs-web split
+that `esign:doctor`'s `web_php_version` check exists to catch.
 
 ## Process isolation for document reads
 
