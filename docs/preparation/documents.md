@@ -229,8 +229,16 @@ streams the engine writes itself, and there is no honest number for the second p
 the work of reading still applies: the per-stream decode ceiling and the time and memory
 backstops. Pages are checked against the count actually written.
 
-Cooperative metering has a known limit: it bounds only work a loop reports. Hard process-level
-bounds on document reads are tracked separately as the structural answer to that class.
+Cooperative metering has a known limit: it bounds only work a loop reports, and nothing inside PHP
+can interrupt one long native call. **The hard bound is a child process**
+([`docs/adr/0006-process-bounded-document-reads.md`](../adr/0006-process-bounded-document-reads.md)):
+where the host can start one, every read runs with its own `memory_limit` and a wall-clock deadline,
+each set to the backstop above plus `esign.documents.isolation.*_headroom_*`, so the named ceiling still
+trips first and the runtime stops only the work nothing reported. A child the runtime stopped is
+reported as `time_budget_exceeded` or `memory_budget_exceeded`, under the same rule about who is told
+as any other ceiling; a caller's budget is handed to the child as what remains of it, and what the
+child counted is charged back. Where no child can be started, `ESIGN_DOCUMENTS_ISOLATION=auto` reads
+in-process, bounded by the cooperative budget alone — see `docs/assurance.md`.
 
 **One boundary admits and parses a document: `DocumentRead`.** Preflight, text extraction and
 assembly all read documents, and admission (is this document allowed to be read at all) and

@@ -175,6 +175,35 @@ lines run under. The web SAPI's own limits govern request-time work (uploads, th
 are configured the same way, but separately — see the CLI-vs-web split
 `esign:doctor`'s `web_php_version` check exists to catch in the first place.
 
+## Process isolation for document reads
+
+Every read of an uploaded PDF — preflight at upload, text extraction for the Firma facade, assembly at
+finalization — runs in a child PHP process with a hard `memory_limit` and a wall-clock deadline when
+the host can start one ([`docs/adr/0006-process-bounded-document-reads.md`](../adr/0006-process-bounded-document-reads.md)).
+`ESIGN_DOCUMENTS_ISOLATION=auto`, the default, uses a child wherever one can be started and trusted,
+and falls back to in-process otherwise; `esign:doctor`'s `document_isolation` check says which one a
+read will actually get, and why.
+
+**Set `ESIGN_DOCUMENTS_ISOLATION_PHP_BINARY` on this profile**, to the same full CLI path the cron lines
+use (for example `/opt/cpanel/ea-php85/root/usr/bin/php`). Two things make the default search unreliable
+here:
+
+- Under the web handler, PHP's own idea of its binary is the LiteSpeed/FPM handler, not a CLI, so a web
+  request cannot start a child from it.
+- The first `php` on the account's path is routinely an **older** installation than the one serving the
+  site. A child started from it would fail Composer's platform check on every read. The trial child
+  catches this — it only trusts a binary that runs this application's PHP major and minor version and
+  honours `-d memory_limit` — and under `auto` the read then falls back to in-process, which works but
+  loses the hard bound. `esign:doctor` reports it as a warning naming both versions.
+
+A child starts in tens of milliseconds, because it loads Composer's autoloader and the PDF adapters and
+nothing else. Under `ESIGN_DOCUMENTS_ISOLATION=process`, a host that cannot start a trusted child
+refuses to read documents instead of reading them without the bound; `esign:doctor` fails in that case.
+
+The web handler's and the CLI's own `memory_limit` still matter for everything that is not a document
+read, and on a LiteSpeed web SAPI `.user.ini` may be silently ignored: verify the running values through
+the vhost, not from the file (see "Memory and time limits" above).
+
 ## Key isolation on shared hosting
 
 The PHP-FPM/LSAPI web process and the cron-driven queue worker run as **the same OS user** on

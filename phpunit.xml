@@ -42,5 +42,9 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <!-- Document reads run in-process for the general suite; the isolation tests start real
+             children explicitly (docs/adr/0006). A child per read across the whole suite would
+             multiply its run time and prove nothing those tests do not. -->
+        <env name="ESIGN_DOCUMENTS_ISOLATION" value="in_process"/>
     </php>
 </phpunit>
