@@ -33,6 +33,14 @@ class ApplicationAccessController extends Controller
             return self::error('not_found', 404);
         }
 
+        // A declared oversize body is refused before it is read. The web server bounds this route's
+        // body to the same ceiling (.docker/nginx/nginx.conf), because the global middleware reads a
+        // JSON body before any controller runs; this check covers servers without that rule.
+        $declared = $request->headers->get('Content-Length');
+        if ($declared !== null && (! ctype_digit($declared) || (int) $declared > DelegatedContract::MAX_REQUEST_BYTES)) {
+            return self::error('invalid_request', 422);
+        }
+
         $body = $request->getContent();
         $authorization = (string) $request->header('Authorization', '');
 

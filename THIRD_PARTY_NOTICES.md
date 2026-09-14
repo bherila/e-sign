@@ -12,8 +12,8 @@ file and fails the build on a license that is not allowed.
 - **Generated from:** `composer licenses --format=json` after `composer install --no-dev`,
   and `pnpm licenses list --json --prod`.
 - **Checked by:** `scripts/check-licenses.php` (allowlist + per-package exceptions).
-- **Inventory date:** 2026-09-08.
-- **Counts:** 117 Composer production packages, 70 pnpm production packages. The pnpm table
+- **Inventory date:** 2026-09-14.
+- **Counts:** 118 Composer production packages, 70 pnpm production packages. The pnpm table
   below lists 72 rows because `immer` and `react-is` are each installed at two versions; the
   count is of distinct packages, the table is of installed versions.
 
@@ -47,7 +47,7 @@ ever needed, revisit the plugin.
 | MIT | 92 | 54 | |
 | LGPL-3.0-or-later | 14 | 0 | The `tecnickcom/tc-lib-*` PDF engine family — see below. |
 | ISC | 0 | 12 | |
-| BSD-3-Clause | 5 | 1 | |
+| BSD-3-Clause | 6 | 1 | |
 | Apache-2.0 | 4 | 2 | The three AWS packages, plus `pdfjs-dist` alongside `class-variance-authority` — see below. |
 | BSD-3-Clause OR GPL-2.0-only OR GPL-3.0-only | 2 | 0 | `nette/schema`, `nette/utils`. Disjunctive: **we take BSD-3-Clause** and no GPL obligation attaches. |
 | MIT AND ISC | 0 | 1 | `victory-vendor`. Conjunctive: both apply, both permissive. |
@@ -216,14 +216,14 @@ Installed into a throwaway virtualenv by the job and never committed. Its transi
 (`asn1crypto`, `cryptography`, `pyhanko-certvalidator`, and the rest) is resolved at install
 time and is not pinned here; nothing from it is distributed either.
 
-## Composer production dependencies (117)
+## Composer production dependencies (118)
 
 | Package | Version | License |
 |---|---|---|
 | `aws/aws-crt-php` | 1.2.7 | Apache-2.0 |
 | `aws/aws-php-sns-message-validator` | 1.10.2 | Apache-2.0 |
 | `aws/aws-sdk-php` | 3.394.9 | Apache-2.0 |
-| `bherila/auth-laravel` | 0.12.2 | MIT |
+| `bherila/auth-laravel` | 0.14.0 | MIT |
 | `brick/math` | 0.18.0 | MIT |
 | `carbonphp/carbon-doctrine-types` | 3.2.1 | MIT |
 | `dflydev/dot-access-data` | 3.0.3 | MIT |
@@ -242,6 +242,7 @@ time and is not pinned here; nothing from it is distributed either.
 | `laravel/prompts` | 0.3.24 | MIT |
 | `laravel/serializable-closure` | 2.0.16 | MIT |
 | `laravel/tinker` | 3.0.2 | MIT |
+| `lcobucci/jwt` | 5.6.0 | BSD-3-Clause |
 | `league/commonmark` | 2.10.1 | BSD-3-Clause |
 | `league/config` | 1.2.0 | BSD-3-Clause |
 | `league/flysystem` | 3.36.0 | MIT |

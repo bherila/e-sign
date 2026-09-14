@@ -222,6 +222,34 @@ final class DelegatedAccessTest extends TestCase
         $this->assertTrue($response['allowed_edits']['provision']);
     }
 
+    /** Cursors carry the last id shown, so a row removed between pages skips nothing (#127 review). */
+    public function test_a_subject_removed_between_pages_does_not_make_the_next_page_skip_one(): void
+    {
+        $later = $this->bound('later-subject', 'Example Later');
+        $this->member($this->owned, $later, WorkspaceRole::Auditor);
+
+        $first = $this->validated($this->send(['operation' => 'subjects', 'limit' => 2]), 'subjects');
+        $this->assertSame(['actor-subject', 'target-subject'], array_column($first['subjects'], 'subject'));
+
+        WorkspaceMembership::query()->where('workspace_id', $this->owned->getKey())->where('user_id', $this->target->getKey())->delete();
+
+        $next = $this->validated($this->send(['operation' => 'subjects', 'limit' => 2, 'cursor' => $first['next_cursor']]), 'subjects');
+        $this->assertSame(['later-subject'], array_column($next['subjects'], 'subject'));
+        $this->assertNull($next['next_cursor']);
+    }
+
+    public function test_a_declared_oversize_body_is_refused_before_it_is_read(): void
+    {
+        $body = $this->body(['operation' => 'capabilities']);
+
+        $this->call('POST', '/application-access', [], [], [], [
+            'CONTENT_TYPE' => 'application/json',
+            'HTTP_ACCEPT' => 'application/json',
+            'CONTENT_LENGTH' => (string) (DelegatedContract::MAX_REQUEST_BYTES + 1),
+            'HTTP_AUTHORIZATION' => 'Bearer '.$this->assertion('actor-subject', $body),
+        ], $body)->assertStatus(422);
+    }
+
     // ------------------------------------------------------------------------ changing
 
     public function test_an_update_changes_adds_and_removes_memberships_through_the_members_service(): void

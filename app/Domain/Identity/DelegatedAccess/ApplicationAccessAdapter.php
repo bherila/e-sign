@@ -18,6 +18,7 @@ use BWH\Auth\OAuth\DelegatedAccess\DelegatedAccessException;
 use BWH\Auth\OAuth\DelegatedAccess\DelegatedContract;
 use Illuminate\Contracts\Encryption\Encrypter;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Throwable;
@@ -112,13 +113,14 @@ final readonly class ApplicationAccessAdapter
      */
     private function workspacesPage(string $actorSubject, array $managed, array $payload): array
     {
-        $offset = $this->offset($actorSubject, 'workspaces', $payload);
+        $after = $this->after($actorSubject, 'workspaces', $payload);
         $limit = (int) ($payload['limit'] ?? self::PAGE_SIZE);
-        $page = array_slice(array_values($managed), $offset, $limit);
+        $remaining = array_values(array_filter($managed, static fn (Workspace $workspace): bool => $workspace->getKey() > $after));
+        $page = array_slice($remaining, 0, $limit);
 
         return [
             'workspaces' => array_map(static fn (Workspace $workspace): array => ['id' => $workspace->public_id, 'label' => $workspace->name], $page),
-            'next_cursor' => $offset + $limit < count($managed) ? $this->cursor($actorSubject, 'workspaces', $offset + $limit) : null,
+            'next_cursor' => count($remaining) > $limit ? $this->cursor($actorSubject, 'workspaces', (int) $page[array_key_last($page)]->getKey()) : null,
         ];
     }
 
@@ -131,7 +133,7 @@ final readonly class ApplicationAccessAdapter
      */
     private function subjectsPage(string $actorSubject, array $managed, array $payload): array
     {
-        $offset = $this->offset($actorSubject, 'subjects', $payload);
+        $after = $this->after($actorSubject, 'subjects', $payload);
         $limit = (int) ($payload['limit'] ?? self::PAGE_SIZE);
         $workspaceIds = array_keys($managed);
 
@@ -139,8 +141,8 @@ final readonly class ApplicationAccessAdapter
             ->with('user')
             ->where('issuer', $this->settings->bindingIssuer())
             ->whereHas('user.workspaceMemberships', static fn (Builder $memberships): Builder => $memberships->whereIn('workspace_id', $workspaceIds))
+            ->where('id', '>', $after)
             ->orderBy('id')
-            ->offset($offset)
             ->limit($limit + 1)
             ->get();
 
@@ -151,7 +153,7 @@ final readonly class ApplicationAccessAdapter
                 'subject' => $binding->subject,
                 'label' => Str::limit((string) $binding->user?->name, 250, '') ?: $binding->subject,
             ])->values()->all(),
-            'next_cursor' => $bindings->count() > $limit ? $this->cursor($actorSubject, 'subjects', $offset + $limit) : null,
+            'next_cursor' => $bindings->count() > $limit ? $this->cursor($actorSubject, 'subjects', (int) $page->last()?->getKey()) : null,
         ];
     }
 
@@ -234,6 +236,10 @@ final readonly class ApplicationAccessAdapter
             $desired[$workspace->getKey()] = $role;
         }
 
+        // Grants lock each workspace's rows in turn. In workspace order, two requests naming the
+        // same workspaces in a different order queue behind each other instead of deadlocking.
+        ksort($desired);
+
         try {
             $payload['expected_revision'] === null
                 ? $this->provision($actor, $managed, $subject, $desired, $payload['display_name'] ?? null)
@@ -259,6 +265,24 @@ final readonly class ApplicationAccessAdapter
     {
         $issuer = $this->settings->bindingIssuer();
 
+        try {
+            $this->provisionLocked($actor, $managed, $subject, $desired, $displayName, $issuer);
+        } catch (UniqueConstraintViolationException) {
+            // Somebody bound the subject first: another provisioning request, or the person's own
+            // first sign-in. Either way the provider's view is stale, as for an existing binding.
+            throw new DelegatedAccessException('revision_conflict', 409);
+        }
+    }
+
+    /**
+     * @param  array<int, Workspace>  $managed
+     * @param  array<int, WorkspaceRole>  $desired
+     *
+     * @throws DelegatedAccessException
+     * @throws MembershipChangeRefused
+     */
+    private function provisionLocked(User $actor, array $managed, string $subject, array $desired, mixed $displayName, string $issuer): void
+    {
         DB::transaction(function () use ($actor, $managed, $subject, $desired, $displayName, $issuer): void {
             if (IdentityBinding::query()->forIssuerSubject($issuer, $subject)->lockForUpdate()->exists()) {
                 // Already provisioned: the provider's view is stale, and a null revision is not a
@@ -432,7 +456,7 @@ final readonly class ApplicationAccessAdapter
      *
      * @throws DelegatedAccessException
      */
-    private function offset(string $actorSubject, string $operation, array $payload): int
+    private function after(string $actorSubject, string $operation, array $payload): int
     {
         if (! isset($payload['cursor'])) {
             return 0;
@@ -445,17 +469,18 @@ final readonly class ApplicationAccessAdapter
         }
 
         // Bound to the actor and the operation, so a cursor cannot be replayed by somebody else or
-        // against another listing.
+        // against another listing. It carries the last id shown, never an offset: a row removed
+        // between pages must not make the next page skip one.
         if (! is_array($cursor) || ($cursor['actor'] ?? null) !== $actorSubject || ($cursor['operation'] ?? null) !== $operation
-            || ! is_int($cursor['offset'] ?? null) || $cursor['offset'] < 0) {
+            || ! is_int($cursor['after'] ?? null) || $cursor['after'] < 0) {
             throw new DelegatedAccessException('invalid_cursor', 422);
         }
 
-        return $cursor['offset'];
+        return $cursor['after'];
     }
 
-    private function cursor(string $actorSubject, string $operation, int $offset): string
+    private function cursor(string $actorSubject, string $operation, int $after): string
     {
-        return $this->encrypter->encryptString((string) json_encode(['actor' => $actorSubject, 'operation' => $operation, 'offset' => $offset]));
+        return $this->encrypter->encryptString((string) json_encode(['actor' => $actorSubject, 'operation' => $operation, 'after' => $after]));
     }
 }
