@@ -18,8 +18,9 @@ use Throwable;
  * finalizations a retry would have completed, and told integrations to correct requests that needed
  * no correcting (docs/adr/0006, issue #119).
  *
- * Raised when a read's child process could not be started, exited unexpectedly or answered with
- * something that could not be decoded; and, as {@see DocumentIsolationUnavailable},
+ * Raised when a read's child process could not be started, exited unexpectedly, answered with
+ * something that could not be decoded, or answered that its read threw something it did not
+ * anticipate (`kind: failed`); and, as {@see DocumentIsolationUnavailable},
  * when process isolation is required and this host cannot provide it.
  *
  * `getMessage()` is for the log, and can name the host's PHP binary or the child's exit status.

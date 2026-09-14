@@ -116,6 +116,14 @@ final readonly class IsolatedPdfTextLocator implements PdfTextLocator
                 );
             }
 
+            if (($response['kind'] ?? null) === 'failed') {
+                // The child's read threw something it did not anticipate, and it said so in a decoded
+                // answer with exit status zero, so there is no ChildReadFailed to catch. Nothing about
+                // the document was learned, and the message is the child's exception, not a statement
+                // about the bytes.
+                throw new DocumentReadUnavailable('The document read process failed unexpectedly: '.(string) ($response['message'] ?? ''));
+            }
+
             // A document the child could not read is still a document it spent work reading.
             $budget?->absorb((int) ($response['decoded'] ?? 0), (int) ($response['objects'] ?? 0));
 

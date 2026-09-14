@@ -57,8 +57,9 @@ unreadable-document failure. Who is told about a ceiling is unchanged: a caller 
 budget hears the ceiling, a caller that did not sees the unreadable-document failure.
 
 **A read that failed on the service side is not an unreadable document** (amended 2026-09-14,
-issue #119). A child that could not be started, exited unexpectedly or answered with something
-undecodable learned nothing about the bytes, and neither did a host that cannot provide the
+issue #119). A child that could not be started, exited unexpectedly, answered with something
+undecodable, or answered that its read threw something unanticipated (`kind: failed`, which it
+reports with exit status zero) learned nothing about the bytes, and neither did a host that cannot provide the
 isolation `process` requires. Every port declares one failure for both, `DocumentReadUnavailable`,
 beside the failure it promises for a document it could not read. As first written, each adapter
 reported it as that document failure instead, which stored valid uploads as `preflight_failed`,

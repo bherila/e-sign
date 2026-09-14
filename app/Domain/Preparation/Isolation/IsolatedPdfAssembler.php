@@ -79,6 +79,13 @@ final readonly class IsolatedPdfAssembler implements PdfAssembler
 
         $message = (string) ($response['message'] ?? 'The document could not be re-assembled.');
 
+        if (($response['kind'] ?? null) === 'failed') {
+            // The child's read threw something it did not anticipate and answered with exit status
+            // zero, so no ChildReadFailed. As an AssemblyException, finalization would give up on an
+            // envelope a retry could complete.
+            throw new DocumentReadUnavailable('The document read process failed unexpectedly: '.$message);
+        }
+
         if (($response['kind'] ?? null) === 'unsupported') {
             throw new UnsupportedSourceException($message);
         }

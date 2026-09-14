@@ -418,6 +418,27 @@ final class ProcessIsolationTest extends TestCase
         }
     }
 
+    /**
+     * A child whose read threw something unanticipated answers `kind: failed` with exit status zero.
+     *
+     * So there is no failed process, and no `ChildReadFailed`. It is still the service failing, on
+     * every port: as the port's document failure it would be a 422 at publish, a 400 on the facade
+     * and a `finalization_failed` envelope, and the child's exception message would reach a caller.
+     */
+    #[DataProvider('portsReadingThroughABrokenChild')]
+    public function test_a_child_whose_read_failed_unexpectedly_is_a_service_side_failure_on_every_port(\Closure $read): void
+    {
+        $isolation = new DocumentIsolation(IsolationMode::Process, app(Factory::class), PHP_BINARY, 0, 0.0, null, self::FIXTURES.'/answer-failed.php');
+
+        try {
+            $read($isolation, app(PreflightLimits::class));
+            $this->fail('A read whose child failed unexpectedly returned an answer.');
+        } catch (DocumentReadUnavailable $unavailable) {
+            $this->assertTrue($unavailable->isTransient());
+            $this->assertStringNotContainsString('/opt/example', $unavailable->publicMessage());
+        }
+    }
+
     /** Isolation that is required and unavailable is the same failure, and the kind a retry alone cannot cure. */
     public function test_isolation_that_is_unavailable_is_a_service_side_failure_that_is_not_transient(): void
     {
