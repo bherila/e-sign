@@ -34,6 +34,7 @@ return Application::configure(basePath: dirname(__DIR__))
             Route::group([], base_path('routes/health.php'));
             Route::group([], base_path('routes/documents.php'));
             Route::group([], base_path('routes/members.php'));
+            Route::group([], base_path('routes/application-access.php'));
             Route::group([], base_path('routes/templates.php'));
             Route::group([], base_path('routes/editor.php'));
             Route::group([], base_path('routes/mail-webhooks.php'));

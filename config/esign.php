@@ -928,6 +928,37 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Delegated application access (issue #111)
+    |--------------------------------------------------------------------------
+    |
+    | Lets the identity provider's application-access page manage workspace
+    | roles here, through POST /application-access and delegated access contract
+    | version 2 (bherila/auth-laravel). Off unless enabled. Every value that
+    | decides whom to trust is pinned here and never discovered from a request:
+    |
+    |  - issuer:      the provider's exact HTTPS issuer URL
+    |  - endpoint:    this deployment's exact HTTPS /application-access URL, as
+    |                 the provider is configured to call it (the assertion's audience)
+    |  - application: this application's key in the provider's registry
+    |  - public_keys: "key-id|/path/to/public.pem" pairs, comma-separated: the
+    |                 provider's dedicated integration keys, never its OAuth keys
+    |
+    | A subject is matched to a local account through its identity binding under
+    | the OAuth provider name (OAUTH_PROVIDER), exactly as sign-in matches it. See
+    | docs/operations/delegated-access.md.
+    |
+    */
+
+    'delegated_access' => [
+        'enabled' => filter_var(env('ESIGN_DELEGATED_ACCESS_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
+        'issuer' => env('ESIGN_DELEGATED_ACCESS_ISSUER', ''),
+        'endpoint' => env('ESIGN_DELEGATED_ACCESS_ENDPOINT', ''),
+        'application' => env('ESIGN_DELEGATED_ACCESS_APPLICATION', ''),
+        'public_keys' => env('ESIGN_DELEGATED_ACCESS_PUBLIC_KEYS', ''),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Restore drill (Stage 5, issue #40)
     |--------------------------------------------------------------------------
     |
