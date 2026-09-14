@@ -595,7 +595,7 @@
         ],
         "operationId": "sendEnvelope",
         "summary": "Issue the invitations.",
-        "description": "Legal from `draft` only; sending twice is `409 illegal_transition`.\n\nThis is the last cheap moment: after it, correcting material content means a new envelope. The gate is strict and reports **every** problem at once under `details.problems`, so a caller fixing an envelope sees the whole list rather than discovering the next problem after fixing the previous one.\n\nA requested assurance level the deployment cannot actually meet is a problem here, never a silent downgrade.",
+        "description": "Legal from `draft` only; sending twice is `409 illegal_transition`.\n\nThis is the last cheap moment: after it, correcting material content means a new envelope. The gate is strict and reports **every** problem at once under `details.problems`, so a caller fixing an envelope sees the whole list rather than discovering the next problem after fixing the previous one.\n\nA requested assurance level the deployment cannot actually meet is a problem here, never a silent downgrade.\n\nSending resolves every text anchor against the envelope's document and stores the resulting rectangles with the transition. An anchor that cannot be placed is one of the problems; an absent optional anchor omits its field, recorded in `omitted_anchor_fields`.",
         "parameters": [
           {
             "name": "envelope",
@@ -650,6 +650,16 @@
           },
           "422": {
             "description": "`details.problems` lists every reason it cannot be sent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The envelope's document could not be read to resolve its anchors. `error.code` is `document_unavailable` with `details.retryable: true`; nothing was changed, and the same request may be retried.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1942,6 +1952,7 @@
                   "template_state",
                   "too_many_requests",
                   "destination_refused",
+                  "document_unavailable",
                   "unknown_event_name",
                   "unsupported",
                   "internal_error"
@@ -2384,6 +2395,14 @@
           },
           "field_schema_sha256": {
             "type": "string"
+          },
+          "omitted_anchor_fields": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "description": "Fields left off the sent agreement because their optional anchor (`anchor.required: false`) was not in the document. Each entry names `field_id`, `recipient_id`, `type`, `page`, `anchor_text` and `reason`. Empty when nothing was omitted, including every envelope not yet sent."
           },
           "expires_in_hours": {
             "type": [

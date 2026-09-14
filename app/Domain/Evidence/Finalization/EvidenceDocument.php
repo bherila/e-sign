@@ -73,8 +73,9 @@ final readonly class EvidenceDocument
                 'name' => 'field_schema_sha256',
                 'algorithm' => 'sha256',
                 'value' => $input->fieldSchemaSha256,
-                'covers' => 'The canonical JSON of the field schema copied onto the envelope at creation: '
-                    .'recipients, signing order, and every field definition with its native rectangle.',
+                'covers' => 'The canonical JSON of the field schema copied onto the envelope at creation, with its '
+                    .'anchors resolved at send: recipients, signing order, and every field definition with its '
+                    .'native rectangle.',
             ],
             [
                 'name' => 'material_values_sha256',

@@ -9,6 +9,7 @@ use App\Domain\Preparation\Documents\DocumentStorageKey;
 use App\Domain\Preparation\Documents\Models\Document;
 use App\Domain\Preparation\Documents\Models\DocumentRevision;
 use App\Domain\Preparation\Documents\RevisionKind;
+use App\Domain\Signing\Contracts\AnchorResolution;
 use App\Domain\Signing\Contracts\AssurancePolicyCheck;
 use App\Domain\Signing\Contracts\EnvelopeEventSink;
 use App\Domain\Signing\Envelopes\AcceptanceRequest;
@@ -92,7 +93,7 @@ final class SigningScenario
 
     public function machine(): EnvelopeStateMachine
     {
-        return new EnvelopeStateMachine($this->sink, $this->assurance);
+        return new EnvelopeStateMachine($this->sink, $this->assurance, app(AnchorResolution::class));
     }
 
     public function factory(): EnvelopeFactory

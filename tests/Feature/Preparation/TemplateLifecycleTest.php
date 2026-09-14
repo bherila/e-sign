@@ -444,60 +444,25 @@ class TemplateLifecycleTest extends TestCase
     }
 
     /**
-     * Validity before availability, and the same answer the envelope boundary gives.
+     * A cross-check anchor and an optional anchor are stored in a draft.
      *
-     * `EnvelopeSourceSnapshotTest` pins the full four-cell matrix; this pins the cell the two
-     * entry points once disagreed about, at the other entry point. A document that is malformed
-     * *and* uses an option this deployment cannot honour is reported as malformed: it stays
-     * malformed after anchor resolution ships, so answering "wait for resolution" would send a
-     * sender to wait for something that will not help them.
+     * Both used to be refused, because nothing performed what they promise. Send-time resolution
+     * now checks a cross-check against the declared rectangle and omits a field whose optional
+     * anchor is absent, so a draft using either is an ordinary valid document.
      */
-    public function test_a_malformed_document_using_a_gated_option_is_reported_as_malformed(): void
+    public function test_a_cross_check_and_an_optional_anchor_are_stored_in_a_draft(): void
     {
         $document = $this->readyDocument();
         $schema = FieldSchemaFixture::asArray();
-        $schema['fields'][0]['anchor'] = [
-            'text' => 'Signature:',
-            'occurrence' => 'sole',
-            'placement' => AnchorPlacementMode::CrossCheck->value,
-            'tolerance' => 2,
-        ];
-        $schema['fields'][0]['recipient_id'] = 'somebody_else';
+        $schema['fields'][5]['anchor']['placement'] = AnchorPlacementMode::CrossCheck->value;
+        $schema['fields'][5]['anchor']['tolerance'] = 2;
+        $schema['fields'][9]['anchor']['required'] = false;
 
-        try {
-            $this->templates->createDraftVersion($this->newTemplate(), $this->sender, $document, $schema);
-            $this->fail('An invalid field schema was stored.');
-        } catch (InvalidFieldSchemaException $e) {
-            $codes = $e->result->codes();
+        $version = $this->templates->createDraftVersion($this->newTemplate(), $this->sender, $document, $schema);
+        $stored = $version->fieldSchemaDocument();
 
-            $this->assertContains('unknown_recipient', $codes);
-            $this->assertNotContains('anchor_resolution_unavailable', $codes);
-        }
-
-        $this->assertDatabaseCount('template_versions', 0);
-    }
-
-    /** And a valid document using the gated option is refused as unavailable, with its own pointer. */
-    public function test_a_valid_document_using_a_gated_option_is_refused_as_unavailable(): void
-    {
-        $document = $this->readyDocument();
-        $schema = FieldSchemaFixture::asArray();
-        $schema['fields'][0]['anchor'] = [
-            'text' => 'Signature:',
-            'occurrence' => 'sole',
-            'placement' => AnchorPlacementMode::CrossCheck->value,
-            'tolerance' => 2,
-        ];
-
-        try {
-            $this->templates->createDraftVersion($this->newTemplate(), $this->sender, $document, $schema);
-            $this->fail('A gated option was stored.');
-        } catch (InvalidFieldSchemaException $e) {
-            $this->assertSame(['anchor_resolution_unavailable'], $e->result->codes());
-            $this->assertNotEmpty($e->result->at('/fields/0/anchor/placement'));
-        }
-
-        $this->assertDatabaseCount('template_versions', 0);
+        $this->assertSame(AnchorPlacementMode::CrossCheck, $stored->field('counterparty_signature')?->anchor?->mode());
+        $this->assertFalse((bool) $stored->field('counterparty_notes')?->anchor?->required);
     }
 
     public function test_the_page_fit_check_uses_the_documents_own_preflight_geometry(): void

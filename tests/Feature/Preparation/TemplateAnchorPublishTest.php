@@ -57,10 +57,6 @@ use Tests\TestCase;
  * `nda-two-signers.pdf` is the document the shared field-set fixture is written against: page 2
  * carries "Counterparty signature:" once and "Notes:" twice, which is what makes both `sole` and an
  * occurrence index testable here.
- *
- * `placement: "cross_check"` and `anchor.required: false` are still refused when a draft is written
- * (`AnchorResolutionGate`), so their publish-time behaviour is tested with send-time resolution,
- * which lifts the gate.
  */
 final class TemplateAnchorPublishTest extends TestCase
 {
@@ -353,6 +349,64 @@ final class TemplateAnchorPublishTest extends TestCase
             ->assertJsonPath('field_schema_errors.0.code', ValidationCode::AnchorOccurrenceOutOfRange->value);
     }
 
+    public function test_a_cross_check_that_disagrees_with_the_declared_rectangle_fails_the_publish(): void
+    {
+        $template = $this->template();
+        $this->draft($template, $this->withAnchor([
+            'text' => 'Counterparty signature:',
+            'occurrence' => 'sole',
+            'placement' => AnchorPlacementMode::CrossCheck->value,
+            'tolerance' => 1,
+        ]));
+
+        // The declared rectangle is at (330, 650); the anchor resolves to (330, 622.4).
+        $this->actingAs($this->sender)
+            ->post($this->publishUrl($template), [], self::JSON)
+            ->assertStatus(422)
+            ->assertJsonPath('field_schema_errors.0.code', ValidationCode::AnchorCrossCheckFailed->value);
+    }
+
+    public function test_a_cross_check_within_the_tolerance_publishes_and_keeps_the_declared_rectangle(): void
+    {
+        $template = $this->template();
+        $draft = $this->draft($template, $this->withAnchor([
+            'text' => 'Counterparty signature:',
+            'occurrence' => 'sole',
+            'placement' => AnchorPlacementMode::CrossCheck->value,
+            'tolerance' => 40,
+        ]));
+
+        $this->actingAs($this->sender)->post($this->publishUrl($template), [], self::JSON)->assertOk();
+
+        $field = $draft->fresh()?->fieldSchemaDocument()->field('counterparty_signature');
+
+        $this->assertNotNull($field);
+        $this->assertSame(['x' => 330, 'y' => 650, 'width' => 170, 'height' => 36], $field->rect->toArray());
+        $this->assertNotNull($field->anchor?->resolved, 'The check is recorded even though it moved nothing.');
+    }
+
+    public function test_an_absent_optional_anchor_is_reported_at_publish_without_removing_the_field(): void
+    {
+        $template = $this->template();
+        $draft = $this->draft($template, $this->withOptionalAbsentNotes());
+
+        $this->actingAs($this->sender)->post($this->publishUrl($template), [], self::JSON)->assertOk();
+
+        // Which fields an envelope leaves out is a fact about that envelope, not about the
+        // template, so publishing reports the absence and changes nothing.
+        $this->assertNotNull($draft->fresh()?->fieldSchemaDocument()->field('counterparty_notes'));
+
+        $payload = AuditEvent::query()
+            ->where('action', 'preparation.template_version_anchors_resolved')
+            ->sole()
+            ->payload;
+
+        $this->assertIsArray($payload);
+        $this->assertFalse($payload['omissions_applied']);
+        $this->assertSame('counterparty_notes', $payload['omitted_fields'][0]['field_id']);
+        $this->assertSame('optional_anchor_absent', $payload['omitted_fields'][0]['reason']);
+    }
+
     public function test_an_optional_anchor_on_a_required_field_is_refused_when_the_draft_is_stored(): void
     {
         $schema = $this->withAnchor(['text' => 'Anywhere:', 'required' => false]);
@@ -536,6 +590,24 @@ final class TemplateAnchorPublishTest extends TestCase
             'occurrence' => 'sole',
             'placement' => AnchorPlacementMode::Replace->value,
         ], $anchor);
+
+        return $schema;
+    }
+
+    /**
+     * The shared fixture with the optional notes field pointed at text the document has not got.
+     *
+     * @return array<string, mixed>
+     */
+    private function withOptionalAbsentNotes(): array
+    {
+        $schema = FieldSchemaFixture::asArray();
+        $schema['fields'][9]['anchor'] = [
+            'text' => 'Witness signature:',
+            'occurrence' => 'sole',
+            'placement' => AnchorPlacementMode::Replace->value,
+            'required' => false,
+        ];
 
         return $schema;
     }

@@ -6,7 +6,6 @@ namespace Tests\Unit\Signing;
 
 use App\Domain\Evidence\Sealing\AssuranceLevel;
 use App\Domain\Preparation\Schema\AnchorPlacementMode;
-use App\Domain\Preparation\Schema\InvalidFieldSchemaException;
 use App\Domain\Preparation\Schema\SchemaVersion;
 use App\Domain\Signing\Envelopes\EnvelopeSourceSnapshot;
 use App\Domain\Signing\Envelopes\SigningMode;
@@ -112,43 +111,33 @@ class EnvelopeSourceSnapshotTest extends TestCase
     }
 
     /**
-     * Validity and availability are two independent questions, and the order between them matters.
+     * Validity is the only question the boundary asks about a schema, with or without a cross-check.
      *
-     * The boundary answers two different refusals — the schema cannot be read (`invalid_field_schema`)
-     * and the schema uses an option this deployment cannot honour yet (`anchor_resolution_unavailable`,
-     * carrying its own pointer). Which one a caller gets is decided by an ordering, and an ordering
-     * with two independent inputs has four states, not one.
-     *
-     * Both of the last two review rounds found a defect in exactly those three lines: one fix made
-     * the gate's structured refusal survive by moving it outside the catch, which also moved it
-     * before validation; the next fix restored the order. Each was correct alone and wrong in
-     * interaction, and each was covered by a test of the case that had just broken. This asserts
-     * the whole matrix, so either ordering being wrong in either direction fails here — including
-     * the direction neither round happened to produce.
+     * A cross-check anchor used to be refused here as an option this deployment could not honour.
+     * Send-time resolution now performs it, so a valid snapshot using one is accepted, and a
+     * malformed one is refused as malformed either way. The matrix is kept so a reintroduced
+     * refusal of the option, or one that masks a malformed document, fails here.
      *
      * @return iterable<string, array{bool, bool, string}>
      */
     public static function validityAndAvailability(): iterable
     {
-        //        malformed  gated   expected refusal (null = accepted)
-        yield 'valid, ungated' => [false, false, ''];
-        yield 'valid, gated' => [false, true, 'anchor_resolution_unavailable'];
-        yield 'malformed, ungated' => [true, false, 'invalid_field_schema'];
-        // The cell the ordering is about: malformed *and* gated. The document stays malformed
-        // after resolution ships, so telling the caller to wait for it is an answer to a question
-        // they did not ask.
-        yield 'malformed, gated' => [true, true, 'invalid_field_schema'];
+        //        malformed  cross-check  expected refusal ('' = accepted)
+        yield 'valid, no anchor' => [false, false, ''];
+        yield 'valid, cross-checked' => [false, true, ''];
+        yield 'malformed, no anchor' => [true, false, 'invalid_field_schema'];
+        yield 'malformed, cross-checked' => [true, true, 'invalid_field_schema'];
     }
 
     #[DataProvider('validityAndAvailability')]
-    public function test_the_boundary_answers_validity_before_availability(
+    public function test_the_boundary_answers_validity_and_accepts_a_cross_check(
         bool $malformed,
-        bool $gated,
+        bool $crossChecked,
         string $expected,
     ): void {
         $schema = SigningFixtures::sequentialTwoSigners();
 
-        if ($gated) {
+        if ($crossChecked) {
             $schema['schema_version'] = SchemaVersion::CURRENT;
             $schema['fields'][0]['anchor'] = [
                 'text' => 'Signature:',
@@ -159,8 +148,7 @@ class EnvelopeSourceSnapshotTest extends TestCase
         }
 
         if ($malformed) {
-            // A field pointing at a recipient the document does not declare: invalid whatever
-            // this deployment can do, and still invalid after resolution ships.
+            // A field pointing at a recipient the document does not declare.
             $schema['fields'][0]['recipient_id'] = 'somebody_else';
         }
 
@@ -181,24 +169,14 @@ class EnvelopeSourceSnapshotTest extends TestCase
             // Flattening the importer's list into one reason would leave a caller reading
             // "invalid_field_schema" with a dozen rules to guess between. Codes are API surface.
             $this->assertNotSame([], $refused->problems);
-        } catch (InvalidFieldSchemaException $refused) {
-            $this->assertSame(
-                $expected,
-                $refused->errors()[0]->code->value,
-                'The gate\'s refusal must keep its own code and pointer rather than being flattened.',
-            );
-            $this->assertSame('/fields/0/anchor/placement', $refused->errors()[0]->path);
         }
     }
 
     /**
      * An ordinary schema error keeps its code through the snapshot wrapper.
      *
-     * The gate's refusal was given its own code and pointer, and then the *other* refusal at this
-     * boundary — a schema that simply does not import — was still being flattened into
-     * `invalid_field_schema` on the way out. Two refusals, one of them structured, is not a
-     * contract a client can branch on: `coordinate_too_precise` says which value to fix, and
-     * "invalid" says go and look.
+     * A schema that does not import is not flattened into `invalid_field_schema` alone on the way
+     * out: `coordinate_too_precise` says which value to fix, and "invalid" says go and look.
      */
     public function test_an_ordinary_schema_error_keeps_its_code_and_pointer(): void
     {

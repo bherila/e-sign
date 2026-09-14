@@ -100,10 +100,9 @@ describe("parseFieldSchema", () => {
       origin: "bottom_left",
       offset: { dx: 0, dy: 12.5 },
     });
-    // The optional notes field's anchor, as a caller can send it today. `required: false` — the
-    // narrow compatibility option for an anchor that may be absent — is a 1.1 member the importer
-    // reads but `AnchorResolutionGate` refuses to store until resolution ships, so the shared
-    // fixture does not carry it and the cases that exercise it add it themselves.
+    // The optional notes field's anchor. `required: false` — the narrow compatibility option for an
+    // anchor that may be absent — is a 1.1 member the shared fixture does not carry; the cases that
+    // exercise it add it themselves.
     expect(document.fields[9]!.anchor).toEqual({
       text: "Notes:",
       occurrence: 2,
