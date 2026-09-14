@@ -53,7 +53,9 @@ class TemplateHttpTest extends TestCase
 
         $this->workspace = Workspace::factory()->create();
         $this->sender = DocumentWorkspace::memberOf($this->workspace, WorkspaceRole::Sender);
-        $this->document = $this->intake('multi-page-mixed-size');
+        // The PDF the shared field-schema fixture is written against: publishing resolves its
+        // anchors against the revision the version snapshots, so the two have to match.
+        $this->document = $this->intake('nda-two-signers');
     }
 
     protected function tearDown(): void

@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Domain\Preparation\Text;
 
 use App\Domain\Preparation\Geometry\NativeRect;
+use App\Domain\Preparation\Preflight\PreflightBudget;
+use App\Domain\Preparation\Preflight\PreflightBudgetException;
 
 /**
  * Anchor semantics, independent of any PDF library.
@@ -22,15 +24,18 @@ final readonly class AnchorResolver
 {
     /**
      * @param  array<int, TextRun>  $runs
+     * @param  PreflightBudget|null  $budget  The budget of the document the runs came from, charged
+     *                                        for matching as it happens. See {@see matches()}.
      * @return array<int, ResolvedAnchor>
      *
      * @throws AnchorNotFoundException
      * @throws AmbiguousAnchorException
      * @throws OccurrenceOutOfRangeException
+     * @throws PreflightBudgetException
      */
-    public function resolve(array $runs, Anchor $anchor): array
+    public function resolve(array $runs, Anchor $anchor, ?PreflightBudget $budget = null): array
     {
-        $matches = $this->matches($runs, $anchor);
+        $matches = $this->matches($runs, $anchor, $budget);
         $count = count($matches);
 
         if ($count === 0) {
@@ -68,15 +73,35 @@ final readonly class AnchorResolver
     /**
      * Every occurrence of the anchor string, in deterministic document order.
      *
+     * Matching is charged to the document's budget in the units it multiplies, reported as the
+     * work is done rather than once before it starts: every run it considers, the bytes it
+     * searches, and every match it materialises. A single anchored field over a document with a
+     * very large run set is otherwise one unmetered pass — and a short anchor in a long run can
+     * match at almost every offset. A null budget leaves matching unbounded, which is only safe for
+     * runs a test or an already-bounded caller controls.
+     *
+     * The candidates are gathered in a loop, not `array_filter()`, so building the list is charged
+     * run by run and a run set far larger than the page is interrupted while it is copied, not
+     * after. The sort is one native call and cannot be charged while it runs. What bounds it is its
+     * input: at most the runs extraction produced, each of which that same budget paid for as it
+     * was made. So the sort costs the same allowance again, within a logarithmic factor, and no
+     * more.
+     *
      * @param  array<int, TextRun>  $runs
      * @return array<int, array{run: TextRun, offset: int}>
+     *
+     * @throws PreflightBudgetException
      */
-    public function matches(array $runs, Anchor $anchor): array
+    public function matches(array $runs, Anchor $anchor, ?PreflightBudget $budget = null): array
     {
-        $candidates = array_values(array_filter(
-            $runs,
-            static fn (TextRun $run): bool => $anchor->page === null || $run->page === $anchor->page,
-        ));
+        $candidates = [];
+        foreach ($runs as $run) {
+            $budget?->expand();
+
+            if ($anchor->page === null || $run->page === $anchor->page) {
+                $candidates[] = $run;
+            }
+        }
 
         usort($candidates, static function (TextRun $a, TextRun $b): int {
             return [$a->page, round($a->rect->y, 4), round($a->rect->x, 4)]
@@ -88,8 +113,11 @@ final readonly class AnchorResolver
             $offset = 0;
             while (($position = strpos($run->text, $anchor->text, $offset)) !== false) {
                 $matches[] = ['run' => $run, 'offset' => $position];
+                $budget?->expand();
                 $offset = $position + 1;
             }
+
+            $budget?->scan(strlen($run->text));
         }
 
         return $matches;

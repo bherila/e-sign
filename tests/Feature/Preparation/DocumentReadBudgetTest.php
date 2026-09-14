@@ -70,6 +70,10 @@ final class DocumentReadBudgetTest extends TestCase
             app(PdfTextLocator::class)->extract($bytes);
         }];
 
+        yield 'text and page geometry' => [static function (string $bytes): void {
+            app(PdfTextLocator::class)->read($bytes);
+        }];
+
         yield 'assembly geometry' => [static function (string $bytes): void {
             try {
                 (new TcPdfAssembler(null, resource_path('fonts'), app(PreflightLimits::class)))->assemble($bytes);

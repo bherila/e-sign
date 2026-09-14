@@ -9,6 +9,7 @@ use App\Domain\Preparation\Preflight\PreflightBudget;
 use App\Domain\Preparation\Preflight\PreflightBudgetException;
 use App\Domain\Preparation\Preflight\PreflightCode;
 use App\Domain\Preparation\Preflight\PreflightLimits;
+use App\Domain\Preparation\Text\DocumentText;
 use App\Domain\Preparation\Text\TextExtractionException;
 use App\Domain\Preparation\Text\TextRun;
 
@@ -44,21 +45,62 @@ final readonly class IsolatedPdfTextLocator implements PdfTextLocator
             return $this->inProcess->extract($pdfBytes, $page, $budget);
         }
 
+        /** @var array<int, TextRun> */
+        return $this->inChild(
+            $reader,
+            ['operation' => ChildDocumentRead::EXTRACT, 'bytes' => $pdfBytes, 'page' => $page],
+            $budget,
+            static fn (mixed $value): bool => is_array($value),
+        );
+    }
+
+    /**
+     * @throws DocumentIsolationUnavailable When isolation is required and this host cannot provide it.
+     */
+    public function read(string $pdfBytes, ?PreflightBudget $budget = null): DocumentText
+    {
+        $reader = $this->isolation->reader();
+
+        if (! $reader instanceof ChildProcessDocumentReader) {
+            return $this->inProcess->read($pdfBytes, $budget);
+        }
+
+        /** @var DocumentText */
+        return $this->inChild(
+            $reader,
+            ['operation' => ChildDocumentRead::READ_TEXT, 'bytes' => $pdfBytes],
+            $budget,
+            static fn (mixed $value): bool => $value instanceof DocumentText,
+        );
+    }
+
+    /**
+     * One read in the child, under the port's rules for a caller's budget.
+     *
+     * Held in one place because `extract()` and `read()` are one rule: the remainder handed over,
+     * the charge-back, who hears about a ceiling and in whose words. Two copies of that would drift.
+     *
+     * @param  array<string, mixed>  $request  The operation and its arguments.
+     * @param  \Closure(mixed): bool  $expected  Whether a successful answer is the value this operation returns.
+     *
+     * @throws TextExtractionException
+     * @throws PreflightBudgetException Only to a caller that supplied the budget.
+     */
+    private function inChild(
+        ChildProcessDocumentReader $reader,
+        array $request,
+        ?PreflightBudget $budget,
+        \Closure $expected,
+    ): mixed {
         try {
             $response = $reader->read(
-                [
-                    'operation' => ChildDocumentRead::EXTRACT,
-                    'bytes' => $pdfBytes,
-                    'page' => $page,
-                    'charged' => $budget instanceof PreflightBudget,
-                ],
+                $request + ['charged' => $budget instanceof PreflightBudget],
                 $budget instanceof PreflightBudget ? $budget->remainingLimits() : $this->limits,
             );
 
-            if (($response['ok'] ?? false) === true && is_array($response['value'] ?? null)) {
+            if (($response['ok'] ?? false) === true && $expected($response['value'] ?? null)) {
                 $budget?->absorb((int) ($response['decoded'] ?? 0), (int) ($response['objects'] ?? 0));
 
-                /** @var array<int, TextRun> */
                 return $response['value'];
             }
 
