@@ -18,7 +18,8 @@ use Illuminate\Support\Str;
 /**
  * Provisions the first owner of a workspace.
  *
- * This is the only place in the application that grants `owner`, and it only ever runs from
+ * This is the only place in the application that grants `owner` without an existing owner
+ * doing it (an owner can, through {@see WorkspaceMembers}), and it only ever runs from
  * an explicit console command. Nothing here reacts to a login, an email address, or a
  * directory grant: an operator names the issuer and subject (or an existing local user) and
  * the workspace, and that is the whole input. "First person to log in becomes an admin" is

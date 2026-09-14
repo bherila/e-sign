@@ -12,7 +12,10 @@ See docs/ARCHITECTURE.md for what this module owns. Keep cross-module calls behi
 | `Models/WorkspaceMembership.php` | One person's role in one workspace. The only source of workspace authority. |
 | `Models/IdentityBinding.php` | The `(issuer, subject)` tuple a local user is bound to. Never email. |
 | `Policies/WorkspacePolicy.php` | Every workspace-scoped ability. Registered in `AppServiceProvider`, since auto-discovery does not look in domain modules. |
-| `Services/OwnerBootstrapper.php` | The only code that grants `owner`, in one transaction, idempotently. |
+| `Services/OwnerBootstrapper.php` | The only code that grants the *first* `owner`, in one transaction, idempotently. |
+| `Services/WorkspaceMembers.php` | Every role change after bootstrap: invitations, role changes, removal. Owner-only and last-owner rules, one audit event per change. See `docs/operations/members.md`. |
+| `Services/MembershipChangeRefused.php` | The stable refusal codes both the members page and delegated access answer with. |
+| `Models/WorkspaceInvitation.php` | A single-use, expiring invitation to a role. Stores a digest of its token, never the token. |
 | `Services/IdentityResolver.php` | Turns a validated provider identity into the local user it belongs to, provisioning a user and a binding — and no membership — for an unknown subject. |
 | `Enums/AuthMode.php` | Whether this deployment exposes single sign-on or a local password form. Chooses which routes exist at all (`routes/web.php`). |
 | `Auth/EsignUserPolicy.php` | The single `canLogin()` gate, bound over the package default so every entry point shares one answer. Reads `users.disabled_at`. |

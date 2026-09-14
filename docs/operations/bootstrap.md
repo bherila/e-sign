@@ -302,9 +302,11 @@ php artisan tinker --execute="
 
 ## Afterwards
 
-- The owner grants further roles — `admin`, `sender`, `auditor` — from the members page.
-  Only `owner` and `admin` can manage members; only `owner` can delete a workspace or rotate
-  service credentials.
+- The owner grants further roles — `owner`, `admin`, `sender`, `auditor` — from the workspace's
+  members page (**Manage members** on the dashboard), by creating a single-use invitation link
+  for a role that the person accepts while signed in. Only `owner` and `admin` can manage
+  members, only `owner` grants `owner`, and the last owner cannot be removed; only `owner` can
+  delete a workspace or rotate service credentials. See [members.md](members.md).
 - Revoking someone's access means deleting their membership, and their identity binding if
   they should no longer be able to authenticate. Neither deletes or alters an envelope, an
   artifact, or an audit event: executed instruments and historical signer evidence outlive

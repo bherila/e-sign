@@ -7,6 +7,10 @@
       Read-only. Roles are granted by a workspace owner or administrator.
     </p>
 
+    @if (session('status'))
+      <p role="status" class="mb-6 rounded border px-4 py-3 text-sm">{{ session('status') }}</p>
+    @endif
+
     <div id="workspaces" data-workspaces="{{ json_encode($workspaces, JSON_THROW_ON_ERROR) }}"></div>
 
     <form method="POST" action="{{ route('logout') }}" class="mt-8">
