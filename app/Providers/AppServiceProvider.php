@@ -58,6 +58,14 @@ class AppServiceProvider extends ServiceProvider
         // Keyed on the authenticated member, not the address, so an office behind one egress
         // address is not one bucket. Generous enough that preparing a batch of agreements
         // never meets it.
+        // Creating an invitation is cheap and audited, and redeeming one is a lookup by an
+        // unguessable token. Both are bounded per person so neither becomes a way to fill the
+        // audit trail or hammer the database (issue #110).
+        RateLimiter::for('member-invitations', static fn (Request $request): Limit => Limit::perMinute(20)
+            ->by('member-invitations:'.($request->user()?->getAuthIdentifier() ?? $request->ip())));
+        RateLimiter::for('invitation-redemptions', static fn (Request $request): Limit => Limit::perMinute(10)
+            ->by('invitation-redemptions:'.($request->user()?->getAuthIdentifier() ?? $request->ip())));
+
         RateLimiter::for('document-uploads', static fn (Request $request): Limit => $request->user() !== null
             ? Limit::perMinute(30)->by('document-uploads:'.$request->user()->getAuthIdentifier())
             : Limit::perMinute(5)->by('document-uploads:'.$request->ip()));

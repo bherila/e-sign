@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Domain\Identity\Enums\WorkspacePermission;
 use App\Domain\Identity\Models\WorkspaceMembership;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\Request;
@@ -41,6 +42,9 @@ class DashboardController extends Controller
                 'slug' => (string) $membership->workspace?->slug,
                 'role' => $membership->role->value,
                 'roleLabel' => $membership->role->label(),
+                'membersUrl' => $membership->role->can(WorkspacePermission::ManageMembers)
+                    ? route('members.index', ['workspace' => (string) $membership->workspace?->public_id])
+                    : null,
             ])->all(),
         ]);
     }

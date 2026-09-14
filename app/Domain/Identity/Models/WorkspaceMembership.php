@@ -9,6 +9,7 @@ use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\Concerns\AsPivot;
+use Illuminate\Support\Str;
 
 /**
  * One person's role in one workspace.
@@ -18,6 +19,7 @@ use Illuminate\Database\Eloquent\Relations\Concerns\AsPivot;
  * id, so revoking access can never reach an envelope, an artifact, or an audit event.
  *
  * @property int $id
+ * @property string|null $public_id
  * @property int $workspace_id
  * @property int $user_id
  * @property WorkspaceRole $role
@@ -45,6 +47,14 @@ class WorkspaceMembership extends Model
         return [
             'role' => WorkspaceRole::class,
         ];
+    }
+
+    protected static function booted(): void
+    {
+        // The members page addresses a membership by this, never by its autoincrement id.
+        static::creating(function (self $membership): void {
+            $membership->public_id ??= (string) Str::ulid();
+        });
     }
 
     /**

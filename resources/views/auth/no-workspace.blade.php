@@ -5,8 +5,8 @@
     <h1 class="text-2xl font-semibold tracking-tight mb-2">You do not belong to a workspace yet</h1>
     <p class="text-muted-foreground">
       Signing in worked. That is not the same as having access to anything: workspace
-      membership is granted separately, and nobody has granted you one. Ask a workspace owner
-      to add you.
+      membership is granted separately, and nobody has granted you one. Ask a workspace owner or
+      administrator for an invitation link, and open it while signed in with this account.
     </p>
     <p class="text-muted-foreground mt-4">
       Setting this installation up for the first time? The first owner is provisioned from the
