@@ -167,3 +167,80 @@ jobs:
           fi
           curl --fail --silent --show-error --retry 3 --retry-all-errors --max-time 20 \
             "${{ vars.SITE_URL }}/up" > /dev/null
+
+      # The account crontab is shared with every other application on the account. The script
+      # replaces only this application's lines (its header says how they are recognised), so a
+      # hand-installed or outdated line cannot run beside the deploy-managed one, and a new account
+      # gets its cron on the first deploy. Its harness runs first, so a regression in the script
+      # fails here instead of rewriting the crontab. See docs/operations/cpanel.md, "Cron".
+      - name: Install and verify this application's cron lines
+        env:
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR }}
+          PHP_BIN: /opt/cpanel/ea-php85/root/usr/bin/php
+        run: |
+          bash scripts/deploy/test-install-cron.sh
+          lines=(
+            "* * * * * cd \"\$HOME/$DEPLOY_DIR\" && $PHP_BIN -d memory_limit=1G artisan schedule:run > /dev/null 2>&1 # JOB:$DEPLOY_DIR-scheduler"
+            "* * * * * cd \"\$HOME/$DEPLOY_DIR\" && $PHP_BIN -d memory_limit=1G artisan esign:queue:work-bounded > /dev/null 2>&1 # JOB:$DEPLOY_DIR-queue-worker"
+          )
+          ssh -o StrictHostKeyChecking=yes "${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }}" \
+            "bash -s -- $(printf '%q ' "$DEPLOY_DIR" "${lines[@]}")" < scripts/deploy/install-cron.sh
+
+      # The web handler's limits cannot be read from the CLI, and LiteSpeed silently ignores
+      # .user.ini, so ask the running site. Fails the deploy when the vhost runs another PHP
+      # version or a memory_limit below the php_value that public/.htaccess sets.
+      - name: Verify the web handler's PHP version and memory limit
+        run: |
+          bash scripts/deploy/verify-web-php.sh "${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }}" \
+            "${{ vars.DEPLOY_DIR }}" "${{ vars.SITE_URL }}" 8.5 1024M -o StrictHostKeyChecking=yes
+
+      # esign:doctor is the install check (docs/operations/cpanel.md). Its scheduler check reads a
+      # heartbeat the scheduler writes every minute, which a brand-new account has not written yet,
+      # so a failure is retried for two minutes after the cron lines above are installed. Output is
+      # shown only on failure: this log is public, and a passing run has nothing to act on.
+      - name: Run esign:doctor on the server
+        run: |
+          for attempt in 1 2 3; do
+            if ssh -o StrictHostKeyChecking=yes "${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }}" \
+                "cd ~/${{ vars.DEPLOY_DIR }} && /opt/cpanel/ea-php85/root/usr/bin/php -d memory_limit=1G artisan esign:doctor" \
+                > doctor.out 2>&1; then
+              echo "esign:doctor: all checks passed."
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then sleep 60; fi
+          done
+          cat doctor.out
+          exit 1
+
+      # Uploads are read in web requests, so process isolation has to be confirmed where they run:
+      # /health/ready is served by the web handler (docs/adr/0006). It is asked from the server, with
+      # the token read from the cached configuration, so the token never leaves the host. Only the
+      # document_isolation probe decides here; an unrelated backlog warning must not fail a deploy.
+      - name: Verify document isolation in web requests
+        env:
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR }}
+          SITE_URL: ${{ vars.SITE_URL }}
+        run: |
+          ssh -o StrictHostKeyChecking=yes "${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }}" \
+            "bash -s -- $(printf '%q ' "$DEPLOY_DIR" "$SITE_URL")" <<'REMOTE'
+          set -euo pipefail
+          php=/opt/cpanel/ea-php85/root/usr/bin/php
+          cd "$HOME/$1"
+          # The cached configuration refers to application classes, so it needs the autoloader.
+          token=$("$php" -d display_errors=stderr -r 'require "vendor/autoload.php"; $config = require "bootstrap/cache/config.php"; echo $config["esign"]["health_token"] ?? "";')
+          if [ -z "$token" ]; then
+            echo "::error::ESIGN_HEALTH_TOKEN is not set, so /health/ready cannot report its probes." >&2
+            exit 1
+          fi
+          printf 'header = "Authorization: Bearer %s"\n' "$token" \
+            | curl --silent --show-error --max-time 60 --config - "$2/health/ready" \
+            | "$php" -r '
+                $probe = json_decode((string) stream_get_contents(STDIN), true)["probes"]["document_isolation"] ?? null;
+                if (! is_array($probe)) {
+                    fwrite(STDERR, "::error::/health/ready did not report a document_isolation probe.\n");
+                    exit(1);
+                }
+                echo "document_isolation: ", $probe["status"], ": ", $probe["message"], "\n";
+                exit($probe["status"] === "ok" ? 0 : 1);
+              '
+          REMOTE
