@@ -30,16 +30,20 @@ use App\Domain\Preparation\Text\AnchorResolver;
  * 1. **The page and the occurrence are the ones asked for.** An anchor is searched on the page its
  *    field declares, so a receipt for another page answers a question this field is not asking.
  *    `"sole"` means the text occurs once, so the match taken is always the first.
- * 2. **The extents are the field's own.** An anchor says where a field goes and never how big it
- *    is: `Anchor::$width` and `$height` come from the field's rectangle, so the resolved rectangle
- *    carries them unchanged. A receipt of another size records a resolution that did not happen.
+ * 2. **The extents are the field's own, as submitted.** An anchor says where a field goes and never
+ *    how big it is: `Anchor::$width` and `$height` come from the field's rectangle, so the resolved
+ *    rectangle carries them unchanged. A receipt of another size records a resolution that did not
+ *    happen. Judged against the field *before* it was placed: in `replace` mode the placed field's
+ *    rectangle is copied from the receipt, so comparing those two would compare the receipt with
+ *    itself and accept any size (#120).
  * 3. **The corner is the requested corner of the matched text, plus the offset.** This is the whole
  *    geometry — `AnchorResolver::build()` picks a corner of `anchor_rect` by `origin` and adds
  *    `offset` — and it is the rule that makes the other two more than bookkeeping: without it a
  *    receipt can pair any measurement with any placement and still look consistent.
- * 4. **In `replace` mode the field's rectangle is the receipt's.** The receipt records where the
- *    field went, so a document whose field sits somewhere its own receipt does not describe is one
- *    nobody can check.
+ * 4. **The placed field sits where its mode says.** In `replace` mode its rectangle is the
+ *    receipt's: the receipt records where the field went, so a field sitting somewhere its own
+ *    receipt does not describe is one nobody can check. In `cross_check` mode it is the declared
+ *    rectangle, untouched, because a check promises to move nothing.
  *
  * Every comparison is made on canonical values, because canonical values are what the document
  * holds; comparing what a caller wrote would accept a receipt that stops agreeing the moment it is
@@ -52,18 +56,21 @@ use App\Domain\Preparation\Text\AnchorResolver;
 readonly class ReceiptVerifier
 {
     /**
-     * Every way this receipt fails to answer this request, as pointer-suffixed reasons.
+     * Every way this receipt, and the field placed from it, fail to answer this request, as
+     * pointer-suffixed reasons.
      *
+     * @param  FieldDefinition  $submitted  The field as it arrived, before resolution placed it.
+     * @param  FieldDefinition  $placed  The same field with the receipt written onto it.
      * @return list<array{path: string, reason: string}>
      */
-    public function problems(FieldDefinition $field, AnchorPlacement $request, ResolvedAnchorRecord $receipt): array
+    public function problems(FieldDefinition $submitted, FieldDefinition $placed, AnchorPlacement $request, ResolvedAnchorRecord $receipt): array
     {
         $problems = [];
 
-        if ($receipt->page !== $field->page) {
+        if ($receipt->page !== $submitted->page) {
             $problems[] = [
                 'path' => '/page',
-                'reason' => 'records page '.$receipt->page.' and the field is on page '.$field->page,
+                'reason' => 'records page '.$receipt->page.' and the field is on page '.$submitted->page,
             ];
         }
 
@@ -76,7 +83,7 @@ readonly class ReceiptVerifier
             ];
         }
 
-        foreach (['width' => $field->rect->width, 'height' => $field->rect->height] as $name => $expected) {
+        foreach (['width' => $submitted->rect->width, 'height' => $submitted->rect->height] as $name => $expected) {
             $actual = $name === 'width' ? $receipt->rect->width : $receipt->rect->height;
 
             if (! self::same($expected, $actual)) {
@@ -90,18 +97,43 @@ readonly class ReceiptVerifier
 
         $problems = array_merge($problems, $this->geometryProblems($request, $receipt));
 
-        if ($request->mode() === AnchorPlacementMode::Replace) {
-            foreach (['x' => $field->rect->x, 'y' => $field->rect->y] as $name => $expected) {
-                $actual = $name === 'x' ? $receipt->rect->x : $receipt->rect->y;
+        return array_merge($problems, $this->placementProblems($submitted, $placed, $request, $receipt));
+    }
 
-                if (! self::same($expected, $actual)) {
-                    $problems[] = [
-                        'path' => '/rect/'.$name,
-                        'reason' => 'records '.$name.' '.$actual.' and the field is placed at '.$expected
-                            .'; in "replace" mode the receipt records where the field went',
-                    ];
-                }
+    /**
+     * Rule 4: the placed field is the receipt's rectangle in `replace` mode, and the declared one in
+     * `cross_check` mode — every component, the extents included.
+     *
+     * @return list<array{path: string, reason: string}>
+     */
+    private function placementProblems(
+        FieldDefinition $submitted,
+        FieldDefinition $placed,
+        AnchorPlacement $request,
+        ResolvedAnchorRecord $receipt,
+    ): array {
+        $replaces = $request->mode() === AnchorPlacementMode::Replace;
+        $problems = [];
+
+        $expected = $replaces
+            ? ['x' => $receipt->rect->x, 'y' => $receipt->rect->y, 'width' => $receipt->rect->width, 'height' => $receipt->rect->height]
+            : ['x' => $submitted->rect->x, 'y' => $submitted->rect->y, 'width' => $submitted->rect->width, 'height' => $submitted->rect->height];
+
+        $actual = ['x' => $placed->rect->x, 'y' => $placed->rect->y, 'width' => $placed->rect->width, 'height' => $placed->rect->height];
+
+        foreach ($expected as $name => $value) {
+            if (self::same($value, $actual[$name])) {
+                continue;
             }
+
+            $problems[] = [
+                'path' => '/rect/'.$name,
+                'reason' => $replaces
+                    ? 'records '.$name.' '.$value.' and the field is placed at '.$actual[$name]
+                        .'; in "replace" mode the receipt records where the field went'
+                    : 'leaves the field at '.$name.' '.$actual[$name].' and it was declared at '.$value
+                        .'; a cross-check never moves the field it checks',
+            ];
         }
 
         return $problems;

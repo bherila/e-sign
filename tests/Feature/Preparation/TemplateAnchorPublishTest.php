@@ -502,7 +502,7 @@ final class TemplateAnchorPublishTest extends TestCase
             SchemaAnchorResolver::DEFAULT_CROSS_CHECK_TOLERANCE,
             new readonly class extends ReceiptVerifier
             {
-                public function problems(FieldDefinition $field, AnchorPlacement $request, ResolvedAnchorRecord $receipt): array
+                public function problems(FieldDefinition $submitted, FieldDefinition $placed, AnchorPlacement $request, ResolvedAnchorRecord $receipt): array
                 {
                     return [['path' => '/fields/5/anchor/resolved/rect/x', 'reason' => 'is not the requested corner plus the offset']];
                 }

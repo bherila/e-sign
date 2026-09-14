@@ -329,7 +329,11 @@ final readonly class SchemaAnchorResolver
         // alternative is a receipt that says a placement was derived from a measurement it was not
         // derived from, which is exactly the kind of thing nobody notices until an agreement is
         // signed against it.
-        $inconsistent = $this->receipts->problems($placed, $placed->anchor ?? $anchor, $record);
+        //
+        // Given the field as it arrived as well as the one placed. In `replace` mode the placed
+        // rectangle was just copied from the receipt, so the receipt's extents can only be judged
+        // against what the caller declared (#120).
+        $inconsistent = $this->receipts->problems($field, $placed, $placed->anchor ?? $anchor, $record);
 
         if ($inconsistent !== []) {
             throw AnchorResolutionDefect::receiptContradicts($field->id, $inconsistent);

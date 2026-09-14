@@ -86,7 +86,7 @@ final class ReceiptVerifierTest extends TestCase
 
         $this->assertSame(
             [],
-            (new ReceiptVerifier)->problems($field, $request, $receipt),
+            (new ReceiptVerifier)->problems($field, $field->withResolvedAnchor($receipt), $request, $receipt),
             'The verifier rejected a receipt the resolver itself produced.',
         );
     }
@@ -109,6 +109,11 @@ final class ReceiptVerifierTest extends TestCase
      * The expectation is therefore per mutation *and* per origin, which is the combination that
      * matters: asserting only "caught somewhere" would pass even if the rule fired for one origin
      * and nothing else.
+     *
+     * The field is placed from the *mutated* receipt, exactly as the resolver places it. Placing it
+     * from the real receipt instead is what hid #120: in `replace` mode the field then kept the real
+     * size, so a resized receipt was caught here by a comparison that, in the resolver, compared the
+     * receipt with a size copied from itself.
      *
      * @return iterable<string, array{callable(array<string, mixed>): array<string, mixed>, list<string>}>
      */
@@ -182,7 +187,7 @@ final class ReceiptVerifierTest extends TestCase
             [$field, $request, $receipt] = $this->resolve($fixture, $page, $text, $occurrence, $origin, $dx, $dy, $placement);
 
             $mutated = ResolvedAnchorRecord::fromArray($mutate($receipt->toArray()));
-            $caught = (new ReceiptVerifier)->problems($field, $request, $mutated) !== [];
+            $caught = (new ReceiptVerifier)->problems($field, $field->withResolvedAnchor($mutated), $request, $mutated) !== [];
             $shouldCatch = in_array($origin->value, $caughtForOrigins, true);
 
             if ($caught !== $shouldCatch) {
@@ -191,6 +196,34 @@ final class ReceiptVerifierTest extends TestCase
         }
 
         $this->assertSame([], $unexpected);
+    }
+
+    /**
+     * The placed field is checked in its own right, not only through its receipt (#120).
+     *
+     * In `replace` mode a field that did not take its receipt's rectangle sits somewhere the receipt
+     * does not describe; in `cross_check` mode a field that moved at all was moved by a check that
+     * promises to move nothing. Every request in the matrix, every component, both modes.
+     */
+    public function test_a_field_placed_anywhere_but_where_its_mode_says_breaks_a_rule(): void
+    {
+        $missed = [];
+
+        foreach (self::requests() as $name => [$fixture, $page, $text, $occurrence, $origin, $dx, $dy, $placement]) {
+            [$field, $request, $receipt] = $this->resolve($fixture, $page, $text, $occurrence, $origin, $dx, $dy, $placement);
+            $placed = $field->withResolvedAnchor($receipt)->toArray();
+
+            foreach (['x', 'y', 'width', 'height'] as $component) {
+                $moved = $placed;
+                $moved['rect'][$component] += 1;
+
+                if ((new ReceiptVerifier)->problems($field, FieldDefinition::fromArray($moved), $request, $receipt) === []) {
+                    $missed[] = $name.', '.$component;
+                }
+            }
+        }
+
+        $this->assertSame([], $missed);
     }
 
     /**
@@ -257,7 +290,7 @@ final class ReceiptVerifierTest extends TestCase
 
         $this->assertSame(
             [],
-            (new ReceiptVerifier)->problems($field, $request, $receipt),
+            (new ReceiptVerifier)->problems($field, $field->withResolvedAnchor($receipt), $request, $receipt),
             'A receipt whose components round one way and whose sum rounds the other was rejected.',
         );
     }
@@ -302,15 +335,8 @@ final class ReceiptVerifierTest extends TestCase
 
         $receipt = ResolvedAnchorRecord::fromResolvedAnchor($resolved, self::DIGEST);
 
-        // In `replace` mode the field's rectangle *is* the resolved one, which is what the
-        // resolver writes back; the verifier checks that relationship, so the field has to carry
-        // it here too.
-        if ($placement === AnchorPlacementMode::Replace) {
-            $field = $field->withAnchor($anchor)->withResolvedAnchor($receipt);
-        } else {
-            $field = $field->withAnchor($anchor);
-        }
-
-        return [$field, $anchor, $receipt];
+        // The field as submitted. Each test places it with `withResolvedAnchor()`, the call the
+        // resolver makes, so the verifier sees both sides of placement as it does in production.
+        return [$field->withAnchor($anchor), $anchor, $receipt];
     }
 }
