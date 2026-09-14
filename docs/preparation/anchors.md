@@ -6,10 +6,12 @@ what it records, and what it refuses.
 
 The document shape is [field-schema.md](field-schema.md); this is the semantics behind it.
 
-> **Not yet reachable from the API.** Resolution is not wired into publishing or sending yet, and
-> the two anchor options that promise it — `placement: "cross_check"` and `anchor.required: false` —
-> are refused at the service boundary with `anchor_resolution_unavailable` until it is. See
-> `Schema\AnchorResolutionGate`, which names the branch that removes it.
+> **Publishing resolves anchors; sending does not yet.** Publishing a template version resolves
+> every anchor against the revision it snapshots ([templates.md](templates.md)). Sending does not
+> resolve yet. So the two anchor options whose promise only send-time resolution can keep —
+> `placement: "cross_check"` and `anchor.required: false` — are still refused at the service
+> boundary with `anchor_resolution_unavailable`. See `Schema\AnchorResolutionGate`, which names the
+> branch that removes it.
 
 ## What resolution is
 

@@ -186,6 +186,7 @@ class PreparationServiceProvider extends ServiceProvider
             return new TemplateService(
                 $app->make(FieldSchemaValidator::class),
                 $app->make(AuditRecorder::class),
+                $app->make(RevisionAnchorResolver::class),
                 (string) $config->get('esign.templates.default_consent_policy_version'),
             );
         });

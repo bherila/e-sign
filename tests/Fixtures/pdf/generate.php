@@ -761,6 +761,50 @@ emit('object-stream', $built['bytes'], [
     ]);
 })();
 
+// ---------------------------------------------------------------------------
+// 17. The document the shared field-schema fixture is placed on.
+// ---------------------------------------------------------------------------
+//
+// tests/Fixtures/schema/nda-two-signers.json is the canonical field document the PHP
+// importer and the TypeScript editor both read, and two of its fields are placed by
+// anchor rather than by coordinate. Those anchors have to resolve against *something*:
+// a template version publishes by resolving every anchor against the revision it
+// snapshots, so a schema fixture with no matching document could only ever be tested
+// against its own failure. This is that document.
+//
+// Its text is chosen to exercise both halves of occurrence selection. "Counterparty
+// signature:" appears exactly once, so `occurrence: "sole"` resolves; "Notes:" appears
+// twice, so `occurrence: 2` selects the second in document order — which is the lower
+// one on the page, because matches are ordered by page, then top edge, then left edge.
+$built = textFixture([
+    [
+        'media' => $letter, 'crop' => $letter, 'rotate' => 0,
+        'texts' => [
+            ['Mutual Non-Disclosure Agreement', 60.0, 700.0],
+            ['Buyer initials:', 505.25, 60.0],
+        ],
+        'probe' => [50.0, 50.0, 20.0, 10.0],
+        'overlay' => [90.0, 400.0, 120.0, 30.0],
+    ],
+    [
+        'media' => $letter, 'crop' => $letter, 'rotate' => 0,
+        'texts' => [
+            ['Buyer signature:', 60.0, 160.0],
+            ['Counterparty signature:', 330.0, 160.0],
+            ['Notes:', 60.0, 250.0],
+            ['Notes:', 60.0, 100.0],
+        ],
+        'probe' => [40.0, 40.0, 20.0, 10.0],
+        'overlay' => [80.0, 380.0, 120.0, 30.0],
+    ],
+]);
+emit('nda-two-signers', $built['bytes'], [
+    'description' => 'Two US Letter pages carrying the anchor strings tests/Fixtures/schema/nda-two-signers.json looks for.',
+    'expected_preflight' => 'accept',
+    'expected_rejections' => [],
+    'pages' => $built['pages'],
+]);
+
 file_put_contents(
     OUT_DIR.'/manifest.json',
     json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)."\n",

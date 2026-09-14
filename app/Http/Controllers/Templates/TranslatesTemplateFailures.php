@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Templates;
 
+use App\Domain\Preparation\Anchoring\AnchorDocumentUnavailable;
+use App\Domain\Preparation\Anchoring\AnchorResolutionDefect;
 use App\Domain\Preparation\Schema\InvalidFieldSchemaException;
 use App\Domain\Preparation\Schema\ValidationError;
 use App\Domain\Preparation\Templates\PublishedVersionIsImmutableException;
 use App\Domain\Preparation\Templates\TemplateStateException;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Turns the Templates module's typed failures into HTTP answers.
@@ -23,6 +26,8 @@ use Illuminate\Http\JsonResponse;
  * | `alias_already_taken` | 422 | the caller sent an alias somebody else holds |
  * | `alias_not_found` | 404 | there is nothing at the identifier the caller named |
  * | published version immutable, `template_retired`, `version_already_published` | 409 | the request is well formed and conflicts with current state |
+ * | `anchor_document_unavailable` | 503 | the revision's bytes could not be read on publish; the same request may succeed on a retry |
+ * | `anchor_resolution_defect` | 500 | anchor resolution contradicted its own request: a defect in this service, logged, never a problem with the document |
  *
  * A 409 rather than a 422 for the last group is the honest distinction: nothing about the
  * request is wrong, and re-sending it after the conflict is resolved (draft the next
@@ -73,6 +78,37 @@ trait TranslatesTemplateFailures
                 'code' => $e->reason,
             ], 409),
         };
+    }
+
+    /**
+     * The document could not be read, so its anchors could not be resolved: a retryable server failure.
+     *
+     * The exception's message carries no storage handle; the cause went to the log where it was raised.
+     */
+    protected function anchorDocumentUnavailableResponse(AnchorDocumentUnavailable $e): JsonResponse
+    {
+        return response()->json([
+            'message' => $e->getMessage(),
+            'code' => $e->code(),
+        ], 503);
+    }
+
+    /**
+     * Anchor resolution contradicted its own request. The detail goes to the log; the caller is
+     * told only that nothing was published and nothing about their request needs to change.
+     */
+    protected function anchorResolutionDefectResponse(AnchorResolutionDefect $e): JsonResponse
+    {
+        Log::error('Anchor resolution produced a receipt that contradicts its request.', [
+            'exception' => $e::class,
+            'message' => $e->getMessage(),
+        ]);
+
+        return response()->json([
+            'message' => 'This version\'s anchors could not be placed because of a defect on the service side. '
+                .'Nothing was published, and nothing about the request needs to change.',
+            'code' => $e->code(),
+        ], 500);
     }
 
     protected function publishedVersionResponse(PublishedVersionIsImmutableException $e): JsonResponse

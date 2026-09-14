@@ -48,7 +48,8 @@ Four rules, each enforced in `TemplateService` and again at the model or in the 
    `document_revisions.id` for a `review` revision of a `ready` document. Binding to the
    document would let a later upload change what the template means; architecture invariant 2
    binds an acceptance to a specific immutable revision.
-2. **A published version is never edited.** `published_at` is the lock. `TemplateVersion`
+2. **Publishing resolves the version's anchors, and then the version is never edited.**
+   `published_at` is the lock. `TemplateVersion`
    refuses updates and deletes after it is set, with
    `PublishedVersionIsImmutableException`; the service refuses first so the caller gets a
    message rather than a half-open transaction. The HTTP answer is **409**, with the
@@ -79,7 +80,7 @@ both directions are audited (`preparation.template_retired` / `..._restored`).
 | `recipients` | the roles/placeholders from the same schema, with each one's signing stage |
 | `consent_policy_version` | the consent text version a signer will be shown |
 | `render_settings` | the declared rendering settings below |
-| `published_at` | null while a draft. Setting it is the last permitted write |
+| `published_at` | null while a draft. Setting it is the last permitted write, and the same statement stores the anchor-resolved field set |
 
 `TemplateVersion::snapshotForEnvelope()` returns all of it in one array, and the Signing
 module is expected to call that instead of reading columns: what a version *means* is then
@@ -105,6 +106,38 @@ bytes — and the digest — are identical on SQLite, MySQL 8, and MariaDB.
 The alternative, a `text` column holding the bytes verbatim, was rejected because it gives up
 every query and index the JSON type offers in exchange for a property the canonical form
 already guarantees.
+
+### Anchors are resolved when the version is published
+
+A field can carry an [anchor](anchors.md) instead of a position: *find this text, then put the
+box next to it*. Publishing is where that request becomes a rectangle.
+
+It is the right moment for two reasons:
+- **The field set and the bytes are both fixed.** A version snapshots one immutable review
+  revision, so publishing is the first point at which the field set and the exact bytes it will be
+  placed on are settled.
+- **The template is still cheap to fix.** It is the last point at which that is true. An anchor
+  whose text is not in the document, or is in it twice, is reported while the sender is still
+  authoring, as an ordinary 422 with a JSON Pointer to the offending field.
+
+**Resolution runs before the publish transaction opens,** so the private-disk read and the
+content-stream parse never happen while the version row is locked. The outcome carries the digest
+of the field set it ran against, and a locked row that disagrees is resolved again under the lock.
+
+**What gets stored:**
+- the resolved rectangle, in the field's `rect`;
+- a receipt in `anchor.resolved`: which page, which occurrence, where the matched text sat, and the
+  digest of the bytes it was measured in;
+- a new `field_schema_sha256`, which moves with them.
+
+So a published version is already placed. Nothing here stops an envelope from resolving again.
+
+**Publishing is not the *authoritative* resolution.** An envelope can be built straight from a
+document with no template involved, so send is. Two failures are not the sender's to fix, and are
+not 422s:
+- a revision whose bytes cannot be read is a retryable **503**, `anchor_document_unavailable`;
+- a resolver that contradicts its own request is a **500**, `anchor_resolution_defect`, with the
+  detail in the log.
 
 ### Validation
 
@@ -231,6 +264,9 @@ has to be *the bytes*, and a representation is allowed to grow a field.
 | Situation | Status |
 |---|---|
 | invalid field schema | 422, with `field_schema_errors` |
+| an anchor that cannot be resolved, on publish | 422, in the same `field_schema_errors` shape |
+| the revision's bytes cannot be read, on publish | 503 `anchor_document_unavailable`, retryable |
+| anchor resolution contradicted its own request, on publish | 500 `anchor_resolution_defect` |
 | document not `ready`, or from another workspace by model | 422 |
 | alias already mapped in this workspace | 422 |
 | alias not on this template | 404 |
@@ -283,8 +319,13 @@ so the trail cannot disagree with the data:
 `preparation.template_created`, `preparation.template_updated`,
 `preparation.template_retired`, `preparation.template_restored`,
 `preparation.template_version_drafted`, `preparation.template_version_updated`,
-`preparation.template_version_published`, `preparation.template_alias_added`,
-`preparation.template_alias_removed`.
+`preparation.template_version_published`, `preparation.template_version_anchors_resolved`,
+`preparation.template_alias_added`, `preparation.template_alias_removed`.
+
+`preparation.template_version_anchors_resolved` is written only when a publish actually placed
+something. It lists the fields whose rectangle it wrote, and any whose optional anchor was absent,
+with `omissions_applied: false`: publishing reports an absence rather than acting on it
+([anchors.md](anchors.md)).
 
 A no-op — a PATCH that changes nothing, retiring a template that is already retired — writes
 neither a row nor an event.
