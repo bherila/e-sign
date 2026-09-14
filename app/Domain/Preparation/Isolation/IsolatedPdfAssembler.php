@@ -12,12 +12,16 @@ use App\Domain\Preparation\Contracts\PdfAssembler;
 use App\Domain\Preparation\Preflight\PreflightBudgetException;
 use App\Domain\Preparation\Preflight\PreflightCode;
 use App\Domain\Preparation\Preflight\PreflightLimits;
+use App\Domain\Preparation\TcPdf\TcPdfAssembler;
 
 /**
  * Assembly, in a child process when this host provides one (docs/adr/0006).
  *
  * The whole assembly runs in one child — its preflight of every input, the geometry reads, the
- * import and the read-back — so one hard limit covers all of it. A ceiling leaves as the
+ * import and the read-back — so one hard limit covers all of it. That limit is sized for every read
+ * the assembly budgets separately ({@see budgetedReads()}), not for one: in-process, each of those
+ * reads may spend a whole budget, and a child held to a single one would be stopped — after assent,
+ * at finalization — doing work the in-process path completes. A ceiling leaves as the
  * `AssemblyException` the port promises, carrying the ceiling, as the in-process assembler does.
  */
 final readonly class IsolatedPdfAssembler implements PdfAssembler
@@ -53,6 +57,7 @@ final readonly class IsolatedPdfAssembler implements PdfAssembler
                     'fonts' => $this->fontDirectory,
                 ],
                 $this->limits,
+                self::budgetedReads(count($appendedDocuments)),
             );
         } catch (PreflightBudgetException $stopped) {
             throw new AssemblyException(
@@ -76,9 +81,20 @@ final readonly class IsolatedPdfAssembler implements PdfAssembler
         }
 
         $ceiling = is_string($response['code'] ?? null)
-            ? new PreflightBudgetException(PreflightCode::from($response['code']), $message)
+            ? new PreflightBudgetException(PreflightCode::from($response['code']), $message, ($response['per_stream'] ?? false) === true)
             : null;
 
         throw new AssemblyException($message, previous: $ceiling);
+    }
+
+    /**
+     * The reads {@see TcPdfAssembler::assemble()} gives a budget of their own.
+     *
+     * The source's preflight and each appended document's; the source's geometry read and import,
+     * which share one budget, and each appended document's; and the read-back of the output.
+     */
+    private static function budgetedReads(int $appended): int
+    {
+        return 3 + 2 * max(0, $appended);
     }
 }

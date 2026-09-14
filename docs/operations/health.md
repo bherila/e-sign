@@ -62,6 +62,7 @@ ESIGN_HEALTH_ALLOW_CIDRS=127.0.0.1/32,::1/128
 | `tsa` | `ESIGN_TSA_URL` unset, or set and parses as `http`/`https` | — | Set but not a valid `http(s)` URL |
 | `artifact_integrity` | The last completed `esign:artifacts:verify` run passed and finished within `esign.retention.verification_warn_days` (default 8) | That run passed but is older than the window, or no verification has ever completed | The last completed run found a digest mismatch, a missing object, or a seal that no longer validates |
 | `finalization_backlog` | No envelope has been waiting to finalize longer than `esign.finalization.resume_after_minutes` (default 10) | At least one has | More than 10 have, one of them has waited an hour, or the tables are unreadable |
+| `document_isolation` | Document reads **in web requests** run in a trusted child process with hard memory and time limits ([ADR 0006](../adr/0006-process-bounded-document-reads.md)) | Reads run in-process: `ESIGN_DOCUMENTS_ISOLATION=in_process`, or `auto` found no child it can trust (the message says why) | `ESIGN_DOCUMENTS_ISOLATION=process` and no trusted child, so documents cannot be read. `esign:doctor` runs the same probe for command-line reads; each run here starts one trial child |
 
 The queue, scheduler, and certificate thresholds live in `config/esign.php` under the
 `health` key and are each overridable by an `ESIGN_HEALTH_*` environment variable. The mail

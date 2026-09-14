@@ -12,6 +12,7 @@ use App\Domain\Preparation\Isolation\ChildProcessDocumentReader;
 use App\Domain\Preparation\Isolation\ChildReadFailed;
 use App\Domain\Preparation\Isolation\DocumentIsolation;
 use App\Domain\Preparation\Isolation\DocumentIsolationUnavailable;
+use App\Domain\Preparation\Isolation\IsolatedPdfAssembler;
 use App\Domain\Preparation\Isolation\IsolationMode;
 use App\Domain\Preparation\Preflight\PreflightBudget;
 use App\Domain\Preparation\Preflight\PreflightBudgetException;
@@ -23,6 +24,7 @@ use App\Domain\Preparation\TcPdf\TcPdfTextLocator;
 use App\Domain\Preparation\Text\TextExtractionException;
 use Illuminate\Process\Factory;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Symfony\Component\Process\Exception\RuntimeException as ProcessRuntimeException;
 use Tests\Support\PdfBombFixtures;
 use Tests\Support\PdfFixtures;
 use Tests\TestCase;
@@ -39,8 +41,9 @@ use Tests\TestCase;
  * 3. **The hard limits are hard.** A child that never answers is stopped at its deadline, and one
  *    that allocates without limit is stopped by its own `memory_limit` — each reported as the named
  *    ceiling, and neither depending on any code reporting its work.
- * 4. **Only a trustworthy child is used.** A binary that cannot run, runs the wrong PHP, or ignores
- *    `-d memory_limit` is not trusted: `auto` falls back and `process` refuses.
+ * 4. **Only a trustworthy child is used.** A binary that cannot run, runs the wrong PHP, ignores
+ *    `-d memory_limit`, or lacks an extension the PDF stack needs is not trusted: `auto` falls back
+ *    and `process` refuses.
  */
 final class ProcessIsolationTest extends TestCase
 {
@@ -206,6 +209,67 @@ final class ProcessIsolationTest extends TestCase
         }
     }
 
+    /**
+     * A read that fails after doing work has still spent it.
+     *
+     * An encrypted document is parsed before extraction refuses it, and in-process that parse stays
+     * charged to the caller's budget. A child answering "unreadable" must leave the same charge, or
+     * repeated failed reads escape the caller's cumulative accounting.
+     */
+    public function test_work_done_by_a_read_that_failed_in_the_child_is_still_charged(): void
+    {
+        $bytes = PdfFixtures::bytes('encrypted-aes128');
+        $inProcess = new PreflightBudget(app(PreflightLimits::class));
+
+        try {
+            (new TcPdfTextLocator(app(PreflightLimits::class)))->extract($bytes, null, $inProcess);
+            $this->fail('An encrypted document was read in-process.');
+        } catch (TextExtractionException) {
+        }
+
+        $this->useProcessIsolation();
+        $isolated = new PreflightBudget(app(PreflightLimits::class));
+
+        try {
+            app(PdfTextLocator::class)->extract($bytes, null, $isolated);
+            $this->fail('An encrypted document was read in a child.');
+        } catch (TextExtractionException) {
+        }
+
+        $this->assertGreaterThan(0, $inProcess->objectCount(), 'The premise failed: the in-process read charged nothing.');
+        $this->assertSame($inProcess->objectCount(), $isolated->objectCount());
+        $this->assertSame($inProcess->decodedBytes(), $isolated->decodedBytes());
+    }
+
+    /**
+     * The per-stream and whole-document decompression ceilings share one code, and a refusal rebuilt
+     * in the caller's words must name the one that bound — here the per-stream ceiling, the smaller.
+     */
+    public function test_a_per_stream_ceiling_reached_in_the_child_names_the_per_stream_ceiling(): void
+    {
+        $limits = new PreflightLimits(maxDecodedStreamBytes: 1_048_576, maxDecompressedBytes: 64 * 1_048_576);
+        $bomb = PdfBombFixtures::bytes('single-stream-bomb');
+
+        try {
+            (new TcPdfTextLocator($limits))->extract($bomb, null, new PreflightBudget($limits));
+            $this->fail('A stream past the per-stream ceiling was decoded in-process.');
+        } catch (PreflightBudgetException $refused) {
+            $inProcess = $refused->getMessage();
+        }
+
+        $this->assertStringContainsString('1048576 bytes allowed for a single stream', $inProcess);
+
+        $this->useProcessIsolation();
+
+        try {
+            app(PdfTextLocator::class)->extract($bomb, null, new PreflightBudget($limits));
+            $this->fail('A stream past the per-stream ceiling was decoded in a child.');
+        } catch (PreflightBudgetException $refused) {
+            $this->assertSame(PreflightCode::DecompressionLimitExceeded, $refused->preflightCode);
+            $this->assertSame($inProcess, $refused->getMessage());
+        }
+    }
+
     // ------------------------------------------------------------------------ the hard limits
 
     public function test_a_child_that_never_answers_is_stopped_at_its_deadline(): void
@@ -233,6 +297,49 @@ final class ProcessIsolationTest extends TestCase
         } catch (PreflightBudgetException $stopped) {
             $this->assertSame(PreflightCode::MemoryBudgetExceeded, $stopped->preflightCode);
         }
+    }
+
+    /**
+     * The premise of the next test: this child, pausing before it answers, outlives one read's deadline.
+     */
+    public function test_a_child_that_pauses_past_one_reads_deadline_is_stopped_at_it(): void
+    {
+        $this->expectException(PreflightBudgetException::class);
+
+        $this->readerRunning('answer-after-a-pause.php')->read(
+            ['operation' => 'preflight', 'bytes' => PdfFixtures::bytes('single-page-letter')],
+            new PreflightLimits(timeBudgetSeconds: 2.0),
+        );
+    }
+
+    /**
+     * Assembly budgets several reads separately — each input's preflight, its geometry and import, and
+     * the read-back — so its hard deadline allows for all of them. Held to one read's (2 s), the same
+     * pausing child would be killed; three reads' (6 s) let it finish, as the in-process path would.
+     */
+    public function test_assembly_is_given_a_deadline_for_every_read_it_budgets(): void
+    {
+        $limits = new PreflightLimits(timeBudgetSeconds: 2.0);
+        $assembler = new IsolatedPdfAssembler(
+            new TcPdfAssembler(new TcPdfPreflight($limits), resource_path('fonts'), $limits),
+            new DocumentIsolation(IsolationMode::Process, app(Factory::class), PHP_BINARY, 0, 0.0, null, self::FIXTURES.'/answer-after-a-pause.php'),
+            $limits,
+            resource_path('fonts'),
+        );
+
+        $this->assertCount(1, $assembler->assemble(PdfFixtures::bytes('single-page-letter'))->outputPages);
+    }
+
+    public function test_a_child_that_cannot_be_started_is_a_read_failure(): void
+    {
+        // A real launch failure cannot be forced portably: a missing binary still starts a shell that
+        // exits 126. This is what Symfony throws when proc_open itself fails.
+        $processes = new Factory;
+        $processes->fake(static fn () => throw new ProcessRuntimeException('Unable to launch a new process.'));
+
+        $this->expectException(ChildReadFailed::class);
+
+        (new ChildProcessDocumentReader($processes, PHP_BINARY, 0, 0.0))->read(['operation' => 'preflight', 'bytes' => ''], new PreflightLimits);
     }
 
     /** @return iterable<string, array{string}> */
@@ -281,14 +388,42 @@ final class ProcessIsolationTest extends TestCase
     }
 
     /**
-     * A binary is trusted only if it runs this PHP and honours the memory limit it is given.
+     * A binary is trusted only if it runs this PHP, honours the memory limit it is given, and has the
+     * extensions the PDF stack needs.
      *
      * @return iterable<string, array{string, string}>
      */
     public static function untrustworthyBinaries(): iterable
     {
-        yield 'it runs a different PHP' => ['7.4|64M', 'runs PHP 7.4'];
-        yield 'it ignores -d memory_limit' => [PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION.'|128M', 'did not honour -d memory_limit'];
+        $php = PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;
+
+        yield 'it runs a different PHP' => ['7.4|64M|', 'runs PHP 7.4'];
+        yield 'it ignores -d memory_limit' => [$php.'|128M|', 'did not honour -d memory_limit'];
+        yield 'it lacks required extensions' => [$php.'|64M|gd,zlib', 'is missing required extension(s): gd, zlib'];
+        yield 'it does not say which extensions it lacks' => [$php.'|64M', 'did not report its extensions'];
+    }
+
+    public function test_the_trial_child_checks_every_extension_the_pdf_stack_declares(): void
+    {
+        $lock = json_decode((string) file_get_contents(base_path('composer.lock')), true, flags: JSON_THROW_ON_ERROR);
+        $declared = [];
+
+        foreach ($lock['packages'] as $package) {
+            if (! str_starts_with($package['name'], 'tecnickcom/')) {
+                continue;
+            }
+
+            foreach (array_keys($package['require'] ?? []) as $requirement) {
+                if (str_starts_with($requirement, 'ext-')) {
+                    $declared[] = substr($requirement, 4);
+                }
+            }
+        }
+
+        $declared = array_values(array_unique($declared));
+        sort($declared);
+
+        $this->assertSame($declared, DocumentIsolation::REQUIRED_EXTENSIONS);
     }
 
     #[DataProvider('untrustworthyBinaries')]

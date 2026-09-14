@@ -36,6 +36,32 @@ final class ChildDocumentRead
 
     public const ASSEMBLE = 'assemble';
 
+    /** The exit status of a child its own `memory_limit` stopped. Arbitrary, but not one PHP uses. */
+    public const MEMORY_EXHAUSTED = 86;
+
+    /**
+     * Exit with {@see MEMORY_EXHAUSTED} when this process dies of memory exhaustion.
+     *
+     * The parent must tell that death apart from every other one, and the fatal error's text is
+     * not a reliable witness: whether it is printed at all depends on the child binary's
+     * `error_reporting`, which `php.ini` or the code may have turned off. The last error is
+     * recorded regardless, and a shutdown function still runs after the fatal — with a little
+     * memory released first, so the check itself has room to run.
+     */
+    public static function exitWhenMemoryIsExhausted(): void
+    {
+        $reserve = str_repeat("\0", 262_144);
+
+        register_shutdown_function(static function () use (&$reserve): void {
+            $reserve = null;
+            $error = error_get_last();
+
+            if ($error !== null && $error['type'] === E_ERROR && str_starts_with($error['message'], 'Allowed memory size of')) {
+                exit(self::MEMORY_EXHAUSTED);
+            }
+        });
+    }
+
     /**
      * @param  resource  $in
      * @param  resource  $out
@@ -78,6 +104,14 @@ final class ChildDocumentRead
         // told of a ceiling is decided by the same fact on both sides of the boundary.
         $budget = ($request['charged'] ?? false) === true ? new PreflightBudget($limits) : null;
 
+        // What the read cost, on every answer and not only a successful one: a read that fails after
+        // doing work — an encrypted document is parsed before it is refused — has still spent it, and
+        // the in-process path leaves that charged to the caller's budget.
+        $spent = static fn (): array => [
+            'decoded' => $budget?->decodedBytes() ?? 0,
+            'objects' => $budget?->objectCount() ?? 0,
+        ];
+
         try {
             $value = match ($request['operation'] ?? null) {
                 self::PREFLIGHT => (new TcPdfPreflight($limits))->inspect($bytes),
@@ -98,27 +132,31 @@ final class ChildDocumentRead
                 default => throw new UnexpectedValueException('Unknown document read operation.'),
             };
 
-            return [
-                'ok' => true,
-                'value' => $value,
-                'decoded' => $budget?->decodedBytes() ?? 0,
-                'objects' => $budget?->objectCount() ?? 0,
-            ];
+            return ['ok' => true, 'value' => $value] + $spent();
         } catch (PreflightBudgetException $exhausted) {
-            return ['ok' => false, 'kind' => 'budget', 'code' => $exhausted->preflightCode->value, 'message' => $exhausted->getMessage()];
+            return self::ceiling('budget', $exhausted, $exhausted->getMessage()) + $spent();
         } catch (TextExtractionException $unreadable) {
-            return ['ok' => false, 'kind' => 'unreadable', 'code' => null, 'message' => $unreadable->getMessage()];
+            return ['ok' => false, 'kind' => 'unreadable', 'code' => null, 'message' => $unreadable->getMessage()] + $spent();
         } catch (UnsupportedSourceException $unsupported) {
-            return ['ok' => false, 'kind' => 'unsupported', 'code' => null, 'message' => $unsupported->getMessage()];
+            return ['ok' => false, 'kind' => 'unsupported', 'code' => null, 'message' => $unsupported->getMessage()] + $spent();
         } catch (AssemblyException $failed) {
             $ceiling = $failed->getPrevious();
 
-            return [
-                'ok' => false,
-                'kind' => 'assembly',
-                'code' => $ceiling instanceof PreflightBudgetException ? $ceiling->preflightCode->value : null,
-                'message' => $failed->getMessage(),
-            ];
+            return ($ceiling instanceof PreflightBudgetException
+                ? self::ceiling('assembly', $ceiling, $failed->getMessage())
+                : ['ok' => false, 'kind' => 'assembly', 'code' => null, 'message' => $failed->getMessage()]) + $spent();
         }
+    }
+
+    /** @return array<string, mixed> */
+    private static function ceiling(string $kind, PreflightBudgetException $exhausted, string $message): array
+    {
+        return [
+            'ok' => false,
+            'kind' => $kind,
+            'code' => $exhausted->preflightCode->value,
+            'per_stream' => $exhausted->perStream,
+            'message' => $message,
+        ];
     }
 }

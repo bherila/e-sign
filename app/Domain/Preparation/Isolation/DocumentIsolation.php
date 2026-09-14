@@ -14,14 +14,26 @@ use Throwable;
  *
  * A child is used only when one can actually be started *and trusted*: `proc_open` is not disabled,
  * a CLI binary is found, and a trial child started from it runs the same PHP major and minor version
- * as this process and honours `-d memory_limit`. The version check is not caution for its own sake.
- * On shared hosting the first `php` on the path is routinely an older installation than the one
- * serving the site, and a child running it would fail Composer's platform check on every read.
+ * as this process, honours `-d memory_limit`, and has every extension the PDF stack requires. None
+ * of these is caution for its own sake. On shared hosting the first `php` on the path is routinely
+ * an older installation than the one serving the site, and a configured binary can be a different
+ * build with a different extension set; a child from either would fail every read as an unreadable
+ * document rather than say what is wrong.
  *
- * Resolved lazily and remembered, so a web worker pays for the trial child once, on its first read.
+ * The resolution answers for the SAPI it runs in, and the CLI and the web handler can differ in
+ * exactly these respects, so `esign:doctor` and `/health/ready` each run the same
+ * `document_isolation` probe where it applies.
+ *
+ * Resolved lazily and remembered, so a process pays for the trial child once, on its first read.
  */
 final class DocumentIsolation
 {
+    /**
+     * Every extension the tecnickcom packages declare in `composer.lock`, sorted. A test keeps the two
+     * equal, so a dependency update that needs a new extension cannot silently trust a child without it.
+     */
+    public const REQUIRED_EXTENSIONS = ['ctype', 'curl', 'filter', 'gd', 'hash', 'json', 'mbstring', 'openssl', 'pcre', 'xml', 'zlib'];
+
     private bool $resolved = false;
 
     private ?ChildProcessDocumentReader $reader = null;
@@ -37,6 +49,7 @@ final class DocumentIsolation
         private readonly int $memoryHeadroomBytes,
         private readonly float $timeHeadroomSeconds,
         private readonly ?LoggerInterface $log = null,
+        private readonly string $entrypoint = __DIR__.'/document-read.php',
     ) {}
 
     /**
@@ -67,7 +80,7 @@ final class DocumentIsolation
     }
 
     /**
-     * What `esign:doctor` reports: the configured mode, the mode reads will actually get, and why.
+     * What the `document_isolation` probe reports: the configured mode, the mode reads will actually get, and why.
      *
      * @return array{mode: IsolationMode, effective: IsolationMode, binary: ?string, reason: ?string}
      */
@@ -102,6 +115,7 @@ final class DocumentIsolation
                 $this->binary,
                 $this->memoryHeadroomBytes,
                 $this->timeHeadroomSeconds,
+                $this->entrypoint,
             );
 
             return;
@@ -148,7 +162,8 @@ final class DocumentIsolation
             $trial = $this->processes->timeout(15)->run([
                 $candidate,
                 '-d', 'memory_limit=64M',
-                '-r', 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION."|".ini_get("memory_limit");',
+                '-r', 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION."|".ini_get("memory_limit")."|"'
+                    .'.implode(",", array_filter('.var_export(self::REQUIRED_EXTENSIONS, true).', fn ($e) => ! extension_loaded($e)));',
             ]);
         } catch (Throwable $failed) {
             return 'a trial child from '.$candidate.' could not be started: '.$failed->getMessage();
@@ -158,7 +173,8 @@ final class DocumentIsolation
             return 'a trial child from '.$candidate.' exited with status '.$trial->exitCode().'.';
         }
 
-        [$version, $memoryLimit] = array_pad(explode('|', trim($trial->output()), 2), 2, '');
+        $answer = explode('|', trim($trial->output()), 3);
+        [$version, $memoryLimit] = array_pad($answer, 2, '');
 
         if ($version !== $expected) {
             return $candidate.' runs PHP '.($version === '' ? 'of an unknown version' : $version)
@@ -169,6 +185,15 @@ final class DocumentIsolation
         if ($memoryLimit !== '64M') {
             return 'a trial child from '.$candidate.' did not honour -d memory_limit (it reported '
                 .($memoryLimit === '' ? 'nothing' : $memoryLimit).'), so it cannot be given a hard memory limit.';
+        }
+
+        if (count($answer) !== 3) {
+            return 'a trial child from '.$candidate.' did not report its extensions, so it cannot be trusted to read documents.';
+        }
+
+        if ($answer[2] !== '') {
+            return $candidate.' is missing required extension(s): '.str_replace(',', ', ', $answer[2])
+                .'; set ESIGN_DOCUMENTS_ISOLATION_PHP_BINARY to a CLI that has them.';
         }
 
         $this->binary = $candidate;

@@ -17,9 +17,11 @@ use App\Domain\Preparation\Text\TextRun;
  *
  * A caller's budget cannot cross the process boundary, so its remaining allowance does: the child
  * reads under {@see PreflightBudget::remainingLimits()}, reports what it counted, and that is
- * charged back with {@see PreflightBudget::absorb()}. Who is told about a ceiling follows the port's
- * rule unchanged — a caller that supplied a budget hears the ceiling, whether the child's budget
- * named it or the runtime stopped the child; a caller that supplied none sees an unreadable document.
+ * charged back with {@see PreflightBudget::absorb()} — after a read that succeeded and after one that
+ * failed having done work, as the in-process path charges both. Who is told about a ceiling follows
+ * the port's rule unchanged — a caller that supplied a budget hears the ceiling, whether the child's
+ * budget named it or the runtime stopped the child; a caller that supplied none sees an unreadable
+ * document.
  */
 final readonly class IsolatedPdfTextLocator implements PdfTextLocator
 {
@@ -61,8 +63,17 @@ final readonly class IsolatedPdfTextLocator implements PdfTextLocator
             }
 
             if (($response['kind'] ?? null) === 'budget' && is_string($response['code'] ?? null)) {
-                throw new PreflightBudgetException(PreflightCode::from($response['code']), (string) ($response['message'] ?? ''));
+                // Not charged back: the child stopped at what remained of this budget, and the
+                // refusal below is what the caller hears about it.
+                throw new PreflightBudgetException(
+                    PreflightCode::from($response['code']),
+                    (string) ($response['message'] ?? ''),
+                    ($response['per_stream'] ?? false) === true,
+                );
             }
+
+            // A document the child could not read is still a document it spent work reading.
+            $budget?->absorb((int) ($response['decoded'] ?? 0), (int) ($response['objects'] ?? 0));
 
             throw new TextExtractionException((string) ($response['message'] ?? 'The document could not be read.'));
         } catch (PreflightBudgetException $exhausted) {
@@ -70,7 +81,7 @@ final readonly class IsolatedPdfTextLocator implements PdfTextLocator
                 // In the caller's budget's own words. The child read on what remained of it, so a
                 // ceiling the child reached — or a hard limit derived from the remainder — is named
                 // in terms of that remainder; rebuilt here it names what the deployment set.
-                $budget->refuse($exhausted->preflightCode, $exhausted->getMessage());
+                $budget->refuse($exhausted->preflightCode, $exhausted->getMessage(), $exhausted->perStream);
             }
 
             throw new TextExtractionException(

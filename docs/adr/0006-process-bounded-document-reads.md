@@ -42,10 +42,17 @@ serialized value objects, which the parent unserializes against an explicit clas
 
 **The limits are hard.** The parent starts the child with `-d memory_limit` set from the
 configured memory backstop plus headroom, and kills it when the wall-clock backstop plus
-headroom expires. Neither depends on any loop reporting anything.
+headroom expires. Neither depends on any loop reporting anything. Each backstop counts once for
+every read the operation gives a budget of its own: one for a preflight or an extraction, and for
+an assembly one per input's preflight, one per input's geometry read and import, and one for the
+read-back. A hard limit sized for a single read would stop an assembly — at finalization, after
+assent — that the in-process path, with a fresh budget per read, completes.
 
 **Failures keep their names.** A killed child is `time_budget_exceeded`; a child that died of
-memory exhaustion is `memory_budget_exceeded`; a ceiling the child's own budget reached comes
+memory exhaustion is `memory_budget_exceeded`, recognised by the exit status the entrypoint's
+shutdown handler sets rather than by the fatal error's text, which the child binary's
+`error_reporting` may suppress; a failure to start the process at all is an unreadable document;
+a ceiling the child's own budget reached comes
 back with that ceiling's code; anything else is the port's ordinary unreadable-document failure.
 Who is told about a ceiling is unchanged: a caller that supplied a budget hears the ceiling, a
 caller that did not sees the unreadable-document failure.
@@ -61,9 +68,20 @@ different installations entirely. `esign.documents.isolation.php_binary` names t
 Left unset, `auto` looks for one and, finding none it can run, falls back to in-process rather
 than failing every upload.
 
-**`esign:doctor` reports the mode it will actually get.** A `document_isolation` probe starts a
-trivial child under the configured limits: `ok` when it runs and honours them, `warn` when
-`auto` has fallen back to in-process, `fail` when `process` is required and unavailable.
+**A child is trusted only after a trial.** The trial child must run this application's PHP
+major and minor version, honour `-d memory_limit`, and have every extension the tecnickcom
+packages declare in `composer.lock` (a test keeps the list equal to the lock). A binary that
+fails any of these is not used: its reads would fail as unreadable documents instead of saying
+what is wrong.
+
+**The mode reads actually get is reported where they run.** The CLI and the web handler can
+have different ini files, and uploads are read in the web request while finalization is read
+on the queue. So the `document_isolation` probe runs in both places: `esign:doctor` answers for
+the command line, and `/health/ready` — served by the web handler — answers for web requests.
+Each is `ok` when a trusted child runs, `warn` when reads are in-process (configured, or `auto`
+fell back), and `fail` when `process` is required and unavailable. A deployment that has seen
+`ok` from both should set `process`, so losing the child refuses reads rather than dropping the
+hard bound silently.
 
 ## Alternatives considered
 
@@ -83,7 +101,10 @@ trivial child under the configured limits: `ok` when it runs and honours them, `
 - Each read on a process-mode host pays a child start. The entrypoint avoids the framework boot
   so that cost stays in tens of milliseconds, not the hundreds a full `artisan` invocation costs.
 - A host in `auto` that falls back to in-process has the cooperative bound only.
-  `docs/assurance.md` states that difference, and `esign:doctor` makes it visible.
+  `docs/assurance.md` states that difference, and the `document_isolation` probe makes it
+  visible in each SAPI.
+- Every `/health/ready` request starts one trial child, the same cost a web request pays on its
+  first document read.
 - The first deployed shared-hosting instance was checked on 2026-09-13, read-only, with no
   changes made: its CLI has no disabled functions, `proc_open` is available, and a child started
   from it honours `-d memory_limit`. It gets process mode under `auto`.

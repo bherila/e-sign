@@ -219,6 +219,7 @@ final class PreflightBudget
                 $aggregate ? $this->limits->maxDecompressedBytes : $this->limits->maxDecodedStreamBytes,
                 $aggregate ? 'for one document' : 'for a single stream',
             ),
+            perStream: ! $aggregate,
         );
     }
 
@@ -410,13 +411,18 @@ final class PreflightBudget
      * which is the number the person who uploaded the file can do something about. A ceiling this
      * budget has no wording of its own for keeps the message it arrived with.
      *
+     * @param  bool  $perStream  For a decompression ceiling, whether the per-stream one bound. The
+     *                           two share a code, and only the whole-document one is a remainder.
+     *
      * @throws PreflightBudgetException
      */
-    public function refuse(PreflightCode $code, string $otherwise): never
+    public function refuse(PreflightCode $code, string $otherwise, bool $perStream = false): never
     {
         match ($code) {
             PreflightCode::ObjectLimitExceeded => $this->exhaustObjects(),
-            PreflightCode::DecompressionLimitExceeded => $this->exhaustDecodedBytes(),
+            PreflightCode::DecompressionLimitExceeded => $perStream
+                ? $this->refuseUndecodableStream(aggregate: false)
+                : $this->exhaustDecodedBytes(),
             PreflightCode::PageLimitExceeded => $this->exhaustPages(),
             PreflightCode::TimeBudgetExceeded => $this->exhaustTime(),
             PreflightCode::MemoryBudgetExceeded => $this->exhaustMemory(),

@@ -16,4 +16,6 @@ use App\Domain\Preparation\Isolation\ChildDocumentRead;
 
 require dirname(__DIR__, 4).'/vendor/autoload.php';
 
+ChildDocumentRead::exitWhenMemoryIsExhausted();
+
 exit(ChildDocumentRead::main(STDIN, STDOUT));

@@ -6,6 +6,7 @@ namespace Tests\Feature\Preparation\Isolation;
 
 use App\Domain\Delivery\Health\HealthStatus;
 use App\Domain\Delivery\Health\Probes\Doctor\DocumentIsolationProbe;
+use App\Domain\Delivery\Health\ReadinessChecker;
 use App\Domain\Preparation\Isolation\DocumentIsolation;
 use App\Domain\Preparation\Isolation\IsolationMode;
 use Illuminate\Process\Factory;
@@ -44,5 +45,17 @@ final class DocumentIsolationProbeTest extends TestCase
         $this->assertSame('document_isolation', $result->name);
         $this->assertSame($expected, $result->status);
         $this->assertStringContainsString($says, $result->message);
+        $this->assertStringContainsString('from the command line', $result->message, 'The CLI probe does not say it speaks for CLI reads only.');
+    }
+
+    /**
+     * The CLI's answer does not hold for the web handler, which reads every upload, so readiness —
+     * served by the web handler — runs the probe there.
+     */
+    public function test_readiness_reports_isolation_as_the_web_handler_sees_it(): void
+    {
+        $probes = app(ReadinessChecker::class)->run()->toArray()['probes'];
+
+        $this->assertArrayHasKey('document_isolation', $probes);
     }
 }
