@@ -7,6 +7,7 @@ namespace App\Domain\Integration\Firma;
 use App\Domain\Evidence\Finalization\Exceptions\FinalizationException;
 use App\Domain\Integration\Native\ApiException;
 use App\Domain\Integration\Native\ErrorCode;
+use App\Domain\Preparation\Contracts\DocumentReadUnavailable;
 use App\Domain\Preparation\Geometry\InvalidGeometryException;
 use App\Domain\Preparation\Geometry\UndeclaredCoordinateConventionException;
 use App\Domain\Preparation\Schema\InvalidFieldSchemaException;
@@ -139,6 +140,15 @@ final class FirmaErrorMap
             // default arm: a fixed sentence, a 500, and a `report()`. The native
             // App\Domain\Integration\Native\ApiErrorMap leaves it unmapped for the same
             // reason.
+
+            // A document read that failed on the service side. The facade's vocabulary has no
+            // retryable server error, so it is upstream's 500 — never `invalid_request`, which
+            // would have a consumer "fix" a body that was never wrong. The exception's own message
+            // can name the host's PHP binary, so the caller is given the fixed sentence.
+            $exception instanceof DocumentReadUnavailable => FirmaException::of(
+                FirmaErrorCode::InternalError,
+                $exception->publicMessage(),
+            ),
 
             $exception instanceof ApiException => self::fromNative($exception),
 

@@ -14,6 +14,7 @@ use App\Domain\Evidence\Finalization\Artifacts\ArtifactStore;
 use App\Domain\Evidence\Finalization\Exceptions\FinalizationException;
 use App\Domain\Evidence\Finalization\Exceptions\PublicationSuperseded;
 use App\Domain\Evidence\Sealing\SealRequest;
+use App\Domain\Preparation\Contracts\DocumentReadUnavailable;
 use App\Domain\Preparation\Documents\DocumentBlobStore;
 use App\Domain\Preparation\Documents\Models\DocumentRevision;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
@@ -113,6 +114,21 @@ final readonly class EnvelopeFinalizer
             return $run->refresh();
         } catch (Throwable $failure) {
             $this->recordFailure($run, $failure);
+
+            if ($failure instanceof DocumentReadUnavailable && $failure->isTransient()) {
+                // The document could not be read on the service side: the read's child process
+                // failed. Nothing about the envelope or its document is wrong, so it is not put in
+                // `finalization_failed`, which an operator retries by hand. It stays `finalizing`
+                // with this attempt recorded as failed, and `esign:finalization:resume` re-dispatches
+                // it once the attempt has been quiet for the resume window — the recovery a crashed
+                // worker gets. Isolation that is unavailable is not transient, and fails visibly below.
+                throw new FinalizationException(
+                    'Finalization could not read the document on the service side and will be retried: '
+                    .$this->redact($failure->getMessage()),
+                    previous: $failure,
+                );
+            }
+
             $this->markFailed($envelope, $failure);
 
             throw $failure instanceof FinalizationException

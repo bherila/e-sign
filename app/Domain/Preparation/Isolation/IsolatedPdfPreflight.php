@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Preparation\Isolation;
 
+use App\Domain\Preparation\Contracts\DocumentReadUnavailable;
 use App\Domain\Preparation\Contracts\PdfPreflight;
 use App\Domain\Preparation\Preflight\DocumentMetrics;
 use App\Domain\Preparation\Preflight\PreflightBudgetException;
@@ -15,9 +16,10 @@ use App\Domain\Preparation\Preflight\PreflightReport;
 /**
  * Preflight, in a child process when this host provides one (docs/adr/0006).
  *
- * The port promises a report for any document, never an exception. So a read the runtime stopped
- * is a rejection naming that ceiling, and a child that failed some other way is `unparseable`, both
- * exactly as an in-process read would have reported them.
+ * The port promises a report for any document. So a read the runtime stopped is a rejection naming
+ * that ceiling, exactly as an in-process read would have reported it. A child that failed some other
+ * way learned nothing about the document, so that is not a report at all: it is the service-side
+ * failure every document-read port declares, {@see DocumentReadUnavailable}.
  */
 final readonly class IsolatedPdfPreflight implements PdfPreflight
 {
@@ -28,7 +30,7 @@ final readonly class IsolatedPdfPreflight implements PdfPreflight
     ) {}
 
     /**
-     * @throws DocumentIsolationUnavailable When isolation is required and this host cannot provide it.
+     * @throws DocumentReadUnavailable When the read fails on the service side: its child process, or isolation that is required and unavailable.
      */
     public function inspect(string $pdfBytes): PreflightReport
     {
@@ -44,8 +46,8 @@ final readonly class IsolatedPdfPreflight implements PdfPreflight
             $response = $reader->read(['operation' => ChildDocumentRead::PREFLIGHT, 'bytes' => $pdfBytes], $this->limits);
         } catch (PreflightBudgetException $stopped) {
             return $this->rejected($pdfBytes, $stopped->preflightCode, $stopped->getMessage(), $startedAt);
-        } catch (ChildReadFailed) {
-            return $this->unparseable($pdfBytes, $startedAt);
+        } catch (ChildReadFailed $failed) {
+            throw DocumentReadUnavailable::childFailed($failed);
         }
 
         $report = $response['value'] ?? null;
@@ -56,23 +58,12 @@ final readonly class IsolatedPdfPreflight implements PdfPreflight
 
         // In-process preflight reports on every document rather than throwing, so anything other
         // than a report is the child failing, not the document.
-        return $this->unparseable($pdfBytes, $startedAt);
+        throw new DocumentReadUnavailable('The document read process answered preflight with something other than a report.');
     }
 
     public function forGenerated(): PdfPreflight
     {
         return new self($this->inProcess->forGenerated(), $this->isolation, $this->limits->forGenerated());
-    }
-
-    private function unparseable(string $pdfBytes, float $startedAt): PreflightReport
-    {
-        return $this->rejected(
-            $pdfBytes,
-            PreflightCode::Unparseable,
-            'The file could not be read as a PDF. Re-export the document from the application that produced it '
-            .'and upload it again.',
-            $startedAt,
-        );
     }
 
     private function rejected(string $pdfBytes, PreflightCode $code, string $message, float $startedAt): PreflightReport

@@ -7,6 +7,7 @@ namespace App\Domain\Preparation\Documents;
 use App\Domain\Identity\Audit\AuditActor;
 use App\Domain\Identity\Audit\AuditRecorder;
 use App\Domain\Identity\Models\Workspace;
+use App\Domain\Preparation\Contracts\DocumentReadUnavailable;
 use App\Domain\Preparation\Contracts\PdfPreflight;
 use App\Domain\Preparation\Documents\Models\Document;
 use App\Models\User;
@@ -64,6 +65,7 @@ final readonly class DocumentIntake
      *                              filename never reaches a storage key or a header.
      *
      * @throws DocumentStorageException When the bytes cannot be stored and read back.
+     * @throws DocumentReadUnavailable When reading the document fails on the service side. No document is recorded.
      */
     public function intake(Workspace $workspace, User $uploader, UploadedFile $file, ?string $title = null): Document
     {
@@ -101,6 +103,7 @@ final readonly class DocumentIntake
      * are a PDF is decided by the preflight parser, which is the only judge that matters.
      *
      * @throws DocumentStorageException When the bytes cannot be stored and read back.
+     * @throws DocumentReadUnavailable When reading the document fails on the service side. No document is recorded.
      */
     public function intakeBytes(
         Workspace $workspace,

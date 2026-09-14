@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Documents;
 
+use App\Domain\Preparation\Contracts\DocumentReadUnavailable;
 use App\Domain\Preparation\Documents\DocumentIntake;
 use App\Domain\Preparation\Documents\DocumentStatus;
 use App\Domain\Preparation\Documents\Models\Document;
@@ -30,12 +31,23 @@ class DocumentController extends Controller
      */
     public function store(StoreDocumentRequest $request, DocumentIntake $intake): JsonResponse
     {
-        $document = $intake->intake(
-            $request->workspace(),
-            $request->currentUser(),
-            $request->file('file'),
-            $request->title(),
-        );
+        try {
+            $document = $intake->intake(
+                $request->workspace(),
+                $request->currentUser(),
+                $request->file('file'),
+                $request->title(),
+            );
+        } catch (DocumentReadUnavailable $unavailable) {
+            // Reading failed on the service side, and no document was recorded. Not a rejection: a
+            // `preflight_failed` document would tell the sender to fix a file that may be fine.
+            report($unavailable);
+
+            return response()->json([
+                'message' => $unavailable->publicMessage(),
+                'code' => $unavailable->code(),
+            ], 503);
+        }
 
         $document->load(['revisions', 'workspace', 'uploader']);
 

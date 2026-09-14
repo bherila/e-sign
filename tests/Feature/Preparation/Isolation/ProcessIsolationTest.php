@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Preparation\Isolation;
 
 use App\Domain\Preparation\Assembly\AssemblyException;
+use App\Domain\Preparation\Contracts\DocumentReadUnavailable;
 use App\Domain\Preparation\Contracts\PdfAssembler;
 use App\Domain\Preparation\Contracts\PdfPreflight;
 use App\Domain\Preparation\Contracts\PdfTextLocator;
@@ -13,6 +14,8 @@ use App\Domain\Preparation\Isolation\ChildReadFailed;
 use App\Domain\Preparation\Isolation\DocumentIsolation;
 use App\Domain\Preparation\Isolation\DocumentIsolationUnavailable;
 use App\Domain\Preparation\Isolation\IsolatedPdfAssembler;
+use App\Domain\Preparation\Isolation\IsolatedPdfPreflight;
+use App\Domain\Preparation\Isolation\IsolatedPdfTextLocator;
 use App\Domain\Preparation\Isolation\IsolationMode;
 use App\Domain\Preparation\Preflight\PreflightBudget;
 use App\Domain\Preparation\Preflight\PreflightBudgetException;
@@ -374,6 +377,61 @@ final class ProcessIsolationTest extends TestCase
         $report = app(PdfPreflight::class)->inspect(PdfBombFixtures::bytes('single-stream-bomb'));
 
         $this->assertSame(['decompression_limit_exceeded'], $report->rejectionCodes());
+    }
+
+    /**
+     * Every port a document is read through, reading through a child that exits unexpectedly.
+     *
+     * @return iterable<string, array{\Closure(DocumentIsolation, PreflightLimits): mixed}>
+     */
+    public static function portsReadingThroughABrokenChild(): iterable
+    {
+        yield 'preflight' => [static fn (DocumentIsolation $isolation, PreflightLimits $limits): mixed => (new IsolatedPdfPreflight(new TcPdfPreflight($limits), $isolation, $limits))
+            ->inspect(PdfFixtures::bytes('single-page-letter'))];
+        yield 'text extraction' => [static fn (DocumentIsolation $isolation, PreflightLimits $limits): mixed => (new IsolatedPdfTextLocator(new TcPdfTextLocator($limits), $isolation, $limits))
+            ->extract(PdfFixtures::bytes('single-page-letter'))];
+        yield 'text and pages' => [static fn (DocumentIsolation $isolation, PreflightLimits $limits): mixed => (new IsolatedPdfTextLocator(new TcPdfTextLocator($limits), $isolation, $limits))
+            ->read(PdfFixtures::bytes('single-page-letter'))];
+        yield 'assembly' => [static fn (DocumentIsolation $isolation, PreflightLimits $limits): mixed => (new IsolatedPdfAssembler(new TcPdfAssembler(new TcPdfPreflight($limits), resource_path('fonts'), $limits), $isolation, $limits, resource_path('fonts')))
+            ->assemble(PdfFixtures::bytes('single-page-letter'))];
+    }
+
+    /**
+     * A child that failed is the deployment failing, on every port (#119).
+     *
+     * Never the port's answer for a document it could not read — an `unparseable` report, a
+     * `TextExtractionException`, an `AssemblyException`. Each port once gave that answer here too,
+     * so a valid upload was stored as `preflight_failed` and a finalization a retry would have
+     * completed gave up.
+     */
+    #[DataProvider('portsReadingThroughABrokenChild')]
+    public function test_a_child_that_fails_is_a_service_side_failure_on_every_port(\Closure $read): void
+    {
+        $isolation = new DocumentIsolation(IsolationMode::Process, app(Factory::class), PHP_BINARY, 0, 0.0, null, self::FIXTURES.'/exit-nonzero.php');
+
+        try {
+            $read($isolation, app(PreflightLimits::class));
+            $this->fail('A read through a child that exited unexpectedly returned an answer.');
+        } catch (DocumentReadUnavailable $unavailable) {
+            $this->assertTrue($unavailable->isTransient());
+            $this->assertInstanceOf(ChildReadFailed::class, $unavailable->getPrevious());
+        }
+    }
+
+    /** Isolation that is required and unavailable is the same failure, and the kind a retry alone cannot cure. */
+    public function test_isolation_that_is_unavailable_is_a_service_side_failure_that_is_not_transient(): void
+    {
+        $limits = app(PreflightLimits::class);
+        $preflight = new IsolatedPdfPreflight(new TcPdfPreflight($limits), $this->isolation(IsolationMode::Process, '/definitely/not/php'), $limits);
+
+        try {
+            $preflight->inspect(PdfFixtures::bytes('single-page-letter'));
+            $this->fail('Preflight answered on a host that cannot provide the isolation it requires.');
+        } catch (DocumentReadUnavailable $unavailable) {
+            $this->assertInstanceOf(DocumentIsolationUnavailable::class, $unavailable);
+            $this->assertFalse($unavailable->isTransient());
+            $this->assertStringNotContainsString('/definitely/not/php', $unavailable->publicMessage());
+        }
     }
 
     // ------------------------------------------------------------------------- the resolution

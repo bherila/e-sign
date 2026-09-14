@@ -72,7 +72,7 @@ class ApiErrorBoundary
             // The routing pipeline reports whatever it renders itself. This branch is the
             // one where it did not, so an unexpected failure is reported here instead — and
             // only an unexpected one: a 409 in the error log teaches nobody anything.
-            if ($error->errorCode === ErrorCode::InternalError) {
+            if (! ApiErrorMap::isExpectedRefusal($exception)) {
                 report($exception);
             }
 

@@ -7,6 +7,7 @@ namespace App\Domain\Integration\Native;
 use App\Domain\Delivery\Outbound\Exceptions\DestinationRefusedException;
 use App\Domain\Delivery\Webhooks\Exceptions\UnknownEventNameException;
 use App\Domain\Preparation\Anchoring\AnchorDocumentUnavailable;
+use App\Domain\Preparation\Contracts\DocumentReadUnavailable;
 use App\Domain\Preparation\Schema\InvalidFieldSchemaException;
 use App\Domain\Preparation\Schema\ValidationError;
 use App\Domain\Preparation\Templates\TemplateStateException;
@@ -76,6 +77,14 @@ final class ApiErrorMap
             $exception instanceof AnchorDocumentUnavailable => ApiException::of(
                 ErrorCode::DocumentUnavailable,
                 $exception->getMessage(),
+                ['retryable' => true],
+            ),
+
+            // The same failure one layer down, from a read that was not resolving anchors. Its own
+            // message can name the host's PHP binary, so the caller is given the fixed sentence.
+            $exception instanceof DocumentReadUnavailable => ApiException::of(
+                ErrorCode::DocumentUnavailable,
+                $exception->publicMessage(),
                 ['retryable' => true],
             ),
 
@@ -176,6 +185,12 @@ final class ApiErrorMap
      */
     public static function isExpectedRefusal(Throwable $exception): bool
     {
+        // Answered plainly, but it is the deployment failing rather than the caller asking for
+        // something refused, so it is reported like any other fault.
+        if ($exception instanceof DocumentReadUnavailable) {
+            return false;
+        }
+
         return self::translate($exception)->errorCode !== ErrorCode::InternalError;
     }
 
