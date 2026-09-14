@@ -36,6 +36,22 @@ final class AnchorDocumentUnavailable extends RuntimeException
         );
     }
 
+    /**
+     * The bytes were fetched, and reading them failed on the service side: the read's child process
+     * could not start, exited unexpectedly or answered with something undecodable, or process
+     * isolation is required and this host cannot provide it. Nothing about the document was learned,
+     * so nothing about the request needs to change.
+     */
+    public static function readFailed(string $revisionPublicId, ?Throwable $previous = null): self
+    {
+        return new self(
+            'The document could not be read, so its anchors could not be resolved. Nothing about the '
+            .'request needs to change; this is a failure on the service side and the same call may '
+            .'succeed on a retry.',
+            previous: $previous,
+        );
+    }
+
     public function code(): string
     {
         return 'anchor_document_unavailable';

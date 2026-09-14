@@ -13,12 +13,17 @@ use App\Domain\Preparation\Anchoring\SchemaAnchorResolver;
 use App\Domain\Preparation\Contracts\PdfTextLocator;
 use App\Domain\Preparation\Documents\DocumentIntake;
 use App\Domain\Preparation\Documents\Models\Document;
+use App\Domain\Preparation\Isolation\DocumentIsolation;
+use App\Domain\Preparation\Isolation\IsolatedPdfTextLocator;
+use App\Domain\Preparation\Isolation\IsolationMode;
 use App\Domain\Preparation\Preflight\PreflightBudget;
+use App\Domain\Preparation\Preflight\PreflightLimits;
 use App\Domain\Preparation\Schema\AnchorPlacement;
 use App\Domain\Preparation\Schema\AnchorPlacementMode;
 use App\Domain\Preparation\Schema\FieldDefinition;
 use App\Domain\Preparation\Schema\ResolvedAnchorRecord;
 use App\Domain\Preparation\Schema\ValidationCode;
+use App\Domain\Preparation\TcPdf\TcPdfTextLocator;
 use App\Domain\Preparation\Templates\Models\Template;
 use App\Domain\Preparation\Templates\Models\TemplateVersion;
 use App\Domain\Preparation\Templates\TemplateService;
@@ -27,8 +32,10 @@ use App\Domain\Preparation\Text\AnchorResolver;
 use App\Domain\Preparation\Text\DocumentText;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Process\Factory;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use PHPUnit\Framework\Attributes\DataProvider;
 use ReflectionMethod;
 use Tests\Support\DocumentWorkspace;
 use Tests\Support\FieldSchemaFixture;
@@ -326,6 +333,45 @@ final class TemplateAnchorPublishTest extends TestCase
 
         // Searched in the decoded body: the raw JSON escapes every `/`, so a path would never match it.
         $this->assertStringNotContainsString((string) $revision->path, (string) json_encode($response->json(), JSON_UNESCAPED_SLASHES));
+        $this->assertNull($draft->fresh()?->published_at);
+    }
+
+    /**
+     * A document read whose child process failed is a server failure too, never an unreadable document.
+     *
+     * The isolated locator reports a child that could not start, exited unexpectedly or answered
+     * with something undecodable as the port's unreadable-document failure. At publish that would
+     * become `anchor_text_unreadable` in a 422, telling the sender to fix a valid template. The same
+     * holds when process isolation is required and the host cannot provide it. Both are driven here
+     * through a real isolated locator.
+     *
+     * @return iterable<string, array{string, string}>
+     */
+    public static function failedReads(): iterable
+    {
+        yield 'the child process exits unexpectedly' => [PHP_BINARY, 'exit-nonzero.php'];
+        yield 'process isolation is unavailable' => ['/definitely/not/a/php/binary', 'exit-nonzero.php'];
+    }
+
+    #[DataProvider('failedReads')]
+    public function test_a_read_that_fails_on_the_service_side_fails_the_publish_as_a_retryable_503(string $binary, string $entrypoint): void
+    {
+        $template = $this->template();
+        $draft = $this->draft($template, FieldSchemaFixture::asArray());
+
+        $limits = app(PreflightLimits::class);
+        app()->instance(PdfTextLocator::class, new IsolatedPdfTextLocator(
+            new TcPdfTextLocator($limits),
+            new DocumentIsolation(IsolationMode::Process, app(Factory::class), $binary, 0, 0.0, null, base_path('tests/Fixtures/isolation/'.$entrypoint)),
+            $limits,
+        ));
+
+        $this->actingAs($this->sender)
+            ->post($this->publishUrl($template), [], self::JSON)
+            ->assertStatus(503)
+            ->assertJsonPath('code', 'anchor_document_unavailable')
+            ->assertJsonMissingPath('field_schema_errors');
+
         $this->assertNull($draft->fresh()?->published_at);
     }
 
