@@ -191,6 +191,66 @@ final class TemplateAnchorPublishTest extends TestCase
     }
 
     /**
+     * A template retired while its version's anchors are being resolved does not gain a published version.
+     *
+     * The retired check before resolution cannot see a retirement that lands during the PDF read,
+     * which can take as long as a parse. The locator here retires the template in the middle of that
+     * read; publishing must re-check under the lock and refuse.
+     */
+    public function test_a_template_retired_during_resolution_is_not_published(): void
+    {
+        $template = $this->template();
+        $this->draft($template, FieldSchemaFixture::asArray());
+
+        $inner = app(PdfTextLocator::class);
+        $retire = function () use ($template): void {
+            $fresh = $template->fresh();
+            $this->assertNotNull($fresh);
+            app(TemplateService::class)->setRetired($fresh, $this->sender, true);
+        };
+
+        app()->instance(PdfTextLocator::class, new class($inner, $retire) implements PdfTextLocator
+        {
+            private bool $retired = false;
+
+            public function __construct(private readonly PdfTextLocator $inner, private readonly \Closure $retire) {}
+
+            public function extract(string $pdfBytes, ?int $page = null, ?PreflightBudget $budget = null): array
+            {
+                $this->retireOnce();
+
+                return $this->inner->extract($pdfBytes, $page, $budget);
+            }
+
+            public function read(string $pdfBytes, ?PreflightBudget $budget = null): DocumentText
+            {
+                $this->retireOnce();
+
+                return $this->inner->read($pdfBytes, $budget);
+            }
+
+            private function retireOnce(): void
+            {
+                if (! $this->retired) {
+                    $this->retired = true;
+                    ($this->retire)();
+                }
+            }
+        });
+
+        try {
+            app(TemplateService::class)->publish($this->versionOf($template), $this->sender);
+            $this->fail('A template retired during resolution published a version.');
+        } catch (TemplateStateException $refused) {
+            $this->assertSame('template_retired', $refused->reason);
+        }
+
+        $this->assertNull($this->versionOf($template)->published_at);
+        $this->assertNull($template->fresh()?->current_version_id);
+        $this->assertTrue((bool) $template->fresh()?->isRetired());
+    }
+
+    /**
      * A repeat publish refuses without opening the document.
      *
      * Otherwise a second request against an already-published version would resolve again — a blob

@@ -397,6 +397,19 @@ final readonly class TemplateService
         $prepared = $this->resolveAnchors($version);
 
         return DB::transaction(function () use ($version, $actor, $template, $prepared): TemplateVersion {
+            // The template first, and re-checked under its lock. The check above ran before a
+            // resolution that can take as long as a PDF parse, and a template retired in that
+            // window must not gain a published current version. `setRetired()` updates this row, so
+            // it waits for this transaction rather than slipping in between; drafting locks only
+            // version rows, so the order template-then-version cannot cycle with it.
+            $lockedTemplate = $template instanceof Template
+                ? Template::query()->whereKey($template->getKey())->lockForUpdate()->first()
+                : null;
+
+            if ($lockedTemplate instanceof Template && $lockedTemplate->isRetired()) {
+                throw TemplateStateException::templateRetired($lockedTemplate);
+            }
+
             /** @var TemplateVersion $locked */
             $locked = TemplateVersion::query()
                 ->whereKey($version->getKey())
@@ -420,9 +433,9 @@ final readonly class TemplateService
             $locked->published_at = now();
             $locked->save();
 
-            if ($template instanceof Template) {
-                $template->current_version_id = $locked->getKey();
-                $template->save();
+            if ($lockedTemplate instanceof Template) {
+                $lockedTemplate->current_version_id = $locked->getKey();
+                $lockedTemplate->save();
             }
 
             $this->audit->record(
