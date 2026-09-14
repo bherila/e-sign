@@ -164,6 +164,16 @@ final readonly class ToUnicodeCMapReader
         return $char === false ? "\u{FFFD}" : $char;
     }
 
+    /**
+     * UTF-16BE to UTF-8, decoded in slices that are each reported before they are unpacked.
+     *
+     * One destination can be most of a stream. Unpacking it whole built an integer array holding
+     * every code unit — many times the memory of the string it came from — before `record()` got
+     * as far as the budget. A slice is the budget's own scan interval and even, so it never splits
+     * a code unit; a surrogate pair that straddles two slices is carried across the boundary.
+     *
+     * @throws PreflightBudgetException
+     */
     private function utf16BeToUtf8(string $bytes): string
     {
         if (strlen($bytes) % 2 === 1) {
@@ -171,27 +181,44 @@ final readonly class ToUnicodeCMapReader
         }
 
         $out = '';
-        $units = unpack('n*', $bytes);
-        if ($units === false) {
-            return "\u{FFFD}";
-        }
+        $pendingHigh = null;
+        $length = strlen($bytes);
 
-        $units = array_values($units);
-        $count = count($units);
-        for ($i = 0; $i < $count; $i++) {
-            $unit = $units[$i];
+        for ($offset = 0; $offset < $length; $offset += PreflightBudget::SCAN_BYTES_PER_TICK) {
+            $slice = substr($bytes, $offset, PreflightBudget::SCAN_BYTES_PER_TICK);
+            $this->budget->scan(strlen($slice));
 
-            if ($unit >= 0xD800 && $unit <= 0xDBFF && isset($units[$i + 1])) {
-                $low = $units[$i + 1];
-                if ($low >= 0xDC00 && $low <= 0xDFFF) {
-                    $out .= $this->utf8(0x10000 + (($unit - 0xD800) << 10) + ($low - 0xDC00));
-                    $i++;
+            $units = unpack('n*', $slice);
+            if ($units === false) {
+                return "\u{FFFD}";
+            }
+
+            foreach ($units as $unit) {
+                if ($pendingHigh !== null) {
+                    if ($unit >= 0xDC00 && $unit <= 0xDFFF) {
+                        $out .= $this->utf8(0x10000 + (($pendingHigh - 0xD800) << 10) + ($unit - 0xDC00));
+                        $pendingHigh = null;
+
+                        continue;
+                    }
+
+                    // A high surrogate with no low one after it stands alone, as it did before.
+                    $out .= $this->utf8($pendingHigh);
+                    $pendingHigh = null;
+                }
+
+                if ($unit >= 0xD800 && $unit <= 0xDBFF) {
+                    $pendingHigh = $unit;
 
                     continue;
                 }
-            }
 
-            $out .= $this->utf8($unit);
+                $out .= $this->utf8($unit);
+            }
+        }
+
+        if ($pendingHigh !== null) {
+            $out .= $this->utf8($pendingHigh);
         }
 
         return $out;

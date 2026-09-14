@@ -289,6 +289,87 @@ final class DocumentReadBudgetTest extends TestCase
     }
 
     /**
+     * An inline image's search is counted however it ends, including on the last operation.
+     *
+     * `skipInlineImage()` finds its terminator with native scans, and reported bytes only when it
+     * rejected a candidate. A far-away valid terminator, or none at all, at the very end of a stream
+     * left nothing after it to notice the offset had moved — so a megabyte was passed and never
+     * counted.
+     *
+     * @return iterable<string, array{string}>
+     */
+    public static function inlineImageEndings(): iterable
+    {
+        yield 'a valid terminator a megabyte away, ending the stream' => ["BI\nID\n".str_repeat('x', 1_048_576).' EI'];
+        yield 'no terminator at all' => ["BI\nID\n".str_repeat('x', 1_048_576)];
+    }
+
+    #[DataProvider('inlineImageEndings')]
+    public function test_an_inline_image_search_is_charged_however_it_ends(string $stream): void
+    {
+        $looks = 0;
+        $clock = static function () use (&$looks): float {
+            return (float) $looks++;
+        };
+        $budget = new PreflightBudget(new PreflightLimits(timeBudgetSeconds: 1.0e9), $clock);
+        $looks = 0;
+
+        foreach ((new ContentStreamTokenizer($stream, $budget))->operations() as $operation) {
+            // Drained for its cost only.
+        }
+
+        $this->assertGreaterThan(0, $looks, 'A megabyte of inline image was passed without being reported to the budget.');
+    }
+
+    /**
+     * One large CMap destination is charged while it is decoded, not only once it is recorded.
+     *
+     * The clock counts the looks made while `utf16BeToUtf8()` is running, which isolates this site
+     * from the tokenizer's own charge for reading the hex string. A megabyte of UTF-16 destination is
+     * 256 of the budget's scan intervals, so decoding it reported must look at the budget a hundred
+     * times; decoding it whole, as one unpack, looked none.
+     */
+    public function test_one_large_cmap_destination_is_charged_while_it_is_decoded(): void
+    {
+        $decodingLooks = 0;
+        $clock = static function () use (&$decodingLooks): float {
+            foreach (debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS) as $frame) {
+                if (($frame['class'] ?? null) === ToUnicodeCMapReader::class && $frame['function'] === 'utf16BeToUtf8') {
+                    $decodingLooks++;
+
+                    break;
+                }
+            }
+
+            return 0.0;
+        };
+
+        $cmap = "1 beginbfchar\n<41> <".str_repeat('0041', 524_288).">\nendbfchar\n";
+
+        (new ToUnicodeCMapReader(new PreflightBudget(new PreflightLimits, $clock)))->parse($cmap);
+
+        $this->assertGreaterThan(100, $decodingLooks, 'A megabyte of CMap destination was decoded in '.$decodingLooks.' looks at the budget.');
+    }
+
+    /**
+     * Decoding in slices changes nothing about the text a destination decodes to.
+     *
+     * A surrogate pair is the one shape a slice boundary could split, so one is placed exactly
+     * across it: the high surrogate as the last unit of the first 4 KiB, the low one as the first
+     * unit of the next. A lone high surrogate still stands alone, as it did before.
+     */
+    public function test_slice_decoding_keeps_a_surrogate_pair_that_straddles_a_boundary(): void
+    {
+        $filler = str_repeat('0041', (PreflightBudget::SCAN_BYTES_PER_TICK / 2) - 1);
+        $cmap = "2 beginbfchar\n<41> <".$filler."D83DDE00>\n<42> <D83D0042>\nendbfchar\n";
+
+        $map = (new ToUnicodeCMapReader(new PreflightBudget(new PreflightLimits)))->parse($cmap);
+
+        $this->assertSame(str_repeat('A', (PreflightBudget::SCAN_BYTES_PER_TICK / 2) - 1)."\u{1F600}", $map[0x41]);
+        $this->assertSame("\u{FFFD}B", $map[0x42]);
+    }
+
+    /**
      * A font's /ToUnicode map is charged for the entries it expands to, not the bytes it is lexed from.
      *
      * Sixteen full-width `bfrange` entries are a few hundred bytes — nothing the tokenizer's per-byte

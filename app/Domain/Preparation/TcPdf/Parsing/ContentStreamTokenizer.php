@@ -395,9 +395,15 @@ final class ContentStreamTokenizer
      */
     private function skipInlineImage(): void
     {
+        // Every way out of this method reports the bytes it passed. Each `strpos()` below is one
+        // native scan that nothing can interrupt while it runs, so reporting afterwards is the most
+        // this can do — it keeps the accounting true, and a far-away terminator on the last
+        // operation no longer leaves the stream uncounted. Bounding the *time* of one such scan is
+        // the process-level limit's job, not this method's.
         $idPos = strpos($this->data, 'ID', $this->offset);
         if ($idPos === false) {
             $this->offset = $this->length;
+            $this->charge();
 
             return;
         }
@@ -408,6 +414,7 @@ final class ContentStreamTokenizer
             $after = $this->data[$eiPos + 2] ?? ' ';
             if (str_contains(self::WHITESPACE, $before) && (str_contains(self::WHITESPACE, $after) || str_contains(self::DELIMITERS, $after))) {
                 $this->offset = $eiPos + 2;
+                $this->charge();
 
                 return;
             }
@@ -421,5 +428,6 @@ final class ContentStreamTokenizer
         }
 
         $this->offset = $this->length;
+        $this->charge();
     }
 }
