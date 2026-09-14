@@ -26,6 +26,7 @@
       @else
         <form method="POST" action="{{ route('invitations.redeem') }}">
           @csrf
+          <input type="hidden" name="invitation" value="{{ $invitation->public_id }}">
           <button type="submit" class="rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">Accept invitation</button>
         </form>
       @endif

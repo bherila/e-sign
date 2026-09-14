@@ -94,6 +94,18 @@ class InvitationRedemptionController extends Controller
             return redirect()->route('invitations.accept');
         }
 
+        // The page names the invitation it showed. Opening another link in another tab replaces the
+        // cookie, and accepting a page still on screen must never accept that other invitation: a
+        // different workspace, or a different role, from the one the person read and agreed to.
+        $current = $this->members->openInvitationFor($token);
+        $shown = $request->input('invitation');
+
+        if ($current !== null && (! is_string($shown) || ! hash_equals($current->public_id, $shown))) {
+            return redirect()
+                ->route('invitations.accept')
+                ->withErrors(['invitation' => 'This page was showing a different invitation from the one you opened most recently. Review the invitation below, and accept it if it is the one you want.']);
+        }
+
         try {
             $membership = $this->members->redeem($token, $this->currentUser($request));
         } catch (MembershipChangeRefused $refusal) {

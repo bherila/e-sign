@@ -209,7 +209,7 @@ final class MembersHttpTest extends TestCase
 
         $this->actingAs($newcomer)
             ->withCookie(InvitationRedemptionController::COOKIE, $token)
-            ->post('/invitations/accept')
+            ->post('/invitations/accept', ['invitation' => $invitation->public_id])
             ->assertRedirect(route('dashboard'))
             ->assertSessionHas('status', 'You joined Synthetic Workspace as Auditor.')
             ->assertCookieExpired(InvitationRedemptionController::COOKIE);
@@ -221,6 +221,28 @@ final class MembersHttpTest extends TestCase
             ->get('/invitations/accept')
             ->assertNotFound()
             ->assertSee('This invitation cannot be used');
+    }
+
+    /**
+     * Accepting binds to the invitation the page showed (#125 review).
+     *
+     * A second link opened in another tab replaces the cookie. The page still showing the first must
+     * not accept the second, which can name another workspace or a different role.
+     */
+    public function test_accepting_a_page_that_shows_another_invitation_is_refused(): void
+    {
+        [$shown] = app(WorkspaceMembers::class)->invite($this->workspace, $this->owner, WorkspaceRole::Auditor);
+        [$replacing, $token] = app(WorkspaceMembers::class)->invite($this->workspace, $this->owner, WorkspaceRole::Admin);
+        $newcomer = User::factory()->create();
+
+        $this->actingAs($newcomer)
+            ->withCookie(InvitationRedemptionController::COOKIE, $token)
+            ->post('/invitations/accept', ['invitation' => $shown->public_id])
+            ->assertRedirect(route('invitations.accept'))
+            ->assertSessionHasErrors('invitation');
+
+        $this->assertFalse(WorkspaceMembership::query()->where('user_id', $newcomer->getKey())->exists());
+        $this->assertTrue($replacing->fresh()?->isOpen());
     }
 
     public function test_a_guest_is_brought_back_to_a_url_without_the_token(): void
@@ -247,7 +269,7 @@ final class MembersHttpTest extends TestCase
 
         $this->actingAs($this->sender)
             ->withCookie(InvitationRedemptionController::COOKIE, $token)
-            ->post('/invitations/accept')
+            ->post('/invitations/accept', ['invitation' => $invitation->public_id])
             ->assertRedirect(route('invitations.accept'))
             ->assertSessionHasErrors('invitation');
 

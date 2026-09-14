@@ -34,7 +34,8 @@ use Illuminate\Support\Facades\DB;
  *   workspace's owner rows, then the actor's and the target's membership rows together in id
  *   order, and only then reads the actor's role. An actor demoted by a concurrent request cannot
  *   finish a change on the authority they just lost, and two changes cannot each see another
- *   owner and leave none. One lock order everywhere is what keeps that from deadlocking.
+ *   owner and leave none. One lock order everywhere is what keeps that from deadlocking: an
+ *   invitation row, when one is involved, always comes before any membership row.
  * - **Removing access removes only access.** A membership row is deleted and nothing else;
  *   the schema's RESTRICT foreign keys keep every envelope, artifact and audit event.
  * - **Every change is audited**, once, and a change that changes nothing writes nothing.
@@ -135,16 +136,19 @@ final readonly class WorkspaceMembers
     public function revokeInvitation(Workspace $workspace, User $actor, WorkspaceInvitation $invitation): void
     {
         DB::transaction(function () use ($workspace, $actor, $invitation): void {
-            $this->lockedOwners($workspace);
-            [$actorRole] = $this->lockedActorAndTarget($workspace, $actor);
-
-            $this->assertManages($actorRole);
-
+            // The invitation row first, as redeem() takes it. Revoking and accepting one link at the
+            // same moment then wait on that one row, instead of each holding what the other needs
+            // (the owner rows here, the invitation there) and deadlocking into a 500.
             $locked = WorkspaceInvitation::query()
                 ->where('workspace_id', $workspace->getKey())
                 ->whereKey($invitation->getKey())
                 ->lockForUpdate()
                 ->first();
+
+            $this->lockedOwners($workspace);
+            [$actorRole] = $this->lockedActorAndTarget($workspace, $actor);
+
+            $this->assertManages($actorRole);
 
             // Already accepted, revoked or expired: there is nothing left to take back, and
             // saying so twice would add an audit event that records nothing happening.

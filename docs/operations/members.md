@@ -32,6 +32,10 @@ sends it to the person, who opens it while signed in and accepts.
   remembered URL holding the token would put a live credential where a read-only copy of that
   table could use it.
 - **Links are rooted at `APP_URL`**, never at the host a request named.
+- **Links stay out of access logs.** The token is in the link's path, so any web server or proxy
+  that logs request URIs records a live credential. The Docker image's nginx does not log
+  `/invitations/{token}`. A deployment with another proxy in front should exclude `/invitations/*`
+  from its access logs too.
 - **An existing member** cannot use a link, and following one does not use it up or change their
   role.
 
