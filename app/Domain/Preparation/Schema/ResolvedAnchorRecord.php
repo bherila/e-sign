@@ -76,6 +76,18 @@ final readonly class ResolvedAnchorRecord
         }
     }
 
+    /**
+     * The receipt for a resolved anchor, holding the placement exactly as it will be stored.
+     *
+     * The placement is built from its canonical components, not the raw ones. Every check that
+     * approves a resolved rectangle judges the stored value: the page fit, the receipt bound, the
+     * cross-check. A raw `x` of `-0.0004` is canonical zero, flush with the page's left edge, and
+     * those checks accept it. {@see Rect} refuses any negative raw coordinate before it rounds,
+     * though. Built from the raw value, the receipt would refuse a placement every check had just
+     * approved, while the same sub-thousandth overhang at the right or bottom edge is accepted.
+     * `+ 0.0` turns a canonical `-0.0` into `0.0`, so the stored document never carries a signed
+     * zero.
+     */
     public static function fromResolvedAnchor(ResolvedAnchor $resolved, string $documentSha256): self
     {
         return new self(
@@ -89,10 +101,10 @@ final readonly class ResolvedAnchorRecord
                 $resolved->anchorRect->height,
             ),
             new Rect(
-                $resolved->resolvedRect->x,
-                $resolved->resolvedRect->y,
-                $resolved->resolvedRect->width,
-                $resolved->resolvedRect->height,
+                CanonicalNumber::round($resolved->resolvedRect->x) + 0.0,
+                CanonicalNumber::round($resolved->resolvedRect->y) + 0.0,
+                CanonicalNumber::round($resolved->resolvedRect->width) + 0.0,
+                CanonicalNumber::round($resolved->resolvedRect->height) + 0.0,
             ),
         );
     }

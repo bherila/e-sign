@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace App\Domain\Preparation\Contracts;
 
-use App\Domain\Preparation\Geometry\PageGeometry;
 use App\Domain\Preparation\Preflight\PreflightBudget;
 use App\Domain\Preparation\Preflight\PreflightBudgetException;
+use App\Domain\Preparation\Text\DocumentText;
 use App\Domain\Preparation\Text\TextExtractionException;
 use App\Domain\Preparation\Text\TextRun;
 
@@ -54,22 +54,21 @@ interface PdfTextLocator
     public function extract(string $pdfBytes, ?int $page = null, ?PreflightBudget $budget = null): array;
 
     /**
-     * The document's pages, in native coordinates, read under the same rules as {@see extract()}.
+     * The whole document's text and its pages, in native coordinates, from one read.
      *
-     * Here because a caller that has just extracted text from a document sometimes needs its page
-     * geometry too — anchor resolution cannot tell whether a placed field lands on its page
-     * without one — and fetching that from preflight instead reads the document again on a
-     * budget of preflight's own. That second read was charged to nobody, and when its private
-     * ceiling tripped it came back as an empty report that looked like a storage failure.
+     * For a caller that needs both. Anchor resolution cannot tell whether a placed field lands on
+     * its page without the page's size. Fetching the pages separately parses and decodes the
+     * document a second time. From preflight, that second read ran on a budget of its own, charged
+     * to nobody. From this port, it ran on the same budget, charging every decoded byte twice, so a
+     * document inside `max_decompressed_bytes` could be refused for a cost it never had.
      *
      * @param  PreflightBudget|null  $budget  As for {@see extract()}: a caller that supplies one
      *                                        is charged and told about a ceiling; one that does not
      *                                        is still bounded, and sees `TextExtractionException`.
-     * @return array<int, PageGeometry> Indexed from 0, in page order.
      *
      * @throws TextExtractionException When the bytes cannot be read as a document, or a ceiling
      *                                 stops a read the caller supplied no budget for.
      * @throws PreflightBudgetException When a ceiling stops a read the caller did supply a budget for.
      */
-    public function pages(string $pdfBytes, ?PreflightBudget $budget = null): array;
+    public function read(string $pdfBytes, ?PreflightBudget $budget = null): DocumentText;
 }

@@ -18,6 +18,7 @@ use App\Domain\Preparation\Preflight\PreflightFinding;
 use App\Domain\Preparation\Preflight\PreflightLimits;
 use App\Domain\Preparation\Preflight\PreflightReport;
 use App\Domain\Preparation\Preflight\PreflightSeverity;
+use App\Domain\Preparation\Text\DocumentText;
 use App\Domain\Preparation\Text\TextDirection;
 use App\Domain\Preparation\Text\TextRun;
 use UnexpectedValueException;
@@ -55,6 +56,7 @@ final class DocumentReadCodec
         TextRun::class,
         NativeRect::class,
         TextDirection::class,
+        DocumentText::class,
         AssembledDocument::class,
     ];
 

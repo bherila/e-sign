@@ -21,6 +21,7 @@ use App\Domain\Preparation\Schema\SchemaVersion;
 use App\Domain\Preparation\Schema\ValidationCode;
 use App\Domain\Preparation\TcPdf\TcPdfTextLocator;
 use App\Domain\Preparation\Text\AnchorResolver;
+use App\Domain\Preparation\Text\DocumentText;
 use App\Domain\Preparation\Text\TextExtractionException;
 use App\Domain\Preparation\Text\TextRun;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -76,7 +77,7 @@ final class RevisionAnchorResolverTest extends TestCase
         $bytes = PdfFixtures::bytes('single-page-letter');
         $revision = $this->revision($bytes);
         $runs = (new TcPdfTextLocator)->extract($bytes);
-        $pages = (new TcPdfTextLocator)->pages($bytes);
+        $pages = (new TcPdfTextLocator)->read($bytes)->pages;
 
         $limits = new PreflightLimits(timeBudgetSeconds: $hasRoom ? 3600.0 : 0.0000001);
 
@@ -132,45 +133,53 @@ final class RevisionAnchorResolverTest extends TestCase
                 return $this->runs;
             }
 
-            public function pages(string $pdfBytes, ?PreflightBudget $budget = null): array
+            public function read(string $pdfBytes, ?PreflightBudget $budget = null): DocumentText
             {
-                return $this->pages;
+                return new DocumentText(array_values($this->runs), array_values($this->pages));
             }
         };
     }
 
     /**
-     * The page-size fallback is measured on this document's budget, not on one of its own.
+     * The page-size fallback reads the document once, on this document's budget.
      *
      * A revision whose stored report carries no page geometry — a factory row's does not — has its
-     * pages measured from the bytes. That measurement used to be a second preflight, which builds
-     * its own budget: charged to nobody, able to spend a whole second window. The locator here
-     * records the budget each phase is handed, and the page read must be handed the very budget the
-     * text was.
+     * pages measured from the bytes. That measurement was first a second preflight, on a budget of
+     * its own, and then a second locator read on the same budget. That parsed and decoded the
+     * document twice and charged every decoded byte twice, so a document well inside
+     * `max_decompressed_bytes` could be refused on the second pass. The text and the pages now come
+     * from one read.
+     *
+     * Asserted on the charge, not only on the call count: the budget the resolver used must have been
+     * charged exactly what one read of these bytes costs.
      */
-    public function test_the_page_size_fallback_is_charged_to_the_running_budget(): void
+    public function test_the_page_size_fallback_reads_the_document_once_on_the_running_budget(): void
     {
         $bytes = PdfFixtures::bytes('single-page-letter');
         $revision = $this->revision($bytes);
 
         $locator = new class implements PdfTextLocator
         {
-            public ?PreflightBudget $extractBudget = null;
+            public int $reads = 0;
 
-            public ?PreflightBudget $pagesBudget = null;
+            public int $extractions = 0;
+
+            public ?PreflightBudget $budget = null;
 
             public function extract(string $pdfBytes, ?int $page = null, ?PreflightBudget $budget = null): array
             {
-                $this->extractBudget = $budget;
+                $this->extractions++;
+                $this->budget = $budget;
 
                 return (new TcPdfTextLocator)->extract($pdfBytes, $page, $budget);
             }
 
-            public function pages(string $pdfBytes, ?PreflightBudget $budget = null): array
+            public function read(string $pdfBytes, ?PreflightBudget $budget = null): DocumentText
             {
-                $this->pagesBudget = $budget;
+                $this->reads++;
+                $this->budget = $budget;
 
-                return (new TcPdfTextLocator)->pages($pdfBytes, $budget);
+                return (new TcPdfTextLocator)->read($pdfBytes, $budget);
             }
         };
 
@@ -184,8 +193,16 @@ final class RevisionAnchorResolverTest extends TestCase
         $outcome = $resolver->resolve($revision, $this->anchoredDocument());
 
         $this->assertSame(['signature'], $outcome->resolved);
-        $this->assertInstanceOf(PreflightBudget::class, $locator->pagesBudget, 'The page sizes were not measured on a budget at all.');
-        $this->assertSame($locator->extractBudget, $locator->pagesBudget, 'The page sizes were measured on a different budget from the text.');
+        $this->assertSame(1, $locator->reads, 'The text and the pages were not taken from one read.');
+        $this->assertSame(0, $locator->extractions, 'The document was read again for its text.');
+        $this->assertInstanceOf(PreflightBudget::class, $locator->budget, 'The document was not read on a budget at all.');
+
+        $once = new PreflightBudget(new PreflightLimits);
+        (new TcPdfTextLocator)->read($bytes, $once);
+
+        $this->assertGreaterThan(0, $once->decodedBytes(), 'The premise failed: one read of the fixture decodes nothing.');
+        $this->assertSame($once->decodedBytes(), $locator->budget->decodedBytes(), 'The document\'s streams were decoded more than once.');
+        $this->assertSame($once->objectCount(), $locator->budget->objectCount(), 'The document\'s objects were read more than once.');
     }
 
     /**
@@ -211,7 +228,7 @@ final class RevisionAnchorResolverTest extends TestCase
                 return $this->runs;
             }
 
-            public function pages(string $pdfBytes, ?PreflightBudget $budget = null): array
+            public function read(string $pdfBytes, ?PreflightBudget $budget = null): DocumentText
             {
                 throw new TextExtractionException('The document\'s pages could not be read: synthetic.');
             }

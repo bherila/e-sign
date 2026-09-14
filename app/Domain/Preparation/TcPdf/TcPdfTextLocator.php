@@ -8,7 +8,6 @@ use App\Domain\Preparation\Contracts\PdfTextLocator;
 use App\Domain\Preparation\Geometry\CoordinateTransform;
 use App\Domain\Preparation\Geometry\InvalidGeometryException;
 use App\Domain\Preparation\Geometry\NativeRect;
-use App\Domain\Preparation\Geometry\PageGeometry;
 use App\Domain\Preparation\Geometry\UserSpacePoint;
 use App\Domain\Preparation\Preflight\PreflightBudget;
 use App\Domain\Preparation\Preflight\PreflightBudgetException;
@@ -22,6 +21,7 @@ use App\Domain\Preparation\TcPdf\Parsing\Matrix;
 use App\Domain\Preparation\TcPdf\Parsing\PdfFontModel;
 use App\Domain\Preparation\TcPdf\Parsing\PdfObjectGraph;
 use App\Domain\Preparation\TcPdf\Parsing\TextState;
+use App\Domain\Preparation\Text\DocumentText;
 use App\Domain\Preparation\Text\TextDirection;
 use App\Domain\Preparation\Text\TextExtractionException;
 use App\Domain\Preparation\Text\TextRun;
@@ -79,51 +79,54 @@ final readonly class TcPdfTextLocator implements PdfTextLocator
      */
     public function extract(string $pdfBytes, ?int $page = null, ?PreflightBudget $budget = null): array
     {
-        return $this->reading($pdfBytes, $budget, function (DocumentRead $read) use ($page): array {
-            $graph = $this->parse($read);
+        return $this->reading($pdfBytes, $budget, fn (DocumentRead $read): array => $this->text($read, $page)->runs);
+    }
 
-            if ($graph->isEncrypted()) {
-                throw new TextExtractionException('Text cannot be extracted from an encrypted document.');
-            }
-
-            $runs = [];
-
-            // The budget's page ceiling, so a document over it is refused as a ceiling — reported
-            // to whoever owns the budget, by `reading()` — and never as a broken page tree.
-            foreach ($read->pages() as $flattened) {
-                $pageNumber = $flattened->geometry->pageNumber;
-                if ($page !== null && $pageNumber !== $page) {
-                    continue;
-                }
-
-                foreach ($this->extractPage($graph, $flattened, $read->budget) as $run) {
-                    $runs[] = $run;
-                }
-            }
-
-            return $runs;
-        });
+    public function read(string $pdfBytes, ?PreflightBudget $budget = null): DocumentText
+    {
+        return $this->reading($pdfBytes, $budget, fn (DocumentRead $read): DocumentText => $this->text($read, null));
     }
 
     /**
-     * @return array<int, PageGeometry>
+     * The runs of one page or of all of them, with every page's geometry, from a read already made.
+     *
+     * The geometry costs nothing more: the walk flattens every page to find the one asked for.
+     *
+     * @throws TextExtractionException
+     * @throws PreflightBudgetException
      */
-    public function pages(string $pdfBytes, ?PreflightBudget $budget = null): array
+    private function text(DocumentRead $read, ?int $page): DocumentText
     {
-        return $this->reading($pdfBytes, $budget, function (DocumentRead $read): array {
-            $this->parse($read);
+        $graph = $this->parse($read);
 
-            return array_map(
-                static fn (FlattenedPage $flattened): PageGeometry => $flattened->geometry,
-                $read->pages(),
-            );
-        });
+        if ($graph->isEncrypted()) {
+            throw new TextExtractionException('Text cannot be extracted from an encrypted document.');
+        }
+
+        $runs = [];
+        $pages = [];
+
+        // The budget's page ceiling, so a document over it is refused as a ceiling — reported
+        // to whoever owns the budget, by `reading()` — and never as a broken page tree.
+        foreach ($read->pages() as $flattened) {
+            $pages[] = $flattened->geometry;
+
+            if ($page !== null && $flattened->geometry->pageNumber !== $page) {
+                continue;
+            }
+
+            foreach ($this->extractPage($graph, $flattened, $read->budget) as $run) {
+                $runs[] = $run;
+            }
+        }
+
+        return new DocumentText($runs, $pages);
     }
 
     /**
      * One read of one document, under the rules both public methods promise.
      *
-     * Held in one place because they are one rule. `extract()` and `pages()` each answering a
+     * Held in one place because they are one rule. `extract()` and `read()` each answering a
      * ceiling or an unreadable page tree in their own words is two handlers that must stay
      * identical, and two such handlers drift.
      *

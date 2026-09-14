@@ -13,12 +13,12 @@ use App\Domain\Preparation\Contracts\PdfTextLocator;
 use App\Domain\Preparation\Documents\DocumentBlobStore;
 use App\Domain\Preparation\Documents\DocumentIntake;
 use App\Domain\Preparation\Documents\ReviewNormalizer;
+use App\Domain\Preparation\Documents\RevisionBytes;
 use App\Domain\Preparation\Isolation\DocumentIsolation;
 use App\Domain\Preparation\Isolation\IsolatedPdfAssembler;
 use App\Domain\Preparation\Isolation\IsolatedPdfPreflight;
 use App\Domain\Preparation\Isolation\IsolatedPdfTextLocator;
 use App\Domain\Preparation\Isolation\IsolationMode;
-use App\Domain\Preparation\Documents\RevisionBytes;
 use App\Domain\Preparation\Preflight\PreflightLimits;
 use App\Domain\Preparation\Schema\FieldSchemaValidator;
 use App\Domain\Preparation\TcPdf\TcPdfAssembler;
@@ -30,8 +30,8 @@ use Illuminate\Contracts\Config\Repository;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Process\Factory as ProcessFactory;
 use Illuminate\Support\ServiceProvider;
-use Psr\Log\LoggerInterface;
 use InvalidArgumentException;
+use Psr\Log\LoggerInterface;
 
 /**
  * Wires the Preparation module's ports to their tc-lib-pdf implementations and builds

@@ -72,14 +72,9 @@ final readonly class RevisionAnchorResolver
         $budget = new PreflightBudget($this->limits);
 
         try {
-            return $this->resolver->resolve(
-                $schema,
-                $this->runs($schema, $bytes, $revision, $budget),
-                $digest,
-                $this->pageSizes($schema, $revision, $bytes, $budget),
-                $omitAbsentFields,
-                $budget,
-            );
+            [$runs, $pageSizes] = $this->textAndPageSizes($schema, $revision, $bytes, $budget);
+
+            return $this->resolver->resolve($schema, $runs, $digest, $pageSizes, $omitAbsentFields, $budget);
         } catch (PreflightBudgetException $exhausted) {
             // A ceiling, crossed anywhere in reading this document: parsing it, walking its
             // content streams, or matching the anchors against the runs that came out. Not a bad
@@ -93,46 +88,57 @@ final readonly class RevisionAnchorResolver
     }
 
     /**
-     * The displayed size of every page, which an anchored field cannot be placed without.
+     * The document's text, and the displayed size of every page, from one read of these bytes.
      *
      * A resolved rectangle is the matched text's position plus the caller's offset, so whether it
      * lands on the page is only knowable afterwards — and only against a page size. Resolving
      * without one would still place the field, silently skipping the one check that catches an
      * offset which walks off the edge, and a signer would be left with a field they cannot reach.
      *
-     * Two sources, in a fixed order. The recorded preflight report first: it is the measurement
-     * every stored rectangle was already validated against, so a second one that disagreed would
-     * be worse than none. Then the page geometry of *these* bytes — the ones just proved against
-     * the revision's digest — for a row whose report predates page geometry or was written by an
-     * older build. There is no third source and no default: a page size is never assumed
-     * (AGENTS.md, "Coordinates are never guessed").
+     * Two sources for the sizes, in a fixed order. The recorded preflight report first: it is the
+     * measurement every stored rectangle was already validated against, so a second one that
+     * disagreed would be worse than none. Then the page geometry of *these* bytes — the ones just
+     * proved against the revision's digest — for a row whose report predates page geometry or was
+     * written by an older build. There is no third source and no default: a page size is never
+     * assumed (AGENTS.md, "Coordinates are never guessed").
      *
-     * The fallback is read on this document's running budget, through the same locator as the
-     * text. It used to be a second preflight, which reads under a budget of its own: charged to
-     * nobody, able to spend a whole second window, and — when that private ceiling tripped —
-     * returning a rejected report with no pages, which then left here as a storage outage. A
-     * ceiling crossed now reaches `resolve()`'s one handler like any other, and a document whose
-     * pages cannot be read is reported as unreadable, which is what it is.
+     * **Either way the document is read once.** With recorded sizes only the text is extracted.
+     * Without them, the text and the pages come from the same read ({@see PdfTextLocator::read()}).
+     * The fallback was first a second preflight, which read on a budget of its own, charged to
+     * nobody. It was then a second locator read on this budget, which parsed and decoded the
+     * document twice, so a document inside the decompression ceiling could be refused on the
+     * duplicate decode.
      *
-     * @throws AnchorResolutionFailed When the fallback cannot read the document's pages.
+     * Bounded by the same limits the upload was inspected under. Preflight's ceilings describe the
+     * *document* — its size, its object count, its streams — and a file can satisfy every one of
+     * them while holding millions of small text-showing operators in a single allowed content
+     * stream. A ceiling crossed here is deliberately *not* caught here: it is the same fact as one
+     * crossed while matching, and `resolve()` answers both in one place.
+     *
+     * @return array{0: array<int, TextRun>, 1: PageSizes}
+     *
+     * @throws AnchorResolutionFailed When the bytes cannot be read as a document.
      * @throws AnchorDocumentUnavailable When the pages were read and still do not describe a document.
-     * @throws PreflightBudgetException Answered by the caller, with every other phase's.
+     * @throws PreflightBudgetException Answered by the caller, with the matching phase's.
      */
-    private function pageSizes(
+    private function textAndPageSizes(
         FieldSchemaDocument $schema,
         DocumentRevision $revision,
         string $bytes,
         PreflightBudget $budget,
-    ): PageSizes {
+    ): array {
         $recorded = PreflightPageSizes::of($revision->document);
 
-        if ($recorded instanceof PageSizes) {
-            return $recorded;
-        }
-
         try {
-            $pages = $this->text->pages($bytes, $budget);
+            if ($recorded instanceof PageSizes) {
+                return [$this->text->extract($bytes, null, $budget), $recorded];
+            }
+
+            $text = $this->text->read($bytes, $budget);
         } catch (TextExtractionException $failure) {
+            // Read, and not parseable. That *is* something about this document, so it is reported
+            // to the sender — but only as the stable code. A parser's message carries engine
+            // internals, and no document response reveals those (docs/BLOB_STORAGE.md).
             $this->log($revision, $failure);
 
             throw new AnchorResolutionFailed($this->unreadableProblems($schema));
@@ -140,7 +146,7 @@ final readonly class RevisionAnchorResolver
 
         $sizes = [];
 
-        foreach ($pages as $geometry) {
+        foreach ($text->pages as $geometry) {
             $sizes[$geometry->pageNumber] = [
                 'width' => $geometry->nativeWidth(),
                 'height' => $geometry->nativeHeight(),
@@ -148,7 +154,7 @@ final readonly class RevisionAnchorResolver
         }
 
         try {
-            return PageSizes::fromMap($sizes);
+            return [$text->runs, PageSizes::fromMap($sizes)];
         } catch (Throwable $unusable) {
             $this->log($revision, $unusable);
 
@@ -165,39 +171,6 @@ final readonly class RevisionAnchorResolver
         }
 
         return false;
-    }
-
-    /**
-     * @return array<int, TextRun>
-     *
-     * @throws AnchorResolutionFailed
-     * @throws PreflightBudgetException Answered by the caller, with the matching phase's.
-     */
-    private function runs(
-        FieldSchemaDocument $schema,
-        string $bytes,
-        DocumentRevision $revision,
-        PreflightBudget $budget,
-    ): array {
-        try {
-            // Bounded by the same limits the upload was inspected under. Preflight's ceilings
-            // describe the *document* — its size, its object count, its streams — and a file can
-            // satisfy every one of them while holding millions of small text-showing operators in
-            // a single allowed content stream. That is a document nobody can resolve, and without
-            // a budget the cost lands on whichever request tried.
-            //
-            // A ceiling crossed here is deliberately *not* caught here: it is the same fact as one
-            // crossed while matching, and `resolve()` answers both in one place. Two handlers that
-            // must stay identical are two that can drift.
-            return $this->text->extract($bytes, null, $budget);
-        } catch (TextExtractionException $failure) {
-            // Read, and not parseable. That *is* something about this document, so it is reported
-            // to the sender — but only as the stable code. A parser's message carries engine
-            // internals, and no document response reveals those (docs/BLOB_STORAGE.md).
-            $this->log($revision, $failure);
-
-            throw new AnchorResolutionFailed($this->unreadableProblems($schema));
-        }
     }
 
     /**

@@ -13,6 +13,7 @@ use App\Domain\Preparation\Preflight\PreflightReport;
 use App\Domain\Preparation\TcPdf\TcPdfAssembler;
 use App\Domain\Preparation\TcPdf\TcPdfPreflight;
 use App\Domain\Preparation\TcPdf\TcPdfTextLocator;
+use App\Domain\Preparation\Text\DocumentText;
 use App\Domain\Preparation\Text\TextRun;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\PdfFixtures;
@@ -38,6 +39,7 @@ final class DocumentReadCodecTest extends TestCase
         yield 'a preflight report' => [static fn (): PreflightReport => (new TcPdfPreflight)->inspect(PdfFixtures::bytes('rotated-pages'))];
         yield 'a rejected preflight report' => [static fn (): PreflightReport => (new TcPdfPreflight)->inspect('not a pdf')];
         yield 'text runs' => [static fn (): array => (new TcPdfTextLocator)->extract(PdfFixtures::bytes('multi-page-mixed-size'))];
+        yield 'text and page geometry' => [static fn (): DocumentText => (new TcPdfTextLocator)->read(PdfFixtures::bytes('rotated-pages'))];
         yield 'an assembled document' => [static fn (): AssembledDocument => (new TcPdfAssembler(null, resource_path('fonts'), new PreflightLimits))
             ->assemble(PdfFixtures::bytes('single-page-letter'), [new OverlayRectangle(1, new NativeRect(10.0, 10.0, 50.0, 20.0))])];
     }

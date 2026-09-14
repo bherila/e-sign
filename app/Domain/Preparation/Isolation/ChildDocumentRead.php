@@ -34,6 +34,9 @@ final class ChildDocumentRead
 
     public const EXTRACT = 'extract';
 
+    /** Text and page geometry together, from one read. */
+    public const READ_TEXT = 'read-text';
+
     public const ASSEMBLE = 'assemble';
 
     /** The exit status of a child its own `memory_limit` stopped. Arbitrary, but not one PHP uses. */
@@ -120,6 +123,7 @@ final class ChildDocumentRead
                     is_int($request['page'] ?? null) ? $request['page'] : null,
                     $budget,
                 ),
+                self::READ_TEXT => (new TcPdfTextLocator($limits))->read($bytes, $budget),
                 self::ASSEMBLE => (new TcPdfAssembler(
                     new TcPdfPreflight($limits),
                     is_string($request['fonts'] ?? null) ? $request['fonts'] : null,

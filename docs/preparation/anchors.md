@@ -57,8 +57,10 @@ is a pure function of the request and the bytes: re-running it on an unchanged p
 and returns the same rectangle.
 
 The receipt is checked against the request that produced it, and the resolver checks **its own**
-output before returning it — a failure there is this service contradicting itself, reported as
-`anchor_receipt_inconsistent` rather than stored.
+output before returning it. A failure there is this service contradicting itself: it raises
+`AnchorResolutionDefect` (`anchor_resolution_defect`), a server failure, and nothing is stored. It
+is deliberately not one of the refusals below, because no change to the document could fix it, and
+reporting it as one would tell a sender to edit a document that is valid.
 
 ### Why the checks live here
 
@@ -90,7 +92,6 @@ mutation test encodes exactly which combinations can and cannot catch it.
 | `anchor_resolved_off_page` | the offset put the rectangle off the page it was found on, or further from the origin than a receipt can record |
 | `anchor_cross_check_failed` | a `cross_check` resolved further than its tolerance from the declared rectangle |
 | `anchor_text_unreadable` | the bytes were read and could not be parsed, or reading them crossed a resource ceiling |
-| `anchor_receipt_inconsistent` | the resolver produced a receipt that contradicts its own request |
 
 Each carries a JSON Pointer to the member the sender has to change. That is the anchor for all of
 them but the first: a field on a page the document does not have has a correct anchor and an
@@ -120,14 +121,23 @@ to that one budget, through the reporting described in [documents.md](documents.
 |---|---|
 | Parsing the object graph | objects and decoded bytes, as they are read |
 | Walking the content streams | bytes scanned, glyphs decoded, one step per operation |
-| Page sizes, when the stored report has none | the same read, through `PdfTextLocator::pages()` |
-| Matching the anchors against the runs | candidate runs, bytes searched, matches found — while it scans |
+| Page sizes, when the stored report has none | nothing more: the text and the pages come from one read, through `PdfTextLocator::read()` |
+| Matching the anchors against the runs | every run considered, bytes searched, matches found — while it scans |
 
-Two of those used to escape it. The page-size fallback was a second preflight, which builds a budget
-of its own: charged to nobody, able to spend a whole second window, and — when its private ceiling
-tripped — returning a report with no pages that then surfaced as a storage outage. And matching
-looked at the budget once per anchored field, *before* the scan, so one field over a very large run
-set was a single unmetered filter, sort and substring search.
+Three of those used to escape it:
+1. **A separate preflight.** The page-size fallback was first a second preflight, which builds a
+   budget of its own. It was charged to nobody, could spend a whole second window, and when its
+   private ceiling tripped it returned a report with no pages, which surfaced as a storage outage.
+2. **A second read on the same budget.** The fallback then became a second read through the
+   locator. That decoded the document twice and charged every decoded byte twice, so a document
+   inside `max_decompressed_bytes` could be refused on the duplicate decode.
+3. **An unmetered filter.** Matching looked at the budget once per anchored field, *before* the
+   scan, so one field over a very large run set was a single unmetered filter, sort and substring
+   search.
+
+The candidates are now gathered run by run under the budget. The sort is still one native call,
+which nothing can charge while it runs. It is bounded by its input: at most the runs extraction
+produced, each of which the same budget already paid for.
 
 A ceiling crossed in any phase reaches the sender as `anchor_text_unreadable`, one problem per
 anchored field, with the limit that stopped it in the log and never in the response. So does a

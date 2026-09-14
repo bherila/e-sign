@@ -113,15 +113,6 @@ enum ValidationCode: string
     case AnchorResolvedOffPage = 'anchor_resolved_off_page';
 
     /**
-     * A resolution receipt that the resolver could not have produced.
-     *
-     * Not a caller's error in the ordinary case: it means this service wrote a receipt that
-     * contradicts the request it answers, which is a bug in resolution rather than in the
-     * document. See `Anchoring\ReceiptVerifier`.
-     */
-    case AnchorReceiptInconsistent = 'anchor_receipt_inconsistent';
-
-    /**
      * An anchor option that promises behaviour this deployment does not perform yet.
      *
      * A distinct code because the document is *not* wrong: it is a correct 1.1 document using an

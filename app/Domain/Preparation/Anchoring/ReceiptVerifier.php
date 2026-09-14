@@ -44,8 +44,12 @@ use App\Domain\Preparation\Text\AnchorResolver;
  * Every comparison is made on canonical values, because canonical values are what the document
  * holds; comparing what a caller wrote would accept a receipt that stops agreeing the moment it is
  * stored.
+ *
+ * Not final. The resolver's response to a verifier that *does* find a contradiction — a server
+ * defect, never a refusal — can only be tested with a verifier that finds one, and the real
+ * resolver never gives it cause.
  */
-final readonly class ReceiptVerifier
+readonly class ReceiptVerifier
 {
     /**
      * Every way this receipt fails to answer this request, as pointer-suffixed reasons.

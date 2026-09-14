@@ -107,6 +107,11 @@ final class ProcessIsolationTest extends TestCase
             (new TcPdfTextLocator(app(PreflightLimits::class)))->extract($bytes, 1),
             app(PdfTextLocator::class)->extract($bytes, 1),
         );
+
+        // And the text with its pages, from one read, crosses the boundary as the same value.
+        $read = app(PdfTextLocator::class)->read($bytes);
+        $this->assertEquals((new TcPdfTextLocator(app(PreflightLimits::class)))->read($bytes), $read);
+        $this->assertEquals($inProcess, $read->runs);
     }
 
     public function test_assembly_in_a_child_produces_what_it_produces_in_process(): void

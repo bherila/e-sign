@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Preparation\Anchoring;
 
+use App\Domain\Preparation\Anchoring\AnchorResolutionDefect;
 use App\Domain\Preparation\Anchoring\AnchorResolutionFailed;
+use App\Domain\Preparation\Anchoring\ReceiptVerifier;
 use App\Domain\Preparation\Anchoring\SchemaAnchorResolver;
 use App\Domain\Preparation\Geometry\NativeRect;
 use App\Domain\Preparation\Preflight\PreflightBudget;
@@ -14,6 +16,7 @@ use App\Domain\Preparation\Preflight\PreflightLimits;
 use App\Domain\Preparation\Schema\AnchorPlacement;
 use App\Domain\Preparation\Schema\AnchorPlacementMode;
 use App\Domain\Preparation\Schema\CanonicalNumber;
+use App\Domain\Preparation\Schema\FieldDefinition;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\FieldSchemaValidator;
 use App\Domain\Preparation\Schema\MeasuredRect;
@@ -1134,6 +1137,130 @@ final class SchemaAnchorResolverTest extends TestCase
         }
 
         $this->fail('Fifty thousand runs were searched in '.$looks.' looks at the budget: the scan went uncharged.');
+    }
+
+    /**
+     * Gathering the candidates is charged run by run, not only the scan that follows.
+     *
+     * Every run here sits on a page the anchor does not search, so nothing is scanned and nothing
+     * matches: the only work is deciding that. A filter charged once, with the count of what it
+     * kept, charges nothing at all for fifty thousand runs it discarded, and completes on a budget
+     * whose time is already gone.
+     *
+     * Asked of `AnchorResolver::matches()` directly. Through the document resolver, the step it
+     * charges after each field would refuse the spent budget anyway, and would hide a filter that
+     * charges nothing.
+     */
+    public function test_gathering_the_candidates_is_charged_for_every_run_considered(): void
+    {
+        $runs = [];
+        for ($i = 0; $i < 50_000; $i++) {
+            $runs[] = new TextRun(page: 2, text: 'Unrelated text', rect: new NativeRect(10.0, 10.0, 80.0, 12.0), fontSize: 12.0, fontResource: 'F1');
+        }
+
+        $anchor = new Anchor(
+            text: 'Signature:',
+            occurrence: AnchorOccurrence::sole(),
+            page: 1,
+            offsetX: 0.0,
+            offsetY: 0.0,
+            width: 170.0,
+            height: 36.0,
+            origin: AnchorOrigin::TopLeft,
+        );
+
+        $budget = new PreflightBudget(new PreflightLimits(timeBudgetSeconds: 0.0000001));
+        usleep(1000);
+
+        try {
+            $matches = (new AnchorResolver)->matches($runs, $anchor, $budget);
+        } catch (PreflightBudgetException $stopped) {
+            $this->assertSame(PreflightCode::TimeBudgetExceeded, $stopped->preflightCode);
+
+            return;
+        }
+
+        $this->fail('Fifty thousand runs were considered, and '.count($matches).' kept, on a spent budget without it being charged.');
+    }
+
+    /**
+     * A placement flush with the page's top-left corner is stored, however the raw sum rounds.
+     *
+     * A raw `x` or `y` of `-0.0004` is canonical zero, and every check that approves a resolved
+     * rectangle judges the canonical value, so they accept it. The receipt used to be built from the
+     * raw value instead, and {@see Rect} refuses a negative raw coordinate before rounding it. A
+     * placement every check had approved was then refused, while the same sub-thousandth overhang at
+     * the right or bottom edge was accepted.
+     */
+    public function test_a_placement_that_rounds_to_the_top_left_edge_is_stored_at_zero(): void
+    {
+        $runs = [new TextRun(
+            page: 1,
+            text: 'Signature:',
+            rect: new NativeRect(-0.0004, -0.0004, 60.0, 12.0),
+            fontSize: 12.0,
+            fontResource: 'F1',
+        )];
+
+        // Precondition: the raw coordinate really is one a placement refuses.
+        try {
+            new Rect(-0.0004, -0.0004, 170.0, 36.0);
+            $this->fail('The premise failed: a raw -0.0004 is accepted as a placement coordinate.');
+        } catch (InvalidArgumentException) {
+        }
+
+        $outcome = $this->resolver()->resolve(
+            $this->documentWith($this->replacingAnchor(), rect: ['x' => 1, 'y' => 1, 'width' => 170, 'height' => 36]),
+            $runs,
+            self::DIGEST,
+            PageSizes::fromList([['width' => 612, 'height' => 792]]),
+        );
+
+        $this->assertSame(['signature'], $outcome->resolved);
+
+        $field = $outcome->schema->field('signature');
+        $receipt = $field?->anchor?->resolved;
+        $this->assertNotNull($receipt);
+
+        // Unsigned zero, not -0.0: the stored document never carries a signed zero.
+        $this->assertSame('0.0', var_export($receipt->rect->x, true));
+        $this->assertSame('0.0', var_export($receipt->rect->y, true));
+        $this->assertSame('0.0', var_export($field->rect->x, true));
+        $this->assertSame('0.0', var_export($field->rect->y, true));
+    }
+
+    /**
+     * A receipt that contradicts its own request is this service's defect, never a sender's refusal.
+     *
+     * Every rule the verifier checks is a property of what the resolver has just computed, so the
+     * real resolver never trips it. A verifier that disagrees stands in for the defect. Collected
+     * with the field set's problems, it would leave as `AnchorResolutionFailed`, which both HTTP
+     * surfaces answer with a 422 telling the sender to correct a valid document.
+     */
+    public function test_a_receipt_that_contradicts_its_request_is_a_server_defect_not_a_refusal(): void
+    {
+        $runs = (new TcPdfTextLocator)->extract(PdfFixtures::bytes('single-page-letter'));
+
+        $disagreeing = new readonly class extends ReceiptVerifier
+        {
+            public function problems(FieldDefinition $field, AnchorPlacement $request, ResolvedAnchorRecord $receipt): array
+            {
+                return [['path' => '/fields/0/anchor/resolved/rect/x', 'reason' => 'is not the requested corner plus the offset']];
+            }
+        };
+
+        $resolver = new SchemaAnchorResolver(new AnchorResolver, SchemaAnchorResolver::DEFAULT_CROSS_CHECK_TOLERANCE, $disagreeing);
+
+        try {
+            $resolver->resolve($this->documentWith($this->replacingAnchor()), $runs, self::DIGEST);
+            $this->fail('A receipt that contradicts its request was stored.');
+        } catch (AnchorResolutionFailed $refused) {
+            $this->fail('A defect in this service was reported to the sender as a problem with their document: '.$refused->getMessage());
+        } catch (AnchorResolutionDefect $defect) {
+            $this->assertSame('anchor_resolution_defect', $defect->code());
+            $this->assertStringContainsString('"signature"', $defect->getMessage());
+            $this->assertStringContainsString('/fields/0/anchor/resolved/rect/x', $defect->getMessage());
+        }
     }
 
     private function resolver(): SchemaAnchorResolver

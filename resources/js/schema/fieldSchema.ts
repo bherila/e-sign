@@ -266,7 +266,6 @@ export const VALIDATION_CODES = [
   "anchor_occurrence_out_of_range",
   "anchor_text_unreadable",
   "anchor_resolved_off_page",
-  "anchor_receipt_inconsistent",
   "anchor_resolution_unavailable",
 ] as const;
 

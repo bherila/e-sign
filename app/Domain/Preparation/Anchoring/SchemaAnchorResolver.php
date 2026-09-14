@@ -122,7 +122,8 @@ final readonly class SchemaAnchorResolver
      *                                        unbounded, which is only safe for inputs a test
      *                                        controls.
      *
-     * @throws AnchorResolutionFailed
+     * @throws AnchorResolutionFailed When the field set cannot be placed, with every reason.
+     * @throws AnchorResolutionDefect When this service produced a receipt that contradicts its request.
      * @throws PreflightBudgetException
      */
     public function resolve(
@@ -322,26 +323,16 @@ final readonly class SchemaAnchorResolver
 
         // The resolver checks its own answer before returning it. Every rule in
         // {@see ReceiptVerifier} is a property of what this method just computed, so a failure
-        // here is this service contradicting itself — not a caller sending something wrong — and
-        // it is reported rather than stored. The alternative is a receipt that says a placement
-        // was derived from a measurement it was not derived from, which is exactly the kind of
-        // thing nobody notices until an agreement is signed against it.
+        // here is this service contradicting itself, not a caller sending something wrong. It is
+        // thrown as a server failure and nothing is stored. Collecting it with the field set's
+        // problems would report it as a 422 telling the sender to correct a valid document. The
+        // alternative is a receipt that says a placement was derived from a measurement it was not
+        // derived from, which is exactly the kind of thing nobody notices until an agreement is
+        // signed against it.
         $inconsistent = $this->receipts->problems($placed, $placed->anchor ?? $anchor, $record);
 
         if ($inconsistent !== []) {
-            return new AnchorResolutionProblem(
-                $index,
-                $field->id,
-                $field->recipientId,
-                $anchor->text,
-                ValidationCode::AnchorReceiptInconsistent,
-                'a receipt this resolver could not have produced',
-                'Field "'.$field->id.'" resolved to a receipt that contradicts the request it answers: '
-                    .implode('; ', array_map(
-                        static fn (array $problem): string => $problem['path'].' '.$problem['reason'],
-                        $inconsistent,
-                    )).'. This is a defect in resolution, not in the document.',
-            );
+            throw AnchorResolutionDefect::receiptContradicts($field->id, $inconsistent);
         }
 
         return $placed;
