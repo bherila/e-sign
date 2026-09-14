@@ -11,6 +11,11 @@ use App\Domain\Preparation\Contracts\PdfTextLocator;
 use App\Domain\Preparation\Documents\DocumentBlobStore;
 use App\Domain\Preparation\Documents\DocumentIntake;
 use App\Domain\Preparation\Documents\ReviewNormalizer;
+use App\Domain\Preparation\Isolation\DocumentIsolation;
+use App\Domain\Preparation\Isolation\IsolatedPdfAssembler;
+use App\Domain\Preparation\Isolation\IsolatedPdfPreflight;
+use App\Domain\Preparation\Isolation\IsolatedPdfTextLocator;
+use App\Domain\Preparation\Isolation\IsolationMode;
 use App\Domain\Preparation\Preflight\PreflightLimits;
 use App\Domain\Preparation\Schema\FieldSchemaValidator;
 use App\Domain\Preparation\TcPdf\TcPdfAssembler;
@@ -19,7 +24,9 @@ use App\Domain\Preparation\TcPdf\TcPdfTextLocator;
 use App\Domain\Preparation\Templates\TemplateService;
 use Illuminate\Contracts\Config\Repository;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Process\Factory as ProcessFactory;
 use Illuminate\Support\ServiceProvider;
+use Psr\Log\LoggerInterface;
 
 /**
  * Wires the Preparation module's ports to their tc-lib-pdf implementations and builds
@@ -48,10 +55,30 @@ class PreparationServiceProvider extends ServiceProvider
             );
         });
 
-        $this->app->bind(
-            PdfPreflight::class,
-            fn (Application $app): PdfPreflight => new TcPdfPreflight($app->make(PreflightLimits::class)),
-        );
+        // Where document reads run (docs/adr/0006). A singleton, so a PHP process resolves its
+        // mode — and starts its trial child — once, on the first read that needs it.
+        $this->app->singleton(DocumentIsolation::class, function (Application $app): DocumentIsolation {
+            /** @var Repository $config */
+            $config = $app->make('config');
+
+            return new DocumentIsolation(
+                IsolationMode::fromSetting((string) $config->get('esign.documents.isolation.mode', 'auto')),
+                $app->make(ProcessFactory::class),
+                (string) $config->get('esign.documents.isolation.php_binary', ''),
+                (int) $config->get('esign.documents.isolation.memory_headroom_bytes', 67_108_864),
+                (float) $config->get('esign.documents.isolation.time_headroom_seconds', 5),
+                $app->make(LoggerInterface::class),
+            );
+        });
+
+        // Each port is the tc-lib-pdf adapter behind the isolation layer. The in-process adapters
+        // are built directly, never resolved through these bindings, so an in-process assembly's
+        // own preflight does not start a child of its own.
+        $this->app->bind(PdfPreflight::class, function (Application $app): PdfPreflight {
+            $limits = $app->make(PreflightLimits::class);
+
+            return new IsolatedPdfPreflight(new TcPdfPreflight($limits), $app->make(DocumentIsolation::class), $limits);
+        });
 
         // The assembler runs preflight again on its own input and refuses anything it
         // rejects, so an unsafe document cannot reach the importer by a different door.
@@ -60,23 +87,27 @@ class PreparationServiceProvider extends ServiceProvider
         // resolves it through a process-wide constant: naming it here keeps "where the
         // bundled text metrics live" a wiring decision with one answer per deployment.
         // See App\Domain\Preparation\TcPdf\CoreFontMetrics.
-        $this->app->bind(
-            PdfAssembler::class,
-            fn (Application $app): PdfAssembler => new TcPdfAssembler(
-                $app->make(PdfPreflight::class),
-                $app->resourcePath('fonts'),
-                $app->make(PreflightLimits::class),
-            ),
-        );
+        $this->app->bind(PdfAssembler::class, function (Application $app): PdfAssembler {
+            $limits = $app->make(PreflightLimits::class);
+            $fonts = $app->resourcePath('fonts');
+
+            return new IsolatedPdfAssembler(
+                new TcPdfAssembler(new TcPdfPreflight($limits), $fonts, $limits),
+                $app->make(DocumentIsolation::class),
+                $limits,
+                $fonts,
+            );
+        });
 
         // Constructed with the configured limits rather than autowired bare, so a deployment
         // that raised a ceiling reads documents under the ceiling it set. Every site that reads
         // a document resolves its limits from this one binding; the enumeration in
         // tests/Feature/Preparation/DocumentReadBudgetTest.php is what keeps that true.
-        $this->app->bind(
-            PdfTextLocator::class,
-            fn (Application $app): PdfTextLocator => new TcPdfTextLocator($app->make(PreflightLimits::class)),
-        );
+        $this->app->bind(PdfTextLocator::class, function (Application $app): PdfTextLocator {
+            $limits = $app->make(PreflightLimits::class);
+
+            return new IsolatedPdfTextLocator(new TcPdfTextLocator($limits), $app->make(DocumentIsolation::class), $limits);
+        });
 
         $this->app->bind(ReviewNormalizer::class, function (Application $app): ReviewNormalizer {
             /** @var Repository $config */

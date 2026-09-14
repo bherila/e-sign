@@ -21,9 +21,16 @@ use App\Domain\Preparation\TcPdf\TcPdfPreflight;
  */
 final class PreflightBudgetException extends \RuntimeException
 {
+    /**
+     * @param  bool  $perStream  True when a decompression refusal came from the per-stream ceiling
+     *                           rather than the whole-document one. Both share one code, and a
+     *                           refusal rebuilt elsewhere ({@see PreflightBudget::refuse()}) has to
+     *                           name the same one.
+     */
     public function __construct(
         public readonly PreflightCode $preflightCode,
         string $message,
+        public readonly bool $perStream = false,
     ) {
         parent::__construct($message);
     }

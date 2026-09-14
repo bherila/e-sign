@@ -100,6 +100,30 @@ return [
         'preflight_time_budget_seconds' => (float) env('ESIGN_DOCUMENTS_PREFLIGHT_TIME_BUDGET_SECONDS', 30),
         'preflight_memory_budget_bytes' => (int) env('ESIGN_DOCUMENTS_PREFLIGHT_MEMORY_BUDGET_BYTES', 268_435_456),
 
+        // Hard, process-level limits on every document read (docs/adr/0006). The
+        // backstops above are checked by code that reports its work; a read in a
+        // child process is also stopped by the runtime itself, whether or not the
+        // loop it is in reports anything.
+        'isolation' => [
+            // auto: a child process where this host can start one, in-process
+            // otherwise (esign:doctor warns). process: always a child; a host that
+            // cannot start one refuses to read documents. in_process: the backstops
+            // above only.
+            'mode' => env('ESIGN_DOCUMENTS_ISOLATION', 'auto'),
+
+            // The PHP *CLI* the child runs under. Under a web SAPI, PHP_BINARY names
+            // the FPM/LSAPI handler, not a CLI, and on shared hosting the two can be
+            // different installations — so name it explicitly there. Empty: look for
+            // one, and under `auto` fall back to in-process if none can be run.
+            'php_binary' => env('ESIGN_DOCUMENTS_ISOLATION_PHP_BINARY', ''),
+
+            // Added to the memory and time backstops to form the child's hard limits,
+            // so the backstop still trips first and names the ceiling, and the hard
+            // limit only fires for work nothing reported.
+            'memory_headroom_bytes' => (int) env('ESIGN_DOCUMENTS_ISOLATION_MEMORY_HEADROOM_BYTES', 67_108_864),
+            'time_headroom_seconds' => (float) env('ESIGN_DOCUMENTS_ISOLATION_TIME_HEADROOM_SECONDS', 5),
+        ],
+
         // The MIME types the upload Form Request accepts, checked against the
         // file's sniffed type rather than its name or its declared header. This
         // is a first gate only; preflight then parses the document for real.

@@ -99,6 +99,63 @@ final class PreflightBudget
     }
 
     /**
+     * This budget's limits, reduced to what is left of them.
+     *
+     * Handed to a read that runs where this object cannot follow — a child process — so the work
+     * done there is held to the allowance that remains here rather than to a fresh copy of the
+     * whole one. A ceiling already spent is refused here, before that read starts, and not handed
+     * over as a remaining allowance of zero, which the limits would read as "no ceiling".
+     *
+     * @throws PreflightBudgetException
+     */
+    public function remainingLimits(): PreflightLimits
+    {
+        $this->tick();
+
+        if ($this->limits->maxDecompressedBytes > 0 && $this->remainingDecodedBytes() <= 0) {
+            $this->exhaustDecodedBytes();
+        }
+
+        if ($this->limits->maxObjects > 0 && $this->objectCount >= $this->limits->maxObjects) {
+            $this->exhaustObjects();
+        }
+
+        return new PreflightLimits(
+            maxBytes: $this->limits->maxBytes,
+            maxPages: $this->limits->maxPages,
+            maxObjects: $this->limits->maxObjects > 0 ? $this->limits->maxObjects - $this->objectCount : 0,
+            maxDecodedStreamBytes: $this->limits->maxDecodedStreamBytes,
+            maxDecompressedBytes: $this->limits->maxDecompressedBytes > 0 ? $this->remainingDecodedBytes() : 0,
+            timeBudgetSeconds: $this->limits->timeBudgetSeconds > 0.0
+                ? max(0.001, $this->limits->timeBudgetSeconds - $this->elapsedSeconds())
+                : 0.0,
+            memoryBudgetBytes: $this->limits->memoryBudgetBytes,
+        );
+    }
+
+    /**
+     * Charge work a read did somewhere else — a child process — to this budget.
+     *
+     * The child reports what its own budget counted; this adds it here and checks the ceilings,
+     * so two reads of one document on either side of a process boundary still spend one
+     * allowance. The time backstop is checked too: the child's wall-clock time has already
+     * passed on this budget's clock.
+     *
+     * @throws PreflightBudgetException
+     */
+    public function absorb(int $decodedBytes, int $objects): void
+    {
+        $this->chargeDecodedBytes($decodedBytes);
+        $this->objectCount += max(0, $objects);
+
+        if ($this->limits->maxObjects > 0 && $this->objectCount > $this->limits->maxObjects) {
+            $this->exhaustObjects();
+        }
+
+        $this->tick();
+    }
+
+    /**
      * @throws PreflightBudgetException
      */
     public function chargeDecodedBytes(int $bytes): void
@@ -162,6 +219,7 @@ final class PreflightBudget
                 $aggregate ? $this->limits->maxDecompressedBytes : $this->limits->maxDecodedStreamBytes,
                 $aggregate ? 'for one document' : 'for a single stream',
             ),
+            perStream: ! $aggregate,
         );
     }
 
@@ -336,27 +394,67 @@ final class PreflightBudget
     private function tick(): void
     {
         if ($this->limits->timeBudgetSeconds > 0.0 && $this->elapsedSeconds() > $this->limits->timeBudgetSeconds) {
-            throw new PreflightBudgetException(
-                PreflightCode::TimeBudgetExceeded,
-                sprintf(
-                    'Inspecting this PDF took longer than the %.0F-second limit for one document and was '
-                    .'stopped. Split the document into smaller files, or re-export it from the application '
-                    .'that produced it, and upload it again.',
-                    $this->limits->timeBudgetSeconds,
-                ),
-            );
+            $this->exhaustTime();
         }
 
         if ($this->limits->memoryBudgetBytes > 0 && $this->memoryDeltaBytes() > $this->limits->memoryBudgetBytes) {
-            throw new PreflightBudgetException(
-                PreflightCode::MemoryBudgetExceeded,
-                sprintf(
-                    'Inspecting this PDF needed more than the %d bytes of memory allowed for one document '
-                    .'and was stopped. Split the document into smaller files, or re-export it from the '
-                    .'application that produced it, and upload it again.',
-                    $this->limits->memoryBudgetBytes,
-                ),
-            );
+            $this->exhaustMemory();
         }
+    }
+
+    /**
+     * Refuse for a ceiling reached somewhere this object could not follow, in this budget's words.
+     *
+     * A read in a child process runs on {@see remainingLimits()}, so a ceiling it reaches is named in
+     * terms of the *remainder* — "more than 1 indirect objects" when the deployment allows 3 and 2
+     * were already spent. Rebuilt here, the refusal names the ceiling the deployment actually set,
+     * which is the number the person who uploaded the file can do something about. A ceiling this
+     * budget has no wording of its own for keeps the message it arrived with.
+     *
+     * @param  bool  $perStream  For a decompression ceiling, whether the per-stream one bound. The
+     *                           two share a code, and only the whole-document one is a remainder.
+     *
+     * @throws PreflightBudgetException
+     */
+    public function refuse(PreflightCode $code, string $otherwise, bool $perStream = false): never
+    {
+        match ($code) {
+            PreflightCode::ObjectLimitExceeded => $this->exhaustObjects(),
+            PreflightCode::DecompressionLimitExceeded => $perStream
+                ? $this->refuseUndecodableStream(aggregate: false)
+                : $this->exhaustDecodedBytes(),
+            PreflightCode::PageLimitExceeded => $this->exhaustPages(),
+            PreflightCode::TimeBudgetExceeded => $this->exhaustTime(),
+            PreflightCode::MemoryBudgetExceeded => $this->exhaustMemory(),
+            default => throw new PreflightBudgetException($code, $otherwise),
+        };
+    }
+
+    /** @throws PreflightBudgetException */
+    private function exhaustTime(): never
+    {
+        throw new PreflightBudgetException(
+            PreflightCode::TimeBudgetExceeded,
+            sprintf(
+                'Inspecting this PDF took longer than the %.0F-second limit for one document and was '
+                .'stopped. Split the document into smaller files, or re-export it from the application '
+                .'that produced it, and upload it again.',
+                $this->limits->timeBudgetSeconds,
+            ),
+        );
+    }
+
+    /** @throws PreflightBudgetException */
+    private function exhaustMemory(): never
+    {
+        throw new PreflightBudgetException(
+            PreflightCode::MemoryBudgetExceeded,
+            sprintf(
+                'Inspecting this PDF needed more than the %d bytes of memory allowed for one document '
+                .'and was stopped. Split the document into smaller files, or re-export it from the '
+                .'application that produced it, and upload it again.',
+                $this->limits->memoryBudgetBytes,
+            ),
+        );
     }
 }

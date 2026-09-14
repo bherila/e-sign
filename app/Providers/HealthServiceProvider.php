@@ -7,6 +7,7 @@ namespace App\Providers;
 use App\Domain\Delivery\Health\Console\DoctorCommand;
 use App\Domain\Delivery\Health\Probes\ArtifactIntegrityProbe;
 use App\Domain\Delivery\Health\Probes\DatabaseProbe;
+use App\Domain\Delivery\Health\Probes\Doctor\DocumentIsolationProbe;
 use App\Domain\Delivery\Health\Probes\FinalizationBacklogProbe;
 use App\Domain\Delivery\Health\Probes\MailBacklogProbe;
 use App\Domain\Delivery\Health\Probes\MailProbe;
@@ -36,6 +37,9 @@ class HealthServiceProvider extends ServiceProvider
                 $app->make(TsaProbe::class),
                 $app->make(ArtifactIntegrityProbe::class),
                 $app->make(FinalizationBacklogProbe::class),
+                // Also in esign:doctor. Here it answers for the web handler, which reads every
+                // upload and can be configured differently from the CLI (docs/adr/0006).
+                $app->make(DocumentIsolationProbe::class),
             ]);
         });
     }

@@ -169,11 +169,48 @@ proposal for sealing a large synthetic PDF, not a number derived from a producti
 with real measurements can replace it. `-1` (memory) and `0` (execution time) both mean
 "unlimited" to PHP and are treated as satisfying any minimum.
 
-Set these in `php.ini` (or an account-level `.user.ini` next to `public/index.php`, the usual
-cPanel mechanism when there is no access to the shared `php.ini`) for the **CLI** SAPI the cron
-lines run under. The web SAPI's own limits govern request-time work (uploads, the editor) and
-are configured the same way, but separately — see the CLI-vs-web split
-`esign:doctor`'s `web_php_version` check exists to catch in the first place.
+For the **CLI** SAPI the cron lines run under, put the limit on the cron line itself
+(`php -d memory_limit=… artisan …`): no ini file next to the application is read by the CLI.
+The web SAPI's own limits govern request-time work (uploads, the editor) and are configured
+separately. Under a **LiteSpeed** web SAPI, `.user.ini` is commonly ignored; `public/.htaccess`
+sets `memory_limit` with `php_value` inside `<IfModule LiteSpeed>`, which LiteSpeed does honour.
+Either way, verify the running values through the vhost rather than from a file — see also the
+CLI-vs-web split `esign:doctor`'s `web_php_version` check exists to catch in the first place.
+
+## Process isolation for document reads
+
+Every read of an uploaded PDF — preflight at upload, text extraction for the Firma facade, assembly at
+finalization — runs in a child PHP process with a hard `memory_limit` and a wall-clock deadline when
+the host can start one ([`docs/adr/0006-process-bounded-document-reads.md`](../adr/0006-process-bounded-document-reads.md)).
+`ESIGN_DOCUMENTS_ISOLATION=auto`, the default, uses a child wherever one can be started and trusted,
+and falls back to in-process otherwise. The `document_isolation` check says which one a read will
+actually get, and why — **in the SAPI it runs in**: `esign:doctor` answers for the cron lines (the queue
+reads documents at finalization), and `/health/ready` answers for web requests (uploads are read there).
+The two can differ on this profile, so check both.
+
+**Set `ESIGN_DOCUMENTS_ISOLATION_PHP_BINARY` on this profile**, to the same full CLI path the cron lines
+use (for example `/opt/cpanel/ea-php85/root/usr/bin/php`). Two things make the default search unreliable
+here:
+
+- Under the web handler, PHP's own idea of its binary is the LiteSpeed/FPM handler, not a CLI, so a web
+  request cannot start a child from it.
+- The first `php` on the account's path is routinely an **older** installation than the one serving the
+  site. A child started from it would fail Composer's platform check on every read. The trial child
+  catches this — it only trusts a binary that runs this application's PHP major and minor version,
+  honours `-d memory_limit`, and has every extension the PDF library requires — and under `auto` the read
+  then falls back to in-process, which works but loses the hard bound. The check reports it as a warning
+  saying which of those failed.
+
+A child starts in tens of milliseconds, because it loads Composer's autoloader and the PDF adapters and
+nothing else. Under `ESIGN_DOCUMENTS_ISOLATION=process`, a host that cannot start a trusted child
+refuses to read documents instead of reading them without the bound, and the check fails. **Once both
+`esign:doctor` and `/health/ready` report `document_isolation` as `ok`, set
+`ESIGN_DOCUMENTS_ISOLATION=process`**, so a later change that removes the child refuses reads visibly
+instead of quietly dropping the hard bound.
+
+The web handler's and the CLI's own `memory_limit` still matter for everything that is not a document
+read, and on a LiteSpeed web SAPI `.user.ini` may be silently ignored: verify the running values through
+the vhost, not from the file (see "Memory and time limits" above).
 
 ## Key isolation on shared hosting
 

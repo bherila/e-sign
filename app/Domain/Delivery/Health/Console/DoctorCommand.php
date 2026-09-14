@@ -8,6 +8,7 @@ use App\Domain\Delivery\Health\HealthProbe;
 use App\Domain\Delivery\Health\HealthStatus;
 use App\Domain\Delivery\Health\ProbeResult;
 use App\Domain\Delivery\Health\Probes\DatabaseProbe;
+use App\Domain\Delivery\Health\Probes\Doctor\DocumentIsolationProbe;
 use App\Domain\Delivery\Health\Probes\Doctor\EnvironmentProbe;
 use App\Domain\Delivery\Health\Probes\Doctor\PhpRuntimeProbe;
 use App\Domain\Delivery\Health\Probes\Doctor\QueueConnectionProbe;
@@ -65,6 +66,7 @@ final class DoctorCommand extends Command
             $container->make(DatabaseProbe::class),
             $container->make(QueueConnectionProbe::class),
             $container->make(ResourceLimitsProbe::class),
+            $container->make(DocumentIsolationProbe::class),
             $container->make(SchedulerHeartbeatProbe::class),
             $container->make(SigningMaterialProbe::class),
             $container->make(MailProbe::class),
