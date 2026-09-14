@@ -1243,7 +1243,7 @@ final class SchemaAnchorResolverTest extends TestCase
 
         $disagreeing = new readonly class extends ReceiptVerifier
         {
-            public function problems(FieldDefinition $field, AnchorPlacement $request, ResolvedAnchorRecord $receipt): array
+            public function problems(FieldDefinition $submitted, FieldDefinition $placed, AnchorPlacement $request, ResolvedAnchorRecord $receipt): array
             {
                 return [['path' => '/fields/0/anchor/resolved/rect/x', 'reason' => 'is not the requested corner plus the offset']];
             }
@@ -1261,6 +1261,44 @@ final class SchemaAnchorResolverTest extends TestCase
             $this->assertStringContainsString('"signature"', $defect->getMessage());
             $this->assertStringContainsString('/fields/0/anchor/resolved/rect/x', $defect->getMessage());
         }
+    }
+
+    /**
+     * The verifier is handed the field as it arrived, as well as the field placed (#120).
+     *
+     * In `replace` mode the placed rectangle is copied from the receipt. Handed only the placed
+     * field, the verifier compares the receipt's size with a size copied from itself, and a resolver
+     * that resized a field would pass the one check that exists to catch it. The verifier's own tests
+     * cannot see this: it is a property of how the resolver calls it.
+     */
+    public function test_the_verifier_is_given_the_field_as_submitted_and_as_placed(): void
+    {
+        $runs = (new TcPdfTextLocator)->extract(PdfFixtures::bytes('single-page-letter'));
+
+        $spy = new readonly class(new \ArrayObject) extends ReceiptVerifier
+        {
+            /** @param  \ArrayObject<int, array{FieldDefinition, FieldDefinition, ResolvedAnchorRecord}>  $calls */
+            public function __construct(public \ArrayObject $calls) {}
+
+            public function problems(FieldDefinition $submitted, FieldDefinition $placed, AnchorPlacement $request, ResolvedAnchorRecord $receipt): array
+            {
+                $this->calls->append([$submitted, $placed, $receipt]);
+
+                return parent::problems($submitted, $placed, $request, $receipt);
+            }
+        };
+
+        $declared = ['x' => 1, 'y' => 1, 'width' => 170, 'height' => 36];
+
+        (new SchemaAnchorResolver(new AnchorResolver, SchemaAnchorResolver::DEFAULT_CROSS_CHECK_TOLERANCE, $spy))
+            ->resolve($this->documentWith($this->replacingAnchor(), 1, $declared), $runs, self::DIGEST);
+
+        $this->assertCount(1, $spy->calls);
+        [$submitted, $placed, $receipt] = $spy->calls[0];
+
+        $this->assertEquals($declared, $submitted->rect->toArray(), 'The verifier was not given the field as it arrived.');
+        $this->assertEquals($receipt->rect->toArray(), $placed->rect->toArray());
+        $this->assertNotEquals($declared, $placed->rect->toArray(), 'Resolution did not move the field, so this proves nothing.');
     }
 
     private function resolver(): SchemaAnchorResolver

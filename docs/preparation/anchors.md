@@ -45,6 +45,12 @@ at **the field's own width and height**. An anchor decides where a field goes an
 is. That single sentence is the whole placement rule, and `Anchoring\ReceiptVerifier` is it written
 as a check.
 
+The verifier judges a receipt's width and height against the field **as submitted**, and the placed
+field on its own: in `replace` mode the placed rectangle is copied from the receipt, so comparing
+those two would compare the receipt with itself and accept any size (#120). The placed field must
+then be exactly the receipt's rectangle in `replace` mode, and exactly the declared one in
+`cross_check` mode.
+
 ## A receipt is a record, never a licence to skip
 
 `anchor.resolved` records what resolution found: the digest of the bytes the text was located in,
