@@ -13,13 +13,18 @@ use App\Domain\Evidence\Finalization\Exceptions\FinalizationException;
 use App\Domain\Evidence\Finalization\ExecutedDocumentRenderer;
 use App\Domain\Evidence\Finalization\FinalizationRun;
 use App\Domain\Evidence\Finalization\FinalizationRunState;
+use App\Domain\Evidence\Finalization\StalledFinalizations;
 use App\Domain\Evidence\Sealing\AssuranceLevel;
 use App\Domain\Preparation\Assembly\AssembledDocument;
 use App\Domain\Preparation\Assembly\AssemblyException;
+use App\Domain\Preparation\Contracts\DocumentReadUnavailable;
 use App\Domain\Preparation\Contracts\PdfAssembler;
+use App\Domain\Preparation\Isolation\ChildReadFailed;
+use App\Domain\Preparation\Isolation\DocumentIsolationUnavailable;
 use App\Domain\Signing\Envelopes\EnvelopeEvent;
 use App\Domain\Signing\Envelopes\EnvelopeState;
 use App\Domain\Signing\Exceptions\IllegalTransition;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use Tests\Support\CmsVerification;
@@ -265,6 +270,65 @@ class EnvelopeFinalizationTest extends TestCase
             $this->assertSame(0, Artifact::query()->count());
             $this->assertSame([], Storage::disk('documents')->allFiles('envelopes'));
         }
+    }
+
+    /**
+     * A read that failed in its child process is retried, not given up on (#119).
+     *
+     * It says nothing about the document, so the envelope is not put in `finalization_failed`, which
+     * an operator retries by hand. It is left `finalizing`, where the resume sweep finds it once the
+     * attempt has been quiet for its window — the way it finds the work of a crashed worker.
+     */
+    public function test_a_read_that_fails_in_its_child_leaves_the_envelope_for_the_resume_sweep(): void
+    {
+        $scenario = FinalizationScenario::signed();
+
+        $renderer = new ExecutedDocumentRenderer(new class implements PdfAssembler
+        {
+            public function assemble(string $pdfBytes, array $overlays = [], array $appendedDocuments = []): AssembledDocument
+            {
+                throw DocumentReadUnavailable::childFailed(new ChildReadFailed('The document read process exited with status 255.'));
+            }
+        });
+
+        try {
+            $scenario->finalizer(renderer: $renderer)->finalize($scenario->envelope);
+            $this->fail('Finalization reported success for a document it could not read.');
+        } catch (FinalizationException $failure) {
+            $this->assertInstanceOf(DocumentReadUnavailable::class, $failure->getPrevious());
+        }
+
+        $this->assertSame(FinalizationRunState::Failed, FinalizationRun::query()->sole()->state);
+        $this->assertSame(0, Artifact::query()->count());
+        $this->assertSame(EnvelopeState::Finalizing, $scenario->envelope->refresh()->state);
+
+        // "Left for a retry" is only true if the retry can find it.
+        $this->assertArrayHasKey(
+            $scenario->envelope->public_id,
+            app(StalledFinalizations::class)->before(CarbonImmutable::now()->addHour()),
+        );
+    }
+
+    /** Isolation that is unavailable needs the host fixed before a retry can succeed, so it fails visibly. */
+    public function test_isolation_that_is_unavailable_fails_finalization_visibly(): void
+    {
+        $scenario = FinalizationScenario::signed();
+
+        $renderer = new ExecutedDocumentRenderer(new class implements PdfAssembler
+        {
+            public function assemble(string $pdfBytes, array $overlays = [], array $appendedDocuments = []): AssembledDocument
+            {
+                throw new DocumentIsolationUnavailable('Document reads require a child process, and this host cannot provide one.');
+            }
+        });
+
+        try {
+            $scenario->finalizer(renderer: $renderer)->finalize($scenario->envelope);
+            $this->fail('Finalization reported success on a host that cannot read documents.');
+        } catch (FinalizationException) {
+        }
+
+        $this->assertSame(EnvelopeState::FinalizationFailed, $scenario->envelope->refresh()->state);
     }
 
     /**

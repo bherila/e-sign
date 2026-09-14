@@ -33,6 +33,8 @@ interface PdfAssembler
      *                                                 a sender may upload.
      *
      * @throws AssemblyException When the source cannot be imported.
+     * @throws DocumentReadUnavailable When the read fails on the service side; the source may be
+     *                                 perfectly importable, and a retry may succeed.
      */
     public function assemble(string $pdfBytes, array $overlays = [], array $appendedDocuments = []): AssembledDocument;
 }

@@ -21,6 +21,10 @@ interface PdfPreflight
      * code path and one error surface.
      *
      * @param  string  $pdfBytes  The uploaded bytes, exactly as received.
+     *
+     * @throws DocumentReadUnavailable When the read fails on the service side. Never a report: a
+     *                                 report is recorded against the upload as a statement about
+     *                                 the document, and this failure says nothing about it.
      */
     public function inspect(string $pdfBytes): PreflightReport;
 

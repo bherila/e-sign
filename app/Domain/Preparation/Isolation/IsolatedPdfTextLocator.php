@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Preparation\Isolation;
 
+use App\Domain\Preparation\Contracts\DocumentReadUnavailable;
 use App\Domain\Preparation\Contracts\PdfTextLocator;
 use App\Domain\Preparation\Preflight\PreflightBudget;
 use App\Domain\Preparation\Preflight\PreflightBudgetException;
@@ -35,7 +36,7 @@ final readonly class IsolatedPdfTextLocator implements PdfTextLocator
     /**
      * @return array<int, TextRun>
      *
-     * @throws DocumentIsolationUnavailable When isolation is required and this host cannot provide it.
+     * @throws DocumentReadUnavailable When the read fails on the service side: its child process, or isolation that is required and unavailable.
      */
     public function extract(string $pdfBytes, ?int $page = null, ?PreflightBudget $budget = null): array
     {
@@ -55,7 +56,7 @@ final readonly class IsolatedPdfTextLocator implements PdfTextLocator
     }
 
     /**
-     * @throws DocumentIsolationUnavailable When isolation is required and this host cannot provide it.
+     * @throws DocumentReadUnavailable When the read fails on the service side: its child process, or isolation that is required and unavailable.
      */
     public function read(string $pdfBytes, ?PreflightBudget $budget = null): DocumentText
     {
@@ -85,6 +86,7 @@ final readonly class IsolatedPdfTextLocator implements PdfTextLocator
      *
      * @throws TextExtractionException
      * @throws PreflightBudgetException Only to a caller that supplied the budget.
+     * @throws DocumentReadUnavailable When the child failed rather than the document.
      */
     private function inChild(
         ChildProcessDocumentReader $reader,
@@ -114,6 +116,14 @@ final readonly class IsolatedPdfTextLocator implements PdfTextLocator
                 );
             }
 
+            if (($response['kind'] ?? null) === 'failed') {
+                // The child's read threw something it did not anticipate, and it said so in a decoded
+                // answer with exit status zero, so there is no ChildReadFailed to catch. Nothing about
+                // the document was learned, and the message is the child's exception, not a statement
+                // about the bytes.
+                throw new DocumentReadUnavailable('The document read process failed unexpectedly: '.(string) ($response['message'] ?? ''));
+            }
+
             // A document the child could not read is still a document it spent work reading.
             $budget?->absorb((int) ($response['decoded'] ?? 0), (int) ($response['objects'] ?? 0));
 
@@ -131,7 +141,7 @@ final readonly class IsolatedPdfTextLocator implements PdfTextLocator
                 previous: $exhausted,
             );
         } catch (ChildReadFailed $failed) {
-            throw new TextExtractionException('The document could not be read.', previous: $failed);
+            throw DocumentReadUnavailable::childFailed($failed);
         }
     }
 }

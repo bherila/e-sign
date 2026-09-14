@@ -5,14 +5,23 @@ declare(strict_types=1);
 namespace Tests\Feature\Integration\Firma;
 
 use App\Domain\Identity\Credentials\IssuedServiceCredential;
+use App\Domain\Integration\Firma\SigningRequestCreation;
+use App\Domain\Preparation\Contracts\PdfPreflight;
 use App\Domain\Preparation\Documents\DocumentBlobStore;
+use App\Domain\Preparation\Documents\DocumentIntake;
 use App\Domain\Preparation\Documents\Models\Document;
+use App\Domain\Preparation\Isolation\DocumentIsolation;
+use App\Domain\Preparation\Isolation\IsolatedPdfPreflight;
+use App\Domain\Preparation\Isolation\IsolationMode;
+use App\Domain\Preparation\Preflight\PreflightLimits;
+use App\Domain\Preparation\TcPdf\TcPdfPreflight;
 use App\Domain\Signing\Envelopes\EnvelopeState;
 use App\Domain\Signing\Models\Envelope;
 use App\Domain\Signing\Sessions\Models\RecipientInvitation;
 use App\Domain\Signing\Sessions\OtpRequirement;
 use Illuminate\Filesystem\FilesystemManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Process\Factory;
 use Illuminate\Support\Facades\Storage;
 use Mockery;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -444,6 +453,44 @@ class FirmaCreateAndSendTest extends TestCase
         // is the only evidence an operator has when a sender reports a rejection. Nothing
         // references it; the blob pruner reclaims it.
         $this->assertSame(1, $this->ingestedCount());
+    }
+
+    /**
+     * A document read that fails on the service side is upstream's 500, never a refused body (#119).
+     *
+     * Reported as an unreadable document, it was a `400 invalid_request`: the answer that has a
+     * consumer change a request that was never wrong, and never retry it.
+     */
+    public function test_a_read_that_fails_on_the_service_side_is_an_internal_error_not_a_bad_request(): void
+    {
+        [, $issued] = $this->scenario();
+
+        $binary = PHP_BINARY;
+        $limits = app(PreflightLimits::class);
+        $this->app->instance(PdfPreflight::class, new IsolatedPdfPreflight(new TcPdfPreflight($limits), new DocumentIsolation(IsolationMode::Process, app(Factory::class), $binary, 0, 0.0, null, base_path('tests/Fixtures/isolation/exit-nonzero.php')), $limits));
+        $this->app->forgetInstance(DocumentIntake::class);
+        $this->app->forgetInstance(SigningRequestCreation::class);
+
+        $response = $this->postJson(self::BASE.'/create-and-send', [
+            'name' => 'Synthetic read failure',
+            'document' => base64_encode(PdfFixtures::bytes('single-page-letter')),
+            'recipients' => [['first_name' => 'Dana', 'email' => 'dana@buyer.example.test', 'order' => 1]],
+            'fields' => [[
+                'type' => 'signature',
+                'page_number' => 1,
+                'position' => ['x' => 10.0, 'y' => 20.0, 'width' => 30.0, 'height' => 5.0],
+            ]],
+        ], FirmaFacadeScenario::headers($issued))
+            ->assertStatus(500)
+            ->assertJsonPath('error', 'internal_error');
+
+        $body = (string) json_encode($response->json(), JSON_UNESCAPED_SLASHES);
+        $this->assertStringContainsString('Nothing about the document or the request needs to change', $body);
+        $this->assertStringNotContainsString($binary, $body);
+
+        // Refused before intake stored anything, unlike an anchor that matches nothing.
+        $this->assertSame(0, Envelope::query()->count());
+        $this->assertSame(0, $this->ingestedCount());
     }
 
     /**

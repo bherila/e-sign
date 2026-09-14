@@ -4,12 +4,11 @@ declare(strict_types=1);
 
 namespace App\Domain\Preparation\Anchoring;
 
+use App\Domain\Preparation\Contracts\DocumentReadUnavailable;
 use App\Domain\Preparation\Contracts\PdfTextLocator;
 use App\Domain\Preparation\Documents\Models\DocumentRevision;
 use App\Domain\Preparation\Documents\PreflightPageSizes;
 use App\Domain\Preparation\Documents\RevisionBytes;
-use App\Domain\Preparation\Isolation\ChildReadFailed;
-use App\Domain\Preparation\Isolation\DocumentIsolationUnavailable;
 use App\Domain\Preparation\Preflight\PreflightBudget;
 use App\Domain\Preparation\Preflight\PreflightBudgetException;
 use App\Domain\Preparation\Preflight\PreflightLimits;
@@ -139,25 +138,14 @@ final readonly class RevisionAnchorResolver
             }
 
             $text = $this->text->read($bytes, $budget);
-        } catch (DocumentIsolationUnavailable $unavailable) {
-            // Process isolation is required and this host cannot provide it: a server configuration
-            // failure, not a statement about the document.
+        } catch (DocumentReadUnavailable $unavailable) {
+            // The read failed on the service side — its child process, or process isolation being
+            // required and unavailable. Nothing about these bytes was learned, and telling the sender
+            // to fix a valid document would put a retryable failure in their non-retryable bucket.
             $this->log($revision, $unavailable);
 
             throw AnchorDocumentUnavailable::readFailed((string) $revision->public_id, $unavailable);
         } catch (TextExtractionException $failure) {
-            if ($failure->getPrevious() instanceof ChildReadFailed) {
-                // The read's child process failed — it could not start, exited unexpectedly, or
-                // answered with something undecodable. The isolated locator reports that as the
-                // port's unreadable-document failure, but nothing about these bytes was learned: it
-                // is the service failing, and telling the sender to fix a valid document would put a
-                // retryable failure in their non-retryable bucket. Inspecting the cause is a stopgap
-                // until the port declares a server-side read failure of its own (#119).
-                $this->log($revision, $failure);
-
-                throw AnchorDocumentUnavailable::readFailed((string) $revision->public_id, $failure);
-            }
-
             // Read, and not parseable. That *is* something about this document, so it is reported
             // to the sender — but only as the stable code. A parser's message carries engine
             // internals, and no document response reveals those (docs/BLOB_STORAGE.md).

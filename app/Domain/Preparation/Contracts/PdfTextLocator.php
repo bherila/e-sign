@@ -50,6 +50,8 @@ interface PdfTextLocator
      *                                  budget for. Deliberately distinct: "too expensive to read"
      *                                  and "not a readable document" call for different answers
      *                                  from whoever uploaded it.
+     * @throws DocumentReadUnavailable When the read fails on the service side, which says nothing
+     *                                 about the bytes.
      */
     public function extract(string $pdfBytes, ?int $page = null, ?PreflightBudget $budget = null): array;
 
@@ -69,6 +71,8 @@ interface PdfTextLocator
      * @throws TextExtractionException When the bytes cannot be read as a document, or a ceiling
      *                                 stops a read the caller supplied no budget for.
      * @throws PreflightBudgetException When a ceiling stops a read the caller did supply a budget for.
+     * @throws DocumentReadUnavailable When the read fails on the service side, which says nothing
+     *                                 about the bytes.
      */
     public function read(string $pdfBytes, ?PreflightBudget $budget = null): DocumentText;
 }

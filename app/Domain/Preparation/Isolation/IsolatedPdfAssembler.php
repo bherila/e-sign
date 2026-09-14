@@ -8,6 +8,7 @@ use App\Domain\Preparation\Assembly\AssembledDocument;
 use App\Domain\Preparation\Assembly\AssemblyException;
 use App\Domain\Preparation\Assembly\PageOverlay;
 use App\Domain\Preparation\Assembly\UnsupportedSourceException;
+use App\Domain\Preparation\Contracts\DocumentReadUnavailable;
 use App\Domain\Preparation\Contracts\PdfAssembler;
 use App\Domain\Preparation\Preflight\PreflightBudgetException;
 use App\Domain\Preparation\Preflight\PreflightCode;
@@ -37,7 +38,7 @@ final readonly class IsolatedPdfAssembler implements PdfAssembler
      * @param  array<int, PageOverlay>  $overlays
      * @param  array<int, string>  $appendedDocuments
      *
-     * @throws DocumentIsolationUnavailable When isolation is required and this host cannot provide it.
+     * @throws DocumentReadUnavailable When the read fails on the service side: its child process, or isolation that is required and unavailable.
      */
     public function assemble(string $pdfBytes, array $overlays = [], array $appendedDocuments = []): AssembledDocument
     {
@@ -65,7 +66,9 @@ final readonly class IsolatedPdfAssembler implements PdfAssembler
                 previous: $stopped,
             );
         } catch (ChildReadFailed $failed) {
-            throw new AssemblyException('The document could not be re-assembled.', previous: $failed);
+            // Not an AssemblyException: that says these bytes cannot be re-assembled, and finalization
+            // gives up on it. A child that failed learned nothing about the bytes.
+            throw DocumentReadUnavailable::childFailed($failed);
         }
 
         $assembled = $response['value'] ?? null;
@@ -75,6 +78,13 @@ final readonly class IsolatedPdfAssembler implements PdfAssembler
         }
 
         $message = (string) ($response['message'] ?? 'The document could not be re-assembled.');
+
+        if (($response['kind'] ?? null) === 'failed') {
+            // The child's read threw something it did not anticipate and answered with exit status
+            // zero, so no ChildReadFailed. As an AssemblyException, finalization would give up on an
+            // envelope a retry could complete.
+            throw new DocumentReadUnavailable('The document read process failed unexpectedly: '.$message);
+        }
 
         if (($response['kind'] ?? null) === 'unsupported') {
             throw new UnsupportedSourceException($message);

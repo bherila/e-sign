@@ -10,6 +10,7 @@ use App\Domain\Preparation\Assembly\OverlayImage;
 use App\Domain\Preparation\Assembly\OverlayRectangle;
 use App\Domain\Preparation\Assembly\OverlayText;
 use App\Domain\Preparation\Assembly\PageOverlay;
+use App\Domain\Preparation\Contracts\DocumentReadUnavailable;
 use App\Domain\Preparation\Contracts\PdfAssembler;
 use App\Domain\Preparation\Geometry\NativeRect;
 use App\Domain\Preparation\Schema\FieldDefinition;
@@ -73,6 +74,7 @@ final readonly class ExecutedDocumentRenderer
      * @param  string  $completionReportPdf  The rendered completion report, appended as-is.
      *
      * @throws FinalizationException When the document cannot be assembled.
+     * @throws DocumentReadUnavailable When the read fails on the service side; the finalizer retries it.
      */
     public function render(FinalizationInput $input, string $reviewPdf, string $completionReportPdf, FieldSchemaDocument $schema): string
     {

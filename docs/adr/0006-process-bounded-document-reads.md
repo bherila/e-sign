@@ -51,11 +51,31 @@ assent — that the in-process path, with a fresh budget per read, completes.
 **Failures keep their names.** A killed child is `time_budget_exceeded`; a child that died of
 memory exhaustion is `memory_budget_exceeded`, recognised by the exit status the entrypoint's
 shutdown handler sets rather than by the fatal error's text, which the child binary's
-`error_reporting` may suppress; a failure to start the process at all is an unreadable document;
-a ceiling the child's own budget reached comes
-back with that ceiling's code; anything else is the port's ordinary unreadable-document failure.
-Who is told about a ceiling is unchanged: a caller that supplied a budget hears the ceiling, a
-caller that did not sees the unreadable-document failure.
+`error_reporting` may suppress; a ceiling the child's own budget reached comes back with that
+ceiling's code; and a document the child read and could not accept is the port's ordinary
+unreadable-document failure. Who is told about a ceiling is unchanged: a caller that supplied a
+budget hears the ceiling, a caller that did not sees the unreadable-document failure.
+
+**A read that failed on the service side is not an unreadable document** (amended 2026-09-14,
+issue #119). A child that could not be started, exited unexpectedly, answered with something
+undecodable, or answered that its read threw something unanticipated (`kind: failed`, which it
+reports with exit status zero) learned nothing about the bytes, and neither did a host that cannot provide the
+isolation `process` requires. Every port declares one failure for both, `DocumentReadUnavailable`,
+beside the failure it promises for a document it could not read. As first written, each adapter
+reported it as that document failure instead, which stored valid uploads as `preflight_failed`,
+failed finalizations a retry would have completed, and told integrations to correct requests that
+needed no correcting. Callers answer it as the deployment's failure:
+
+| Path | Answer |
+|---|---|
+| Upload | `503`, `code: document_unavailable`; no document is recorded |
+| Native API | `503 document_unavailable`, `details.retryable: true` |
+| Firma facade | upstream's `500 internal_error`, with a sentence saying nothing needs to change |
+| Publish and send | `anchor_document_unavailable` / `document_unavailable`, both `503` |
+| Finalization | a failed child leaves the envelope `finalizing` for `esign:finalization:resume`; unavailable isolation is `finalization_failed`, because the host has to be fixed before any retry can succeed |
+
+Each is reported to the error log, and none puts the exception's own message on the wire, since
+that can name the host's PHP binary.
 
 **The cooperative budget stays.** It is what turns "this cost too much" into a named, actionable
 ceiling (`decompression_limit_exceeded`, `object_limit_exceeded`, ...) before the hard limit is

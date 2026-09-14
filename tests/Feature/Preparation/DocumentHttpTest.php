@@ -4,15 +4,24 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Preparation;
 
+use App\Domain\Identity\Audit\AuditEvent;
 use App\Domain\Identity\Enums\WorkspaceRole;
 use App\Domain\Identity\Models\Workspace;
+use App\Domain\Preparation\Contracts\PdfPreflight;
 use App\Domain\Preparation\Documents\DocumentIntake;
 use App\Domain\Preparation\Documents\DocumentStatus;
 use App\Domain\Preparation\Documents\Models\Document;
+use App\Domain\Preparation\Isolation\DocumentIsolation;
+use App\Domain\Preparation\Isolation\IsolatedPdfPreflight;
+use App\Domain\Preparation\Isolation\IsolationMode;
+use App\Domain\Preparation\Preflight\PreflightLimits;
+use App\Domain\Preparation\TcPdf\TcPdfPreflight;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Process\Factory;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\DocumentWorkspace;
 use Tests\Support\PdfFixtures;
 use Tests\TestCase;
@@ -384,6 +393,44 @@ class DocumentHttpTest extends TestCase
 
         $this->assertNotNull($refused, 'The upload route must have a ceiling.');
         $refused->assertHeader('Retry-After');
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function failedReads(): iterable
+    {
+        yield 'the read process exits unexpectedly' => [PHP_BINARY];
+        yield 'process isolation is unavailable' => ['/definitely/not/a/php/binary'];
+    }
+
+    /**
+     * A read that fails on the service side is not a rejected upload (#119).
+     *
+     * Reported as preflight's `unparseable`, it stored the upload as `preflight_failed` — for good,
+     * for a file that may be fine — and told the sender to re-export it.
+     */
+    #[DataProvider('failedReads')]
+    public function test_a_read_that_fails_on_the_service_side_is_a_503_and_records_nothing(string $binary): void
+    {
+        $limits = app(PreflightLimits::class);
+        $this->app->instance(PdfPreflight::class, new IsolatedPdfPreflight(new TcPdfPreflight($limits), new DocumentIsolation(IsolationMode::Process, app(Factory::class), $binary, 0, 0.0, null, base_path('tests/Fixtures/isolation/exit-nonzero.php')), $limits));
+        $this->app->forgetInstance(DocumentIntake::class);
+
+        $response = $this->actingAs($this->sender)->post(
+            $this->uploadUrl(),
+            ['file' => DocumentWorkspace::upload('single-page-letter')],
+            self::JSON,
+        );
+
+        $response->assertStatus(503)
+            ->assertJsonPath('code', 'document_unavailable')
+            ->assertJsonMissingPath('document')
+            ->assertJsonMissingPath('errors');
+
+        // Decoded first: JSON escapes the slashes a path is made of.
+        $this->assertStringNotContainsString($binary, (string) json_encode($response->json(), JSON_UNESCAPED_SLASHES));
+
+        $this->assertDatabaseCount('documents', 0);
+        $this->assertFalse(AuditEvent::query()->where('action', 'preparation.document_rejected')->exists());
     }
 
     // ---------------------------------------------------------------- helpers
