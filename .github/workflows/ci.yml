@@ -453,6 +453,23 @@ jobs:
           # Prove the image's own HEALTHCHECK script reports the web role healthy, the same way
           # Docker's health state machine would (see .docker/scripts/healthcheck.sh).
           docker exec esign-smoke esign-healthcheck
+          # The image's nginx must accept its own config, and its access-log map must keep
+          # credential-bearing paths out of the log (issue #126) without hiding anything else.
+          docker exec esign-smoke nginx -t
+          envelope=01ARZ3NDEKTSV4RRFFQ69G5FAV
+          sign_token=$(printf 'S%.0s' $(seq 1 43))
+          invitation_token=$(printf 'a%.0s' $(seq 1 64))
+          for path in "/sign/$envelope/$sign_token" "/invitations/$invitation_token" "/sign/$envelope/session"; do
+            curl -s -o /dev/null "http://localhost:8080$path"
+          done
+          curl -s -o /dev/null -X POST "http://localhost:8080/sign/$envelope/$sign_token/start"
+          sleep 1
+          logs=$(docker logs esign-smoke 2>&1)
+          if grep -q -e "$sign_token" -e "$invitation_token" <<<"$logs"; then
+            echo "A credential-bearing path was written to the access log"
+            exit 1
+          fi
+          grep -q "GET /sign/$envelope/session" <<<"$logs" || { echo "The signing session route is no longer logged"; exit 1; }
           docker rm -f esign-smoke >/dev/null
 
       - name: Smoke test role dispatch (artisan, worker)
