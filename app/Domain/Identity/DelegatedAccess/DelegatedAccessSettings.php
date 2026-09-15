@@ -49,7 +49,13 @@ final readonly class DelegatedAccessSettings
     {
         $publicKeys = self::parsePublicKeys((string) $this->config->get('esign.delegated_access.public_keys', ''));
 
-        if ($publicKeys === [] || $this->bindingIssuer() === '') {
+        // The package's provider key defaults to `bherila`, so it can never read as unset. Require the
+        // raw OAUTH_PROVIDER mirror instead, as `esign:bootstrap-owner` does: bindings stored under a
+        // default nobody chose would not match sign-in once the operator sets the real key.
+        $explicitProvider = $this->config->get('esign.oauth_provider');
+
+        if ($publicKeys === [] || ! is_string($explicitProvider) || trim($explicitProvider) === ''
+            || trim($explicitProvider) !== $this->bindingIssuer()) {
             throw new DelegatedAccessException('invalid_verifier_configuration');
         }
 

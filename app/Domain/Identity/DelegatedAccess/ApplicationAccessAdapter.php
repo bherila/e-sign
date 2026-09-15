@@ -119,7 +119,11 @@ final readonly class ApplicationAccessAdapter
         $page = array_slice($remaining, 0, $limit);
 
         return [
-            'workspaces' => array_map(static fn (Workspace $workspace): array => ['id' => $workspace->public_id, 'label' => $workspace->name], $page),
+            'workspaces' => array_map(static fn (Workspace $workspace): array => [
+                'id' => $workspace->public_id,
+                // The contract bounds labels to 250 characters; a workspace name may be longer.
+                'label' => Str::limit($workspace->name, 250, ''),
+            ], $page),
             'next_cursor' => count($remaining) > $limit ? $this->cursor($actorSubject, 'workspaces', (int) $page[array_key_last($page)]->getKey()) : null,
         ];
     }
@@ -239,6 +243,12 @@ final readonly class ApplicationAccessAdapter
         // Grants lock each workspace's rows in turn. In workspace order, two requests naming the
         // same workspaces in a different order queue behind each other instead of deadlocking.
         ksort($desired);
+
+        // Provisioning grants at least one membership. Each grant rechecks the actor's authority under
+        // the membership locks, so an account is never created on the strength of a stale check.
+        if ($payload['expected_revision'] === null && $desired === []) {
+            throw new DelegatedAccessException('invalid_request', 422);
+        }
 
         try {
             $payload['expected_revision'] === null

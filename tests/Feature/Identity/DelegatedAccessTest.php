@@ -69,6 +69,7 @@ final class DelegatedAccessTest extends TestCase
 
         config([
             'bherila-auth.oauth_client.provider' => self::PROVIDER,
+            'esign.oauth_provider' => self::PROVIDER,
             'esign.delegated_access' => [
                 'enabled' => true,
                 'issuer' => self::ISSUER,
@@ -370,6 +371,38 @@ final class DelegatedAccessTest extends TestCase
         ])->assertStatus(422);
 
         $this->assertFalse(IdentityBinding::query()->forIssuerSubject(self::PROVIDER, 'orphan-subject')->exists());
+    }
+
+    /** Provisioning must grant something, so every account is created under a locked authority check (#127 review). */
+    public function test_provisioning_without_a_membership_is_refused(): void
+    {
+        $this->send([
+            'operation' => 'update', 'subject' => 'empty-subject', 'expected_revision' => null,
+            'access' => ['application_admin' => false, 'workspaces' => []],
+        ])->assertStatus(422);
+
+        $this->assertFalse(IdentityBinding::query()->forIssuerSubject(self::PROVIDER, 'empty-subject')->exists());
+    }
+
+    /** The package default provider name is never trusted as the binding issuer (#127 review). */
+    public function test_requests_are_refused_until_the_oauth_provider_is_set_explicitly(): void
+    {
+        config(['esign.oauth_provider' => '']);
+
+        $response = $this->send(['operation' => 'capabilities']);
+
+        $this->assertGreaterThanOrEqual(500, $response->status());
+        $response->assertJsonMissingPath('controls');
+    }
+
+    /** Workspace labels respect the contract's 250-character bound (#127 review). */
+    public function test_a_long_workspace_name_is_listed_within_the_label_bound(): void
+    {
+        $this->owned->forceFill(['name' => str_repeat('W', 255)])->save();
+
+        $response = $this->validated($this->send(['operation' => 'workspaces']), 'workspaces');
+
+        $this->assertSame(250, mb_strlen($response['workspaces'][0]['label']));
     }
 
     public function test_settings_refuse_a_key_list_with_an_unreadable_entry(): void
