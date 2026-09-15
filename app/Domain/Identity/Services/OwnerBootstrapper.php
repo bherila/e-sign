@@ -69,7 +69,7 @@ class OwnerBootstrapper
                     return [$user, $binding];
                 }
 
-                $placeholderEmail = $this->placeholderEmail($issuer, $subject);
+                $placeholderEmail = PendingAccount::email($issuer, $subject);
 
                 // A binding is the only thing that links this tuple to a user row, and it
                 // is gone. If a row still holds the derived placeholder address, an earlier
@@ -87,7 +87,7 @@ class OwnerBootstrapper
                 }
 
                 $user = User::create([
-                    'name' => $this->placeholderName($subject),
+                    'name' => PendingAccount::name('Pending owner', $subject),
                     'email' => $placeholderEmail,
                     'password' => Str::random(64),
                 ]);
@@ -250,18 +250,5 @@ class OwnerBootstrapper
         }
 
         return $membership;
-    }
-
-    private function placeholderName(string $subject): string
-    {
-        return 'Pending owner ('.Str::limit($subject, 40, '…').')';
-    }
-
-    private function placeholderEmail(string $issuer, string $subject): string
-    {
-        // `.invalid` is reserved by RFC 2606 and resolves nowhere, so this address can never
-        // be mailed and can never be mistaken for a real one. It is not an account-linking
-        // key: the (issuer, subject) binding is.
-        return 'sso-'.substr(hash('sha256', $issuer."\0".$subject), 0, 32).'@invalid';
     }
 }

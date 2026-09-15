@@ -61,6 +61,12 @@ class AppServiceProvider extends ServiceProvider
         // Creating an invitation is cheap and audited, and redeeming one is a lookup by an
         // unguessable token. Both are bounded per person so neither becomes a way to fill the
         // audit trail or hammer the database (issue #110).
+        // Delegated access is called by the identity provider's server, so it is keyed by client
+        // address. Every request has already been signed; this bounds a misbehaving or replaying
+        // caller, not a person (issue #111).
+        RateLimiter::for('delegated-access', static fn (Request $request): Limit => Limit::perMinute(120)
+            ->by('delegated-access:'.$request->ip()));
+
         RateLimiter::for('member-invitations', static fn (Request $request): Limit => Limit::perMinute(20)
             ->by('member-invitations:'.($request->user()?->getAuthIdentifier() ?? $request->ip())));
         RateLimiter::for('invitation-redemptions', static fn (Request $request): Limit => Limit::perMinute(10)

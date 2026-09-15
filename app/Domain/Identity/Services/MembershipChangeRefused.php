@@ -58,6 +58,15 @@ final class MembershipChangeRefused extends RuntimeException
         );
     }
 
+    /** The person is already a member of the workspace a grant names. */
+    public static function memberExists(): self
+    {
+        return new self(
+            self::ALREADY_MEMBER,
+            'This person is already a member of the workspace. Change their role instead of granting another one.',
+        );
+    }
+
     public static function invitationUnavailable(): self
     {
         return new self(

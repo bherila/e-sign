@@ -19,7 +19,7 @@
         "ext-openssl": "*",
         "ext-zip": "*",
         "aws/aws-php-sns-message-validator": "^1.10",
-        "bherila/auth-laravel": "^0.12",
+        "bherila/auth-laravel": "^0.14",
         "laravel/framework": "^13.0",
         "laravel/tinker": "^3.0",
         "league/flysystem-aws-s3-v3": "^3.0",

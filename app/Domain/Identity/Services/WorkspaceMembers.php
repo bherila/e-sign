@@ -246,11 +246,61 @@ final readonly class WorkspaceMembers
     }
 
     /**
+     * Give somebody who is not yet a member a role in this workspace.
+     *
+     * The path delegated access takes (#111). The members page adds people through invitations
+     * instead, because it cannot know who somebody is before they sign in. The identity provider
+     * can: it names the exact subject, already bound to `$member`. The same locks and rules apply
+     * as to every other change.
+     *
+     * @param  array<string, mixed>  $context  Recorded with the audit event, such as the surface that asked.
+     *
      * @throws MembershipChangeRefused
      */
-    public function changeRole(Workspace $workspace, User $actor, WorkspaceMembership $membership, WorkspaceRole $role): WorkspaceMembership
+    public function grant(Workspace $workspace, User $actor, User $member, WorkspaceRole $role, array $context = []): WorkspaceMembership
     {
-        return DB::transaction(function () use ($workspace, $actor, $membership, $role): WorkspaceMembership {
+        return DB::transaction(function () use ($workspace, $actor, $member, $role, $context): WorkspaceMembership {
+            $this->lockedOwners($workspace);
+            [$actorRole] = $this->lockedActorAndTarget($workspace, $actor);
+
+            $this->assertManages($actorRole);
+
+            if ($role === WorkspaceRole::Owner) {
+                $this->assertOwner($actorRole);
+            }
+
+            if (WorkspaceMembership::query()->where('workspace_id', $workspace->getKey())->where('user_id', $member->getKey())->exists()) {
+                throw MembershipChangeRefused::memberExists();
+            }
+
+            try {
+                $membership = WorkspaceMembership::create([
+                    'workspace_id' => $workspace->getKey(),
+                    'user_id' => $member->getKey(),
+                    'role' => $role,
+                ]);
+            } catch (UniqueConstraintViolationException) {
+                throw MembershipChangeRefused::memberExists();
+            }
+
+            $this->audit->record(AuditActor::user($actor), 'identity.member_granted', $workspace, [
+                ...$context,
+                'user_id' => $member->getKey(),
+                'role' => $role->value,
+            ]);
+
+            return $membership;
+        });
+    }
+
+    /**
+     * @param  array<string, mixed>  $context  Recorded with the audit event, such as the surface that asked.
+     *
+     * @throws MembershipChangeRefused
+     */
+    public function changeRole(Workspace $workspace, User $actor, WorkspaceMembership $membership, WorkspaceRole $role, array $context = []): WorkspaceMembership
+    {
+        return DB::transaction(function () use ($workspace, $actor, $membership, $role, $context): WorkspaceMembership {
             $owners = $this->lockedOwners($workspace);
             [$actorRole, $locked] = $this->lockedActorAndTarget($workspace, $actor, $membership);
 
@@ -278,6 +328,7 @@ final readonly class WorkspaceMembers
             $locked->forceFill(['role' => $role])->save();
 
             $this->audit->record(AuditActor::user($actor), 'identity.member_role_changed', $workspace, [
+                ...$context,
                 'user_id' => $locked->user_id,
                 'from' => $from->value,
                 'to' => $role->value,
@@ -288,11 +339,13 @@ final readonly class WorkspaceMembers
     }
 
     /**
+     * @param  array<string, mixed>  $context  Recorded with the audit event, such as the surface that asked.
+     *
      * @throws MembershipChangeRefused
      */
-    public function remove(Workspace $workspace, User $actor, WorkspaceMembership $membership): void
+    public function remove(Workspace $workspace, User $actor, WorkspaceMembership $membership, array $context = []): void
     {
-        DB::transaction(function () use ($workspace, $actor, $membership): void {
+        DB::transaction(function () use ($workspace, $actor, $membership, $context): void {
             $owners = $this->lockedOwners($workspace);
             [$actorRole, $locked] = $this->lockedActorAndTarget($workspace, $actor, $membership);
 
@@ -313,6 +366,7 @@ final readonly class WorkspaceMembers
             $locked->delete();
 
             $this->audit->record(AuditActor::user($actor), 'identity.member_removed', $workspace, [
+                ...$context,
                 'user_id' => $locked->user_id,
                 'role' => $locked->role->value,
             ]);
