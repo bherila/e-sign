@@ -74,6 +74,8 @@ jobs:
               # CI-only DSS profile checker; never part of the runtime, but the
               # `pades-profile` job below is built from it.
               - 'tools/**'
+              # Drivers and proxy config for the `auth-manager-integration` job.
+              - '.github/integration/**'
               - '.github/workflows/**'
             docker:
               - '.docker/**'
@@ -578,9 +580,154 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  auth-manager-integration:
+    # Delegated access depends on auth-manager (docs/operations/delegated-access.md). This runs
+    # auth-manager's real transport, from its main branch, against this commit's e-sign over
+    # HTTPS, each on its own database in one disposable MySQL container.
+    name: Delegated access against auth-manager
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    services:
+      database:
+        image: mysql:8.4
+        env:
+          # A throwaway container torn down with the job; the password has no value outside it.
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      WORK: /tmp/esign-integration
+      DB_CONNECTION: mysql
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_USERNAME: root
+      DB_PASSWORD: root
+      SESSION_DRIVER: array
+      CACHE_STORE: array
+      QUEUE_CONNECTION: sync
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/checkout@v7
+        with:
+          repository: bherila/auth-manager
+          ref: main
+          path: auth-manager
+          persist-credentials: false
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: dom, curl, libxml, mbstring, zip, pdo, pdo_mysql, bcmath, intl, gd, exif, iconv, sodium
+          ini-values: curl.cainfo=/etc/ssl/certs/ca-certificates.crt, openssl.cafile=/etc/ssl/certs/ca-certificates.crt
+          coverage: none
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v6
+        with:
+          path: vendor
+          key: composer-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-
+
+      - name: Install PHP dependencies
+        timeout-minutes: 6
+        run: |
+          composer install --no-interaction --prefer-dist --no-progress
+          composer install --no-interaction --prefer-dist --no-progress --working-dir=auth-manager
+
+      - name: Create databases, TLS certificate and integration keys
+        run: |
+          mkdir -p "$WORK"
+          php -r "new PDO('mysql:host=127.0.0.1;port=3306', 'root', 'root')->exec('CREATE DATABASE esign_integration; CREATE DATABASE auth_manager_integration');"
+
+          # A self-signed certificate trusted for this run only, so the transport's HTTPS
+          # requirement is met without weakening it.
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=esign.example.test \
+            -addext subjectAltName=DNS:esign.example.test -addext basicConstraints=critical,CA:TRUE \
+            -keyout "$WORK/tls.key" -out "$WORK/tls.crt"
+          sudo cp "$WORK/tls.crt" /usr/local/share/ca-certificates/esign-integration.crt
+          sudo update-ca-certificates
+          echo '127.0.0.1 esign.example.test' | sudo tee -a /etc/hosts
+
+          # The provider's integration key pair, generated for this run.
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$WORK/integration.key"
+          chmod 600 "$WORK/integration.key"
+          openssl pkey -in "$WORK/integration.key" -pubout -out "$WORK/integration.pub"
+
+      - name: Prepare auth-manager
+        working-directory: auth-manager
+        env:
+          DB_DATABASE: auth_manager_integration
+        run: |
+          # CI-only: migrations run against the job's disposable service container, never a
+          # persistent or shared database (see the `database` job).
+          cp .env.example .env
+          php artisan key:generate --no-interaction --force
+          php artisan migrate --force --no-interaction
+          php ../.github/integration/auth-manager/drive.php seed "$WORK/ids.json"
+
+      - name: Prepare and start e-sign
+        env:
+          DB_DATABASE: esign_integration
+          OAUTH_PROVIDER: ci-auth-manager
+          ESIGN_DELEGATED_ACCESS_ENABLED: 'true'
+          ESIGN_DELEGATED_ACCESS_ISSUER: https://identity.example.test
+          ESIGN_DELEGATED_ACCESS_ENDPOINT: https://esign.example.test/application-access
+          ESIGN_DELEGATED_ACCESS_APPLICATION: e-sign
+          ESIGN_DELEGATED_ACCESS_PUBLIC_KEYS: integration-v1|/tmp/esign-integration/integration.pub
+        run: |
+          cp .env.example .env
+          php artisan key:generate --no-interaction --force
+          php artisan migrate --force --no-interaction
+          php .github/integration/auth-manager/seed-esign.php "$WORK/ids.json"
+
+          # The built-in server inherits this step's environment (artisan serve would filter it).
+          # Laravel's router script takes the working directory as the public path, so start it there.
+          (cd public && nohup php -S 127.0.0.1:8000 ../vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php > "$WORK/server.log" 2>&1 &)
+          command -v nginx >/dev/null || { sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends nginx; }
+          sudo nginx -c "$GITHUB_WORKSPACE/.github/integration/auth-manager/nginx.conf"
+
+          # An unsigned request must be refused over trusted TLS before the transport is tried.
+          for _ in $(seq 1 30); do
+            status=$(curl -s -o /dev/null -w '%{http_code}' -X POST https://esign.example.test/application-access || true)
+            [ "$status" = 401 ] && exit 0
+            sleep 1
+          done
+          echo "e-sign did not answer an unsigned request with 401 (last status: $status)"
+          exit 1
+
+      - name: Drive delegated access through auth-manager's transport
+        working-directory: auth-manager
+        env:
+          DB_DATABASE: auth_manager_integration
+          AUTH_MANAGER_DELEGATED_ACCESS_ENABLED: 'true'
+          AUTH_MANAGER_DELEGATED_ACCESS_WRITES_ENABLED: 'true'
+          AUTH_MANAGER_DELEGATED_ACCESS_ISSUER: https://identity.example.test
+          AUTH_MANAGER_DELEGATED_ACCESS_KEY_ID: integration-v1
+          AUTH_MANAGER_DELEGATED_ACCESS_PRIVATE_KEY_PATH: /tmp/esign-integration/integration.key
+        run: php ../.github/integration/auth-manager/drive.php run "$WORK/ids.json"
+
+      - name: Show e-sign logs
+        if: failure()
+        run: |
+          cat "$WORK/server.log" || true
+          sudo cat "$WORK/nginx-access.log" "$WORK/nginx-error.log" || true
+          tail -n 200 storage/logs/laravel.log || true
+          tail -n 200 auth-manager/storage/logs/laravel.log || true
+
   result:
     name: CI result
-    needs: [changes, test, database, licenses, audit, image, validation, pades-profile]
+    needs: [changes, test, database, auth-manager-integration, licenses, audit, image, validation, pades-profile]
     if: always()
     runs-on: ubuntu-24.04-arm
     steps:
@@ -593,6 +740,9 @@ jobs:
             exit 1
           fi
           if [[ "${{ needs.database.result }}" == "failure" || "${{ needs.database.result }}" == "cancelled" ]]; then
+            exit 1
+          fi
+          if [[ "${{ needs['auth-manager-integration'].result }}" == "failure" || "${{ needs['auth-manager-integration'].result }}" == "cancelled" ]]; then
             exit 1
           fi
           if [[ "${{ needs.licenses.result }}" == "failure" || "${{ needs.licenses.result }}" == "cancelled" ]]; then

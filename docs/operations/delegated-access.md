@@ -78,3 +78,20 @@ At the provider, the application needs:
   web worker, and never restored to an earlier snapshot while assertions are live.
 - **Proxy.** Nothing in front of the application may rewrite the request body or strip the
   `Authorization` header. The assertion is bound to the exact bytes of the body.
+
+## Integration test
+
+The CI job `auth-manager-integration` checks both sides of the contract as deployed. It uses:
+- auth-manager's `main` branch and this commit's e-sign;
+- one disposable MySQL container;
+- a certificate and an integration key pair generated for the run.
+
+It seeds an owner, a sender and an unbound newcomer (`.github/integration/auth-manager/`), then
+drives auth-manager's own `DelegatedAccessTransport` through a sequence of steps:
+- capabilities, workspaces, subjects and a read;
+- a role change;
+- a stale revision, which must be a conflict;
+- provisioning the newcomer;
+- provisioning the newcomer again, which must also be a conflict.
+
+A change on either side that breaks the other fails this job.
