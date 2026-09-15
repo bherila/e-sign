@@ -11,17 +11,18 @@ use App\Domain\Identity\Models\IdentityBinding;
 use App\Domain\Identity\Models\Workspace;
 use App\Domain\Identity\Models\WorkspaceMembership;
 use App\Domain\Identity\Services\MembershipChangeRefused;
-use App\Domain\Identity\Services\PendingAccount;
 use App\Domain\Identity\Services\WorkspaceMembers;
 use App\Models\User;
+use BWH\Auth\OAuth\DelegatedAccess\ApplicationAccessAdapter as AccessAdapter;
 use BWH\Auth\OAuth\DelegatedAccess\DelegatedAccessException;
+use BWH\Auth\OAuth\DelegatedAccess\DelegatedAccessSettings;
 use BWH\Auth\OAuth\DelegatedAccess\DelegatedContract;
-use Illuminate\Contracts\Encryption\Encrypter;
+use BWH\Auth\OAuth\DelegatedAccess\DelegatedCursor;
+use BWH\Auth\OAuth\PendingAccount;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use Throwable;
 
 /**
  * Answers the identity provider's delegated access requests, contract version 2 (issue #111).
@@ -44,7 +45,7 @@ use Throwable;
  *   bound yet, bound to this provider's issuer and that exact subject, and grants the memberships
  *   asked for. It never adopts an existing row found by address.
  */
-final readonly class ApplicationAccessAdapter
+final readonly class ApplicationAccessAdapter implements AccessAdapter
 {
     public const PAGE_SIZE = 50;
 
@@ -54,13 +55,13 @@ final readonly class ApplicationAccessAdapter
     public function __construct(
         private WorkspaceMembers $members,
         private AuditRecorder $audit,
-        private Encrypter $encrypter,
+        private DelegatedCursor $cursors,
         private DelegatedAccessSettings $settings,
     ) {}
 
     /**
      * @param  array<string, mixed>  $payload  A request already validated by {@see DelegatedContract::request()}.
-     * @return array<string, mixed> The response envelope.
+     * @return array<string, mixed> The operation's response fields; the package adds the envelope.
      *
      * @throws DelegatedAccessException
      */
@@ -78,10 +79,7 @@ final readonly class ApplicationAccessAdapter
             throw new DelegatedAccessException('not_authorized', 403);
         }
 
-        $operation = (string) $payload['operation'];
-        $envelope = ['contract_version' => DelegatedContract::VERSION_2, 'application' => $this->settings->application(), 'operation' => $operation];
-
-        return $envelope + match ($operation) {
+        return match ((string) $payload['operation']) {
             'capabilities' => $this->capabilities(),
             'workspaces' => $this->workspacesPage($actorSubject, $managed, $payload),
             'subjects' => $this->subjectsPage($actorSubject, $managed, $payload),
@@ -113,7 +111,7 @@ final readonly class ApplicationAccessAdapter
      */
     private function workspacesPage(string $actorSubject, array $managed, array $payload): array
     {
-        $after = $this->after($actorSubject, 'workspaces', $payload);
+        $after = $this->cursors->after($actorSubject, 'workspaces', $payload);
         $limit = (int) ($payload['limit'] ?? self::PAGE_SIZE);
         $remaining = array_values(array_filter($managed, static fn (Workspace $workspace): bool => $workspace->getKey() > $after));
         $page = array_slice($remaining, 0, $limit);
@@ -124,7 +122,7 @@ final readonly class ApplicationAccessAdapter
                 // The contract bounds labels to 250 characters; a workspace name may be longer.
                 'label' => Str::limit($workspace->name, 250, ''),
             ], $page),
-            'next_cursor' => count($remaining) > $limit ? $this->cursor($actorSubject, 'workspaces', (int) $page[array_key_last($page)]->getKey()) : null,
+            'next_cursor' => count($remaining) > $limit ? $this->cursors->encode($actorSubject, 'workspaces', (int) $page[array_key_last($page)]->getKey()) : null,
         ];
     }
 
@@ -137,7 +135,7 @@ final readonly class ApplicationAccessAdapter
      */
     private function subjectsPage(string $actorSubject, array $managed, array $payload): array
     {
-        $after = $this->after($actorSubject, 'subjects', $payload);
+        $after = $this->cursors->after($actorSubject, 'subjects', $payload);
         $limit = (int) ($payload['limit'] ?? self::PAGE_SIZE);
         $workspaceIds = array_keys($managed);
 
@@ -157,7 +155,7 @@ final readonly class ApplicationAccessAdapter
                 'subject' => $binding->subject,
                 'label' => Str::limit((string) $binding->user?->name, 250, '') ?: $binding->subject,
             ])->values()->all(),
-            'next_cursor' => $bindings->count() > $limit ? $this->cursor($actorSubject, 'subjects', (int) $page->last()?->getKey()) : null,
+            'next_cursor' => $bindings->count() > $limit ? $this->cursors->encode($actorSubject, 'subjects', (int) $page->last()?->getKey()) : null,
         ];
     }
 
@@ -459,38 +457,5 @@ final readonly class ApplicationAccessAdapter
             'user' => $target->getKey(),
             'memberships' => array_map(static fn (WorkspaceMembership $membership): array => [$membership->workspace_id, $membership->role->value], $memberships),
         ]));
-    }
-
-    /**
-     * @param  array<string, mixed>  $payload
-     *
-     * @throws DelegatedAccessException
-     */
-    private function after(string $actorSubject, string $operation, array $payload): int
-    {
-        if (! isset($payload['cursor'])) {
-            return 0;
-        }
-
-        try {
-            $cursor = json_decode($this->encrypter->decryptString((string) $payload['cursor']), true, 8, JSON_THROW_ON_ERROR);
-        } catch (Throwable) {
-            throw new DelegatedAccessException('invalid_cursor', 422);
-        }
-
-        // Bound to the actor and the operation, so a cursor cannot be replayed by somebody else or
-        // against another listing. It carries the last id shown, never an offset: a row removed
-        // between pages must not make the next page skip one.
-        if (! is_array($cursor) || ($cursor['actor'] ?? null) !== $actorSubject || ($cursor['operation'] ?? null) !== $operation
-            || ! is_int($cursor['after'] ?? null) || $cursor['after'] < 0) {
-            throw new DelegatedAccessException('invalid_cursor', 422);
-        }
-
-        return $cursor['after'];
-    }
-
-    private function cursor(string $actorSubject, string $operation, int $after): string
-    {
-        return $this->encrypter->encryptString((string) json_encode(['actor' => $actorSubject, 'operation' => $operation, 'after' => $after]));
     }
 }

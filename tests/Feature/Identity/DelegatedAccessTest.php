@@ -5,15 +5,15 @@ declare(strict_types=1);
 namespace Tests\Feature\Identity;
 
 use App\Domain\Identity\Audit\AuditEvent;
-use App\Domain\Identity\DelegatedAccess\DelegatedAccessSettings;
 use App\Domain\Identity\Enums\WorkspaceRole;
 use App\Domain\Identity\Models\IdentityBinding;
 use App\Domain\Identity\Models\Workspace;
 use App\Domain\Identity\Models\WorkspaceMembership;
-use App\Domain\Identity\Services\PendingAccount;
 use App\Models\User;
+use BWH\Auth\OAuth\DelegatedAccess\DelegatedAccessSettings;
 use BWH\Auth\OAuth\DelegatedAccess\DelegatedContract;
 use BWH\Auth\OAuth\DelegatedAccess\NonceStore;
+use BWH\Auth\OAuth\PendingAccount;
 use DateTimeImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Testing\TestResponse;
@@ -70,12 +70,13 @@ final class DelegatedAccessTest extends TestCase
         config([
             'bherila-auth.oauth_client.provider' => self::PROVIDER,
             'esign.oauth_provider' => self::PROVIDER,
-            'esign.delegated_access' => [
+            'bherila-auth.delegated_access' => [
                 'enabled' => true,
                 'issuer' => self::ISSUER,
                 'endpoint' => self::ENDPOINT,
                 'application' => self::APPLICATION,
                 'public_keys' => 'integration-v1|'.$this->keyPath,
+                'oauth_provider' => self::PROVIDER,
             ],
         ]);
 
@@ -118,7 +119,7 @@ final class DelegatedAccessTest extends TestCase
 
     public function test_the_route_is_absent_until_enabled(): void
     {
-        config(['esign.delegated_access.enabled' => false]);
+        config(['bherila-auth.delegated_access.enabled' => false]);
 
         $this->send(['operation' => 'capabilities'])->assertNotFound();
     }
@@ -387,7 +388,7 @@ final class DelegatedAccessTest extends TestCase
     /** The package default provider name is never trusted as the binding issuer (#127 review). */
     public function test_requests_are_refused_until_the_oauth_provider_is_set_explicitly(): void
     {
-        config(['esign.oauth_provider' => '']);
+        config(['bherila-auth.delegated_access.oauth_provider' => '']);
 
         $response = $this->send(['operation' => 'capabilities']);
 
