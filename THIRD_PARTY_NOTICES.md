@@ -223,7 +223,7 @@ time and is not pinned here; nothing from it is distributed either.
 | `aws/aws-crt-php` | 1.2.7 | Apache-2.0 |
 | `aws/aws-php-sns-message-validator` | 1.10.2 | Apache-2.0 |
 | `aws/aws-sdk-php` | 3.394.9 | Apache-2.0 |
-| `bherila/auth-laravel` | 0.14.0 | MIT |
+| `bherila/auth-laravel` | 0.15.0 | MIT |
 | `brick/math` | 0.18.0 | MIT |
 | `carbonphp/carbon-doctrine-types` | 3.2.1 | MIT |
 | `dflydev/dot-access-data` | 3.0.3 | MIT |
