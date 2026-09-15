@@ -692,7 +692,8 @@ jobs:
           php .github/integration/auth-manager/seed-esign.php "$WORK/ids.json"
 
           # The built-in server inherits this step's environment (artisan serve would filter it).
-          nohup php -S 127.0.0.1:8000 -t public vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php > "$WORK/server.log" 2>&1 &
+          # Laravel's router script takes the working directory as the public path, so start it there.
+          (cd public && nohup php -S 127.0.0.1:8000 ../vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php > "$WORK/server.log" 2>&1 &)
           command -v nginx >/dev/null || { sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends nginx; }
           sudo nginx -c "$GITHUB_WORKSPACE/.github/integration/auth-manager/nginx.conf"
 
