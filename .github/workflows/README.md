@@ -25,4 +25,9 @@ Once the `prod` environment is created, you need to configure the following secr
 
 ## Deployment Target
 
-The workflow rsyncs to `~/<DEPLOY_DIR>/` on the remote server, where `DEPLOY_DIR` is a repository variable naming this site's Laravel root (never a webroot). The webroot symlink to `<DEPLOY_DIR>/public` is one-time provisioning. The deploy job is skipped unless the `DEPLOY_ENABLED` variable is `true`, and `SITE_URL` must be set for the post-deploy health check. This is the cPanel/shared-hosting profile; the Docker profile is documented separately.
+The workflow calls a commit-pinned shared cPanel action. It deploys to `~/<DEPLOY_DIR>/`, where
+`DEPLOY_DIR` is a repository variable naming this site's Laravel root (never a webroot), preserves
+runtime storage, runs migrations, installs the scheduler and bounded-worker cron lines, and checks
+the live site. The webroot symlink to `<DEPLOY_DIR>/public` is one-time provisioning. The deploy job
+is skipped unless `DEPLOY_ENABLED` is `true`, and `SITE_URL` supplies the post-deploy health target.
+This is the cPanel/shared-hosting profile; the Docker profile is documented separately.

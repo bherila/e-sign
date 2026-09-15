@@ -1,16 +1,16 @@
 
-# Appended to public/.htaccess by .github/workflows/deploy.yml on every deploy.
+# Appended to public/.htaccess by a manual release-bundle install. The GitHub deploy workflow's
+# pinned shared cPanel action applies and verifies the equivalent handler and memory settings.
 #
 # Two reasons this file exists rather than the handler just living on the server:
 #
-# 1. The deploy rsyncs `public` with --delete, which wipes any handler block cPanel or a
-#    human added to public/.htaccess directly. Re-appending at deploy time is what makes
-#    it survive.
+# 1. A deploy rsyncs `public` with --delete, which wipes any handler block cPanel or a human
+#    added directly. The shared action restores it; a manual bundle install uses this file.
 # 2. The cPanel account default is ea-php81. Without this block the site silently runs on
-#    PHP 8.1 while artisan (invoked in deploy.yml via the ea-php85 binary) runs 8.5 — a
+#    PHP 8.1 while artisan runs through the cPanel ea-php85 binary — a
 #    web/CLI split that produces failures only on the web path.
 #
-# Keep the version here in sync with the ea-phpXX binary in deploy.yml and with the
+# Keep the version here in sync with the deploy workflow's php-version and with the
 # php-version in ci.yml. All three are currently 8.5.
 
 # php -- BEGIN cPanel-generated handler, do not edit

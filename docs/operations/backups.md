@@ -45,7 +45,8 @@ The manifest step goes **in the same script as the dump**, not in a later cron e
 manifest taken an hour after the dump describes a different database, and the comparison
 then produces failures that mean nothing — which is how a check gets switched off.
 
-`.github/workflows/deploy.yml` excludes `/storage/app/*` from its `rsync --delete`, so
+The shared action used by `.github/workflows/deploy.yml` excludes `/storage/app/*` from its
+`rsync --delete`, so
 `storage/app/documents` and `storage/app/backups` survive a deploy. That exclusion is the
 only thing standing between a green deploy and an empty documents disk on a local-disk
 deployment (`docs/BLOB_STORAGE.md` rule 2). Do not remove it, and add a matching exclusion

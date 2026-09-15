@@ -12,9 +12,10 @@ qualification and is not repeated in full below.
 
 - **PHP 8.4 or newer**, on **both** the CLI binary (`php artisan …`) and the account's web vhost
   handler — they are not automatically the same version on a cPanel account, and a mismatch is
-  the single most common cause of "the deploy pipeline reported success but the site 500s"
-  (see `.github/workflows/deploy.yml`'s "Verify production health" step and
-  `htaccess-append.txt`). Required extensions on both: `pdo_mysql`, `mbstring`, `gd`, `zip`,
+  the single most common cause of "the deploy pipeline reported success but the site 500s."
+  The shared deployment action verifies the live handler; `htaccess-append.txt` supplies the
+  equivalent configuration for manual release-bundle installs. Required extensions on both:
+  `pdo_mysql`, `mbstring`, `gd`, `zip`,
   `intl`, `bcmath`, `openssl`, `exif`.
 - **MySQL 8 or MariaDB 10.6+**, a dedicated database and user for this instance —
   `docs/adr/0002-supported-databases.md` is the supported-engine list; do not run against an
@@ -27,8 +28,8 @@ qualification and is not repeated in full below.
 `scripts/build-release.sh [version]` produces `dist/bwh-esign-<version>.tar.gz` and a
 `.sha256` sums file: a `git archive` of the committed tree (never the working tree — untracked
 files and a stray `.env` cannot leak in), with `composer install --no-dev` and `pnpm run build`
-run inside a scratch copy, assembled into exactly what
-`.github/workflows/deploy.yml` rsyncs to a live account (`app`, `bootstrap`, `config`,
+run inside a scratch copy, assembled from the same application paths that
+`.github/workflows/deploy.yml` gives the shared deployment action (`app`, `bootstrap`, `config`,
 `database`, `public` — including the built `public/build/` assets, `resources`, `routes`,
 `storage`, `vendor`, `artisan`, `composer.json`, `composer.lock`, `LICENSE`,
 `THIRD_PARTY_NOTICES.md`) plus `htaccess-append.txt` and an `INSTALL.md` quick-start. The
@@ -43,9 +44,8 @@ sha256sum -c bwh-esign-<version>.tar.gz.sha256
 ## Install
 
 1. **Unpack outside the webroot**, e.g. `~/bwh-esign/`, and point the account's document root
-   (or a `public_html` symlink, provisioned once — see the `deploy.yml` comment on why the
-   webroot symlink is one-time provisioning, not deploy-managed, on an account that hosts more
-   than this one site) at `~/bwh-esign/public`.
+   at `~/bwh-esign/public`. Never replace a shared account's main `public_html` directory to
+   install a subdomain application.
 2. **Configure.** `cp .env.example .env` (not shipped in the bundle — copy it from the
    repository or from a previous install's template) and `php artisan key:generate`. Fill in
    database credentials, mail transport (never `log`/`array` in production —
@@ -67,7 +67,8 @@ sha256sum -c bwh-esign-<version>.tar.gz.sha256
    that mail is not `log`/`array` in production. Exits non-zero on any failure and never prints
    a secret. Fix everything it reports before continuing — a deployment is not "working" merely
    because its home page loads (`docs/HANDOFF.md` section 13).
-4. **Migrate — an explicit step, never automatic:**
+4. **Migrate a manual release-bundle install explicitly.** The GitHub deployment workflow runs
+   this command through its pinned shared action; a manual install does not:
 
    ```bash
    php artisan migrate --force
@@ -110,15 +111,13 @@ application reaches the CLI) and a `# JOB:` id:
 * * * * * cd "$HOME/bwh-esign" && /path/to/php -d memory_limit=1G artisan esign:queue:work-bounded > /dev/null 2>&1 # JOB:bwh-esign-queue-worker
 ```
 
-**The deploy workflow installs them.** `.github/workflows/deploy.yml` runs
-`scripts/deploy/install-cron.sh` on the host after every deploy. It replaces only this
-application's lines: those running from its directory, in any spelling, or carrying one of
-its job ids. Every other line on the account is left as it was. It takes a lock, refuses to
-rewrite anything when `crontab -l` fails, keeps the previous crontab under
-`~/.crontab-backups`, installs from a file and reads it back. A fresh account therefore gets
-its cron on the first deploy, and a hand edit to these two lines lasts only until the next
-deploy. Change them in the workflow instead. `scripts/deploy/test-install-cron.sh` runs before
-the install, so a regression in the script fails the deploy instead of touching the crontab.
+**The deploy workflow installs them.** `.github/workflows/deploy.yml` passes the bounded-worker
+line to the pinned shared cPanel deployment action, which also supplies the scheduler line. The
+action replaces only this application's lines and preserves every other application on the
+account. It locks the shared crontab, refuses to write after a failed read, keeps the previous
+version under `~/.crontab-backups`, installs from a file and reads it back. A fresh account gets
+both lines on its first deploy, and a hand edit lasts only until the next deploy. Change the
+eSign-specific worker line in the workflow; the shared scheduler behavior belongs to the action.
 
 The same deploy then runs `esign:doctor` on the host. It also confirms through `/health/ready`
 that web requests read documents in a child process (`document_isolation` is `ok`), and
@@ -192,7 +191,7 @@ separately. Under a **LiteSpeed** web SAPI, `.user.ini` is silently ignored. Ins
 LiteSpeed does honour.
 
 The deploy verifies the web value rather than trusting a file:
-`scripts/deploy/verify-web-php.sh` writes a one-line PHP file with an unguessable name into
+The pinned shared deployment action writes a one-line PHP file with an unguessable name into
 `public/`, fetches it through the site's URL, and always deletes it. The deploy fails when the
 vhost runs another PHP version or a `memory_limit` below 1024M. See also the CLI-vs-web split
 that `esign:doctor`'s `web_php_version` check exists to catch.

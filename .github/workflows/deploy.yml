@@ -60,149 +60,52 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm run build
 
-      - name: Append to .htaccess
-        run: cat htaccess-append.txt >> public/.htaccess
-
-      - name: Configure SSH
-        run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          printf '%s\n' "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
-          chmod 644 ~/.ssh/known_hosts
-
-      # DEPLOY DESTINATION AND WEBROOT
-      #
-      # This workflow used to rsync to a hardcoded ~/laravel/ and then rebuild the account
-      # webroot on every deploy:
-      #
-      #     cd ~ && rm -rf public_html && rm -rf web && ln -s laravel/public public_html
-      #
-      # That is only safe when the site being deployed IS the cPanel account's main domain.
-      # For a site deployed as a SUBDOMAIN on a shared account it is destructive: ~/public_html
-      # is the main domain's document root, so the step deletes that domain's content —
-      # including any redirect .htaccess and the .well-known/acme-challenge directory AutoSSL
-      # renews against — and then repoints the apex at the wrong app. The certificate failure
-      # surfaces silently, ~60 days later.
-      #
-      # The webroot symlink is now treated as one-time provisioning, not deploy-managed, and
-      # the destination comes from the DEPLOY_DIR repository variable so each site states its
-      # own Laravel root explicitly.
-
-      - name: Verify the deploy destination is set
-        run: |
-          # An unset DEPLOY_DIR would make the rsync destination "~/" — and this workflow
-          # runs `--delete`. Fail loudly instead.
-          if [ -z "${{ vars.DEPLOY_DIR }}" ]; then
-            echo "::error::DEPLOY_DIR repository variable is not set. Set it to this site's" \
-                 "Laravel root directory name (e.g. 'kath-laravel'), NOT 'public_html'."
-            exit 1
-          fi
-          case "${{ vars.DEPLOY_DIR }}" in
-            public_html|www|web|.|..|/*)
-              echo "::error::DEPLOY_DIR must not be '${{ vars.DEPLOY_DIR }}' — that is a webroot," \
-                   "not a Laravel root."
-              exit 1 ;;
-          esac
-
-      # RUNTIME STATE MUST SURVIVE --delete
-      #
-      # `storage/` is transferred, so without these excludes every deploy replaces the
-      # server's storage tree with the repository's empty skeleton: application logs are
-      # erased, and if the app uses the `file` session or cache driver, every signed-in
-      # user is logged out on each deploy. The trailing `/*` protects the contents while
-      # still letting rsync create the directory on a first deploy.
-      #
-      # `storage/app/*` also covers Laravel Passport's signing keys if this app ever
-      # becomes an OAuth client or provider. Passport writes them under `storage/` by
-      # default, and rotating them on deploy invalidates every live token — so pair this
-      # with `Passport::loadKeysFrom(storage_path('app/private/oauth'))` in a service
-      # provider rather than relying on the default location.
-      # `LICENSE` and `THIRD_PARTY_NOTICES.md` are part of the payload, not documentation.
-      # The bundle carries LGPL `vendor/tecnickcom/*` code, whose notices must travel with the
-      # distribution (docs/adr/0005-lgpl-dependency-handling.md).
-      - name: Deploy with rsync
-        run: |
-          rsync -av --delete \
-            --exclude='.env' \
-            --exclude='/storage/app/*' \
-            --exclude='/storage/logs/*' \
-            --exclude='/storage/framework/sessions/*' \
-            --exclude='/storage/framework/cache/*' \
-            -e "ssh -o StrictHostKeyChecking=yes" \
-            app \
-            bootstrap \
-            config \
-            database \
-            public \
-            resources \
-            routes \
-            storage \
-            vendor \
-            artisan \
-            composer.json \
-            composer.lock \
-            LICENSE \
-            THIRD_PARTY_NOTICES.md \
-            ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }}:~/${{ vars.DEPLOY_DIR }}/
-
-      - name: Run artisan config clear/cache on server
-        run: |
-          ssh -o StrictHostKeyChecking=yes \
-            ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }} \
-            "cd ~/${{ vars.DEPLOY_DIR }} && /opt/cpanel/ea-php85/root/usr/bin/php artisan config:clear && /opt/cpanel/ea-php85/root/usr/bin/php artisan config:cache"
-
-      # Every step above can exit 0 while the deployed site returns 500 on every page —
-      # most commonly when the cPanel PHP handler in public/.htaccess is lost and the vhost
-      # falls back to the account default PHP version, which fails composer's platform
-      # check. Without this step the workflow reports a successful deploy and the breakage
-      # is visible only in the server's error_log. Requires APP_URL to be set as the
-      # SITE_URL repository variable.
-      - name: Verify production health
-        run: |
-          if [ -z "${{ vars.SITE_URL }}" ]; then
-            echo "::error::SITE_URL repository variable is not set, so the deploy cannot be" \
-                 "verified. Set it to this site's public URL (e.g. 'https://example.bherila.net')."
-            exit 1
-          fi
-          curl --fail --silent --show-error --retry 3 --retry-all-errors --max-time 20 \
-            "${{ vars.SITE_URL }}/up" > /dev/null
-
-      # The account crontab is shared with every other application on the account. The script
-      # replaces only this application's lines (its header says how they are recognised), so a
-      # hand-installed or outdated line cannot run beside the deploy-managed one, and a new account
-      # gets its cron on the first deploy. Its harness runs first, so a regression in the script
-      # fails here instead of rewriting the crontab. See docs/operations/cpanel.md, "Cron".
-      - name: Install and verify this application's cron lines
-        env:
-          DEPLOY_DIR: ${{ vars.DEPLOY_DIR }}
-          PHP_BIN: /opt/cpanel/ea-php85/root/usr/bin/php
-        run: |
-          bash scripts/deploy/test-install-cron.sh
-          lines=(
-            "* * * * * cd \"\$HOME/$DEPLOY_DIR\" && $PHP_BIN -d memory_limit=1G artisan schedule:run > /dev/null 2>&1 # JOB:$DEPLOY_DIR-scheduler"
-            "* * * * * cd \"\$HOME/$DEPLOY_DIR\" && $PHP_BIN -d memory_limit=1G artisan esign:queue:work-bounded > /dev/null 2>&1 # JOB:$DEPLOY_DIR-queue-worker"
-          )
-          ssh -o StrictHostKeyChecking=yes "${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }}" \
-            "bash -s -- $(printf '%q ' "$DEPLOY_DIR" "${lines[@]}")" < scripts/deploy/install-cron.sh
-
-      # The web handler's limits cannot be read from the CLI, and LiteSpeed silently ignores
-      # .user.ini, so ask the running site. Fails the deploy when the vhost runs another PHP
-      # version or a memory_limit below the php_value that public/.htaccess sets.
-      - name: Verify the web handler's PHP version and memory limit
-        run: |
-          bash scripts/deploy/verify-web-php.sh "${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }}" \
-            "${{ vars.DEPLOY_DIR }}" "${{ vars.SITE_URL }}" 8.5 1024M -o StrictHostKeyChecking=yes
+      # The shared action owns the cPanel mechanics: guarded rsync, persistent runtime storage,
+      # PHP handler, migrations, config cache, this application's crontab lines and generic
+      # health checks. eSign keeps only its application-specific checks below.
+      - name: Deploy to cPanel
+        id: cpanel
+        uses: bherila/shared-cpanel-deployment@f5a4ce12657544a0b61f1f9a5b8c2157b470b740 # v1.0.0
+        with:
+          ssh-host: ${{ secrets.SSH_HOST }}
+          ssh-username: ${{ secrets.SSH_USERNAME }}
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+          ssh-known-hosts: ${{ secrets.SSH_KNOWN_HOSTS }}
+          deploy-dir: ${{ vars.DEPLOY_DIR }}
+          site-url: ${{ vars.SITE_URL }}
+          run-migrations: true
+          paths: |
+            app
+            bootstrap
+            config
+            database
+            public
+            resources
+            routes
+            storage
+            vendor
+            artisan
+            composer.json
+            composer.lock
+            LICENSE
+            THIRD_PARTY_NOTICES.md
+          extra-cron-lines: |
+            * * * * * cd "$HOME/${{ vars.DEPLOY_DIR }}" && /opt/cpanel/ea-php85/root/usr/bin/php -d memory_limit=1G artisan esign:queue:work-bounded > /dev/null 2>&1 # JOB:${{ vars.DEPLOY_DIR }}-queue-worker
 
       # esign:doctor is the install check (docs/operations/cpanel.md). Its scheduler check reads a
       # heartbeat the scheduler writes every minute, which a brand-new account has not written yet,
       # so a failure is retried for two minutes after the cron lines above are installed. Output is
       # shown only on failure: this log is public, and a passing run has nothing to act on.
       - name: Run esign:doctor on the server
+        env:
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR }}
+          PHP_BIN: ${{ steps.cpanel.outputs.php-binary }}
+          SSH_TARGET: ${{ steps.cpanel.outputs.ssh-target }}
         run: |
           for attempt in 1 2 3; do
-            if ssh -o StrictHostKeyChecking=yes "${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }}" \
-                "cd ~/${{ vars.DEPLOY_DIR }} && /opt/cpanel/ea-php85/root/usr/bin/php -d memory_limit=1G artisan esign:doctor" \
+            # shellcheck disable=SC2029 # Validated action outputs expand on the runner by design.
+            if ssh "$SSH_TARGET" \
+                "cd \"\$HOME/$DEPLOY_DIR\" && $PHP_BIN -d memory_limit=1G artisan esign:doctor" \
                 > doctor.out 2>&1; then
               echo "esign:doctor: all checks passed."
               exit 0
@@ -219,12 +122,15 @@ jobs:
       - name: Verify document isolation in web requests
         env:
           DEPLOY_DIR: ${{ vars.DEPLOY_DIR }}
+          PHP_BIN: ${{ steps.cpanel.outputs.php-binary }}
           SITE_URL: ${{ vars.SITE_URL }}
+          SSH_TARGET: ${{ steps.cpanel.outputs.ssh-target }}
         run: |
-          ssh -o StrictHostKeyChecking=yes "${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }}" \
-            "bash -s -- $(printf '%q ' "$DEPLOY_DIR" "$SITE_URL")" <<'REMOTE'
+          # shellcheck disable=SC2029 # printf quotes validated action inputs for the remote shell.
+          ssh "$SSH_TARGET" \
+            "bash -s -- $(printf '%q ' "$DEPLOY_DIR" "$SITE_URL" "$PHP_BIN")" <<'REMOTE'
           set -euo pipefail
-          php=/opt/cpanel/ea-php85/root/usr/bin/php
+          php=$3
           cd "$HOME/$1"
           # The cached configuration refers to application classes, so it needs the autoloader.
           token=$("$php" -d display_errors=stderr -r 'require "vendor/autoload.php"; $config = require "bootstrap/cache/config.php"; echo $config["esign"]["health_token"] ?? "";')

@@ -35,9 +35,10 @@ gating the rest by touched path:
 | `pades-profile` | backend or docker changed | Temurin JDK 21, runs `scripts/validate-pades-profile.sh`: European Commission **DSS 6.5** over the committed artifact bytes (no resealing, no PHP), matched against `tests/Fixtures/validation/pades-profile-manifest.tsv` on level *and* conclusion. A separate job from `validation` on purpose, so a JVM or Maven Central problem cannot mask a pyHanko regression. Uploads DSS's reports. |
 | `result` | always | Aggregating gate; fails if any of the above failed or was cancelled. |
 
-`deploy.yml` (cPanel rsync, off until `DEPLOY_ENABLED`) runs the suite, deploys, and then
-`curl --fail "$SITE_URL/up"`. `publish-image.yml` and `release-bundle.yml` publish artifacts and
-attach an SBOM.
+`deploy.yml` (cPanel, off until `DEPLOY_ENABLED`) runs the suite, then calls the pinned shared
+deployment action for guarded rsync, migrations, cron and generic health checks. It follows that
+with `esign:doctor` and the authenticated document-isolation readiness probe.
+`publish-image.yml` and `release-bundle.yml` publish artifacts and attach an SBOM.
 
 Local gate, from `TESTING.AGENTS.md`: `./vendor/bin/pint --parallel --test && composer test`, and
 for frontend changes `pnpm run type-check && pnpm run lint && pnpm run test && pnpm run build`.

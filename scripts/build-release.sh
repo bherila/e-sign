@@ -5,13 +5,13 @@
 # files, .env, and local build cruft can never leak in) with production Composer dependencies
 # and a real Vite build baked in.
 #
-# Contents mirror exactly what .github/workflows/deploy.yml rsyncs to a live cPanel account
+# Contents mirror exactly what .github/workflows/deploy.yml asks the shared action to rsync
 # (app, bootstrap, config, database, public, resources, routes, storage, vendor, artisan,
 # composer.json, composer.lock, LICENSE, THIRD_PARTY_NOTICES.md), plus the three things a
 # rsync-based *update* does not need to carry every time but a *first install from nothing*
 # does: the built public/build assets (already inside `public/`, called out here because a
-# git archive alone would not have them — see the build step below), htaccess-append.txt (the
-# ea-phpNN handler block, appended in CI on every deploy but only ever *shipped* here), and
+# git archive alone would not have them — see the build step below), htaccess-append.txt (for an
+# ea-phpNN handler block in a manual install; the shared action handles CI deploys), and
 # INSTALL.md.
 #
 # Usage:
