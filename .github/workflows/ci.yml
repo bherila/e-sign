@@ -721,7 +721,7 @@ jobs:
         if: failure()
         run: |
           cat "$WORK/server.log" || true
-          sudo cat "$WORK/nginx-error.log" || true
+          sudo cat "$WORK/nginx-access.log" "$WORK/nginx-error.log" || true
           tail -n 200 storage/logs/laravel.log || true
           tail -n 200 auth-manager/storage/logs/laravel.log || true
 

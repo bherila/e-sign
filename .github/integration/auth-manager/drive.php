@@ -27,6 +27,7 @@ use BWH\Auth\OAuth\DelegatedAccess\DelegatedAccessException;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 
 $step = $argv[1] ?? null;
@@ -146,6 +147,20 @@ try {
     $refused(static fn (): array => $send($provision), 'revision_conflict', 'provisioning the same subject twice is a conflict');
 } catch (DelegatedAccessException $failure) {
     fwrite(STDERR, "FAIL: unexpected refusal {$failure->outcome} ({$failure->status})\n");
+    if ($failure->outcome === 'unavailable') {
+        // The transport deliberately hides why the exchange failed. Repeat an unsigned request
+        // with the same client options so the job log shows the underlying cause.
+        try {
+            $probe = Http::connectTimeout(3)->timeout(10)->withoutRedirecting()
+                ->withOptions(['stream' => true, 'read_timeout' => 1])
+                ->withBody('{}', 'application/json')->post('https://esign.example.test/application-access');
+            fwrite(STDERR, "probe: HTTP {$probe->status()}\n");
+        } catch (Throwable $cause) {
+            for (; $cause !== null; $cause = $cause->getPrevious()) {
+                fwrite(STDERR, 'probe: '.$cause::class.': '.$cause->getMessage()."\n");
+            }
+        }
+    }
     exit(1);
 }
 
