@@ -620,7 +620,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: bherila/auth-manager
-          ref: main
+          ref: fix/delegated-transport-stream-handler
           path: auth-manager
           persist-credentials: false
 
