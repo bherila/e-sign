@@ -111,8 +111,9 @@ interruption):
   pipeline's release/rollback steps and the env-file/key-directory contracts; the consumer's
   compose stack has an `esign` profile that runs this image beside it.
 - **cPanel / shared hosting**: prebuilt assets, `public/` as document root, cron-driven bounded
-  queue work with a database lease. `.github/workflows/deploy.yml` is the rsync path and is off
-  until `DEPLOY_ENABLED` is set. Keys, `.env`, and private storage stay outside the synced tree.
+  queue work with a database lease. `.github/workflows/deploy.yml` calls a commit-pinned shared
+  action for guarded rsync, migrations, cron and health checks, and is off until `DEPLOY_ENABLED`
+  is set. Keys, `.env`, and private storage stay outside the synced tree.
   See [docs/operations/cpanel.md](docs/operations/cpanel.md) for the release bundle
   (`scripts/build-release.sh`), install steps, `esign:doctor`, the crontab lines, and the
   shared-account key-isolation limitation.
