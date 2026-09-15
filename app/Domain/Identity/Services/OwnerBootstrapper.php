@@ -11,6 +11,7 @@ use App\Domain\Identity\Models\IdentityBinding;
 use App\Domain\Identity\Models\Workspace;
 use App\Domain\Identity\Models\WorkspaceMembership;
 use App\Models\User;
+use BWH\Auth\OAuth\PendingAccount;
 use Closure;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;

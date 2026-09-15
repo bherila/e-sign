@@ -155,6 +155,22 @@ return [
         'timeout_seconds' => (int) env('OAUTH_INTROSPECTION_TIMEOUT_SECONDS', 5),
     ],
 
+    // Delegated application access (issue #111): the package serves POST /application-access with
+    // the adapter bound in AppServiceProvider. The ESIGN_ names are kept so existing deployments and
+    // the CI integration job need no change. Every value that decides whom to trust is pinned here;
+    // see docs/operations/delegated-access.md.
+    'delegated_access' => [
+        'enabled' => filter_var(env('ESIGN_DELEGATED_ACCESS_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
+        'issuer' => env('ESIGN_DELEGATED_ACCESS_ISSUER', ''),
+        'endpoint' => env('ESIGN_DELEGATED_ACCESS_ENDPOINT', ''),
+        'application' => env('ESIGN_DELEGATED_ACCESS_APPLICATION', ''),
+        'public_keys' => env('ESIGN_DELEGATED_ACCESS_PUBLIC_KEYS', ''),
+        // The raw OAUTH_PROVIDER, with no default: it must be set and match oauth_client.provider.
+        'oauth_provider' => env('OAUTH_PROVIDER'),
+        'path' => '/application-access',
+        'per_minute' => 120,
+    ],
+
     'migrations' => [
         'drop_tables_on_rollback' => false,
     ],

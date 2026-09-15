@@ -4,10 +4,12 @@ namespace App\Providers;
 
 use App\Domain\Identity\Auth\EsignUserPolicy;
 use App\Domain\Identity\Credentials\CurrentPrincipal;
+use App\Domain\Identity\DelegatedAccess\ApplicationAccessAdapter;
 use App\Domain\Identity\Models\Workspace;
 use App\Domain\Identity\Policies\WorkspacePolicy;
 use App\Listeners\UpdateLastLoginDate;
 use BWH\Auth\Contracts\AuthUserPolicy;
+use BWH\Auth\OAuth\DelegatedAccess\ApplicationAccessAdapter as AccessAdapter;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Http\Kernel;
@@ -40,6 +42,12 @@ class AppServiceProvider extends ServiceProvider
         // question and get the same answer. Registered here rather than in boot() because
         // the package binds its default during registration.
         $this->app->bind(AuthUserPolicy::class, EsignUserPolicy::class);
+
+        // Delegated access (issue #111). The package serves POST /application-access, verifies the
+        // provider's assertion and validates both sides of the contract once an adapter is bound;
+        // this adapter decides what the provider may see and change. Bound in register() because the
+        // package registers the route while booting, only when a binding exists.
+        $this->app->bind(AccessAdapter::class, ApplicationAccessAdapter::class);
     }
 
     /**
@@ -61,12 +69,6 @@ class AppServiceProvider extends ServiceProvider
         // Creating an invitation is cheap and audited, and redeeming one is a lookup by an
         // unguessable token. Both are bounded per person so neither becomes a way to fill the
         // audit trail or hammer the database (issue #110).
-        // Delegated access is called by the identity provider's server, so it is keyed by client
-        // address. Every request has already been signed; this bounds a misbehaving or replaying
-        // caller, not a person (issue #111).
-        RateLimiter::for('delegated-access', static fn (Request $request): Limit => Limit::perMinute(120)
-            ->by('delegated-access:'.$request->ip()));
-
         RateLimiter::for('member-invitations', static fn (Request $request): Limit => Limit::perMinute(20)
             ->by('member-invitations:'.($request->user()?->getAuthIdentifier() ?? $request->ip())));
         RateLimiter::for('invitation-redemptions', static fn (Request $request): Limit => Limit::perMinute(10)

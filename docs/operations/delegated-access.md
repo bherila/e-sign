@@ -2,7 +2,7 @@
 
 Lets the identity provider's application-access page manage who has which role in this
 application's workspaces (issue #111). It uses delegated access contract version 2 from
-`bherila/auth-laravel` (0.14 or later), and the provider side is auth-manager's application-access
+`bherila/auth-laravel` (0.15 or later), whose endpoint does the transport work, and the provider side is auth-manager's application-access
 page ([auth-manager#56](https://github.com/bherila/auth-manager/issues/56)).
 
 This deployment depends on auth-manager for it: nothing here can be managed centrally without
@@ -11,8 +11,8 @@ enabled, and whether or not the provider can be reached.
 
 | | |
 |---|---|
-| Endpoint | `POST /application-access`, called by the provider's server only |
-| Adapter | `App\Domain\Identity\DelegatedAccess\ApplicationAccessAdapter` |
+| Endpoint | `POST /application-access`, called by the provider's server only. Served by the package's `DelegatedAccessController`: body bound, assertion verification, nonce consumption, and contract validation of the request and the answer |
+| Adapter | `App\Domain\Identity\DelegatedAccess\ApplicationAccessAdapter`, the package's `ApplicationAccessAdapter` bound in `AppServiceProvider`; configuration in `config/bherila-auth.php` under `delegated_access` |
 | Rules | `App\Domain\Identity\Services\WorkspaceMembers`, the same service the members page uses |
 | Tests | `tests/Feature/Identity/DelegatedAccessTest.php` |
 
