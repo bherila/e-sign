@@ -73,7 +73,7 @@ final readonly class ArtifactStorageKey
 
     private static function segment(string $value, string $label): string
     {
-        if (preg_match('/^[0-9A-Za-z]{10,64}$/', $value) !== 1) {
+        if (preg_match('/^[0-9A-Za-z]{10,64}$/D', $value) !== 1) {
             throw new InvalidArgumentException("The {$label} is not a usable storage key segment.");
         }
 
@@ -82,7 +82,7 @@ final readonly class ArtifactStorageKey
 
     private static function digest(string $sha256): string
     {
-        if (preg_match('/^[0-9a-f]{64}$/', $sha256) !== 1) {
+        if (preg_match('/^[0-9a-f]{64}$/D', $sha256) !== 1) {
             throw new InvalidArgumentException('A storage key needs a lowercase hex SHA-256 digest.');
         }
 

@@ -64,7 +64,7 @@ final readonly class SchemaVersion
      */
     public static function parse(string $version): ?self
     {
-        if (preg_match('/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/', $version, $matches) !== 1) {
+        if (preg_match('/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/D', $version, $matches) !== 1) {
             return null;
         }
 
