@@ -143,7 +143,7 @@ final class SignatureImage
     {
         $submitted = trim($submitted);
 
-        if (preg_match('#^data:([a-z0-9.+/-]+);base64,([A-Za-z0-9+/=\s]+)$#i', $submitted, $matches) !== 1) {
+        if (preg_match('#^data:([a-z0-9.+/-]+);base64,([A-Za-z0-9+/=\s]+)$#iD', $submitted, $matches) !== 1) {
             throw SignatureImageRejected::notADataUrl();
         }
 

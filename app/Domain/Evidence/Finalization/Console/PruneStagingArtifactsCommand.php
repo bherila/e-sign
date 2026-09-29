@@ -191,7 +191,7 @@ final class PruneStagingArtifactsCommand extends Command
     /** Accepts `7d`, `48h`, `90m`, `600s`, or a plain integer of seconds. Null when unreadable. */
     private function ageInSeconds(string $option): ?int
     {
-        if (preg_match('/^(\d+)([dhms]?)$/i', trim($option), $matches) !== 1) {
+        if (preg_match('/^(\d+)([dhms]?)$/iD', trim($option), $matches) !== 1) {
             return null;
         }
 

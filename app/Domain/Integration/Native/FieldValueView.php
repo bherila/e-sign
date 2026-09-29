@@ -107,7 +107,9 @@ final readonly class FieldValueView
         $mediaType = 'application/octet-stream';
         $bytes = $value;
 
-        if (preg_match('#^data:([a-z]+/[a-z0-9.+-]+);base64,(.*)$#i', $value, $matches) === 1) {
+        // `\n?` then a dollar-end-only `$` states what the unmodified `$` used to allow
+        // implicitly, so a stored value is described exactly as before (#135).
+        if (preg_match('#^data:([a-z]+/[a-z0-9.+-]+);base64,(.*)\n?$#iD', $value, $matches) === 1) {
             $decoded = base64_decode($matches[2], true);
 
             if ($decoded !== false) {

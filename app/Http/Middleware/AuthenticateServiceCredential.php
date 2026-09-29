@@ -182,7 +182,7 @@ class AuthenticateServiceCredential
             return null;
         }
 
-        if (preg_match('/^Bearer\s+(\S+)$/i', $header, $matches) === 1) {
+        if (preg_match('/^Bearer\s+(\S+)$/iD', $header, $matches) === 1) {
             return $matches[1];
         }
 

@@ -99,7 +99,7 @@ abstract class ServiceCredentialCommand extends Command
      */
     protected function interval(string $value, bool $quiet = false): ?CarbonInterval
     {
-        if (preg_match('/^(\d+)\s*([dhm])$/i', trim($value), $matches) !== 1) {
+        if (preg_match('/^(\d+)\s*([dhm])$/iD', trim($value), $matches) !== 1) {
             if (! $quiet) {
                 $this->refuse(
                     "'{$value}' is not an interval.",

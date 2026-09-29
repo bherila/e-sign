@@ -55,9 +55,12 @@ use Throwable;
 final class AwsSnsMessageVerifier implements SnsMessageVerifier
 {
     /**
+     * The library default, plus `D` so that `$` means end of input rather than "or before a
+     * final newline" (#135). Keep the `D` if this is ever resynced with the library.
+     *
      * @see MessageValidator the default this deliberately mirrors.
      */
-    private const HOST_PATTERN = '/^sns\.[a-zA-Z0-9\-]{3,}\.amazonaws\.com(\.cn)?$/';
+    private const HOST_PATTERN = '/^sns\.[a-zA-Z0-9\-]{3,}\.amazonaws\.com(\.cn)?$/D';
 
     private const SUPPORTED_SIGNATURE_VERSIONS = ['1', '2'];
 

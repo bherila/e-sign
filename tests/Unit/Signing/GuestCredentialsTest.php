@@ -67,6 +67,8 @@ class GuestCredentialsTest extends TestCase
             'a plus' => [str_repeat('a', 42).'+'],
             'padding' => [str_repeat('a', 42).'='],
             'a path traversal' => ['../'.str_repeat('a', 40)],
+            // PCRE's `$` matches before a final newline unless the pattern says `D` (#135).
+            'a trailing newline' => [str_repeat('a', 43)."\n"],
         ];
     }
 

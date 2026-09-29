@@ -36,7 +36,7 @@ class StoreTemplateAliasRequest extends WorkspaceTemplateRequest
     public function rules(): array
     {
         return [
-            'alias' => ['required', 'string', 'min:1', 'max:191', 'regex:/^\S(?:[^\x00-\x1f\x7f]*\S)?$/u'],
+            'alias' => ['required', 'string', 'min:1', 'max:191', 'regex:/^\S(?:[^\x00-\x1f\x7f]*\S)?$/uD'],
             'source' => ['required', Rule::enum(TemplateAliasSource::class)],
         ];
     }

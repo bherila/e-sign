@@ -163,7 +163,7 @@ final class TcLibPdfArtifactValidator implements ArtifactValidator
     {
         $trimmed = trim($hex);
 
-        if ($trimmed === '' || strlen($trimmed) % 2 === 1 || preg_match('/^[0-9A-Fa-f]+$/', $trimmed) !== 1) {
+        if ($trimmed === '' || strlen($trimmed) % 2 === 1 || preg_match('/^[0-9A-Fa-f]+$/D', $trimmed) !== 1) {
             return null;
         }
 

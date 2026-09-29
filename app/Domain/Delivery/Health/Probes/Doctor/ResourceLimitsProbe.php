@@ -77,7 +77,7 @@ final class ResourceLimitsProbe implements HealthProbe
             return -1;
         }
 
-        if (preg_match('/^(-?\d+)([KMG]?)$/i', $value, $matches) !== 1) {
+        if (preg_match('/^(-?\d+)([KMG]?)$/iD', $value, $matches) !== 1) {
             return 0;
         }
 

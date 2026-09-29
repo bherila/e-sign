@@ -306,11 +306,11 @@ final readonly class FontDictionaryReader
 
     private function glyphNameToUtf8(string $name): ?string
     {
-        if (preg_match('/^uni([0-9A-Fa-f]{4})$/', $name, $match) === 1) {
+        if (preg_match('/^uni([0-9A-Fa-f]{4})$/D', $name, $match) === 1) {
             return $this->utf8((int) hexdec($match[1]));
         }
 
-        if (preg_match('/^u([0-9A-Fa-f]{4,6})$/', $name, $match) === 1) {
+        if (preg_match('/^u([0-9A-Fa-f]{4,6})$/D', $name, $match) === 1) {
             return $this->utf8((int) hexdec($match[1]));
         }
 
