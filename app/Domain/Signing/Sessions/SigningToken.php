@@ -67,6 +67,6 @@ final class SigningToken
      */
     public static function looksWellFormed(string $token): bool
     {
-        return preg_match('/^[A-Za-z0-9_-]{'.self::ENCODED_LENGTH.'}$/', $token) === 1;
+        return preg_match('/^[A-Za-z0-9_-]{'.self::ENCODED_LENGTH.'}$/D', $token) === 1;
     }
 }

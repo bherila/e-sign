@@ -52,7 +52,7 @@ class AcceptAgreementRequest extends FormRequest
             'consent_accepted' => ['accepted'],
             'intent_confirmed' => ['accepted'],
             'consent_version' => ['required', 'string', 'max:'.AcceptanceRequest::MAX_CONSENT_POLICY_VERSION_LENGTH],
-            'reviewed_material_sha256' => ['required', 'string', 'regex:/^[0-9a-f]{64}$/'],
+            'reviewed_material_sha256' => ['required', 'string', 'regex:/^[0-9a-f]{64}$/D'],
             'reviewed_envelope_version' => ['required', 'integer', 'min:1'],
             'signature_field_ids' => ['present', 'array', 'max:100'],
             'signature_field_ids.*' => ['string', 'max:191'],

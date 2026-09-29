@@ -41,7 +41,7 @@ final class Cursor
 
         $id = substr($decoded, strlen(self::PREFIX));
 
-        if (preg_match('/^[1-9][0-9]{0,18}$/', $id) !== 1) {
+        if (preg_match('/^[1-9][0-9]{0,18}$/D', $id) !== 1) {
             throw self::invalid();
         }
 

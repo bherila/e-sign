@@ -136,7 +136,7 @@ final class DestinationPolicy
         // (docs/security/review-2026-09.md finding D-2). A destination is either an ASCII
         // hostname or it is refused; an operator with an internationalised domain converts it
         // to punycode once, in configuration, where it can be read.
-        if (preg_match('/^[\x21-\x7e]+$/', $host) !== 1) {
+        if (preg_match('/^[\x21-\x7e]+$/D', $host) !== 1) {
             throw $this->refuse('URL host must be ASCII; convert an internationalised name to punycode first.');
         }
 

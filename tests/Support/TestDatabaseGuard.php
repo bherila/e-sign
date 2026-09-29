@@ -66,7 +66,7 @@ final class TestDatabaseGuard
         // Laravel's ParallelTesting suffixes the configured database with _test_{token} per
         // paratest process (e.g. esign_ci_test_test_1). Allow that pattern only for the exact
         // CI database name, nothing else.
-        $pattern = '/^'.preg_quote(self::ALLOWED_DATABASE, '/').'_test_\d+$/';
+        $pattern = '/^'.preg_quote(self::ALLOWED_DATABASE, '/').'_test_\d+$/D';
 
         return (bool) preg_match($pattern, $databaseName);
     }

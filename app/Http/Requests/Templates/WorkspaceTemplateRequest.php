@@ -40,7 +40,7 @@ use RuntimeException;
 abstract class WorkspaceTemplateRequest extends FormRequest
 {
     /** A version number: 1 to 999999999, no leading zero. */
-    public const VERSION_NUMBER_PATTERN = '/^[1-9][0-9]{0,8}$/';
+    public const VERSION_NUMBER_PATTERN = '/^[1-9][0-9]{0,8}$/D';
 
     private ?Workspace $workspace = null;
 

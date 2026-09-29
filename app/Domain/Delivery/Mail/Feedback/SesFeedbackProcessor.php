@@ -33,7 +33,7 @@ final class SesFeedbackProcessor
      * could choose its destination would have a server-side request forgery primitive
      * reachable from an unauthenticated webhook.
      */
-    private const SUBSCRIBE_HOST_PATTERN = '/^sns\.[a-z0-9\-]+\.amazonaws\.com(\.cn)?$/';
+    private const SUBSCRIBE_HOST_PATTERN = '/^sns\.[a-z0-9\-]+\.amazonaws\.com(\.cn)?$/D';
 
     /** Seconds. Confirming a subscription is a one-shot AWS call, not a long job. */
     private const CONFIRM_TIMEOUT = 10;

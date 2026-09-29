@@ -185,7 +185,7 @@ final readonly class ExecutedDocumentRenderer
      */
     private function inlineImageBytes(string $value): ?string
     {
-        if (preg_match('#^data:image/(png|jpeg|jpg|gif);base64,([A-Za-z0-9+/=\s]+)$#i', $value, $matches) !== 1) {
+        if (preg_match('#^data:image/(png|jpeg|jpg|gif);base64,([A-Za-z0-9+/=\s]+)$#iD', $value, $matches) !== 1) {
             return null;
         }
 
