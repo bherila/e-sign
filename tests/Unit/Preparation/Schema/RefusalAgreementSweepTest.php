@@ -6,6 +6,7 @@ namespace Tests\Unit\Preparation\Schema;
 
 use App\Domain\Preparation\Schema\FieldSchemaValidator;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\StringContractSweep;
 
 /**
  * The two implementations must refuse the same document for the same stated reason.
@@ -38,6 +39,19 @@ final class RefusalAgreementSweepTest extends TestCase
 {
     private const ARTIFACT = __DIR__.'/../../../Fixtures/schema/numeric-refusals.json';
 
+    private const STRING_ARTIFACT = __DIR__.'/../../../Fixtures/schema/string-refusals.json';
+
+    /**
+     * Code points probed inside an email address: every character ECMA-262's `\s` matches, and
+     * the near misses a hand-written whitespace class tends to get wrong (NEL, the Mongolian vowel
+     * separator, zero-width space and joiner). The contract's pattern is ECMA-262, so the two
+     * importers must draw the line in the same place, character by character.
+     */
+    private const EMAIL_WHITESPACE_PROBES = [
+        0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x20, 0x85, 0xA0, 0x1680, 0x180E, 0x2000, 0x2005, 0x200A,
+        0x200B, 0x200D, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000, 0xFEFF,
+    ];
+
     public function test_every_refusal_matches_the_shared_artifact(): void
     {
         $this->assertFileExists(self::ARTIFACT, 'Run with REGENERATE_REFUSALS=1 to write it.');
@@ -61,6 +75,77 @@ final class RefusalAgreementSweepTest extends TestCase
                 .'REGENERATE_REFUSALS=1 and check the TypeScript sweep still matches it — the two '
                 .'implementations have to refuse the same document for the same stated reason.',
         );
+    }
+
+    /**
+     * The same agreement for every string and enum member (issue #106), through its own artifact.
+     */
+    public function test_every_string_refusal_matches_the_shared_artifact(): void
+    {
+        $this->assertFileExists(self::STRING_ARTIFACT, 'Run with REGENERATE_REFUSALS=1 to write it.');
+
+        $computed = self::stringRefusals();
+
+        if (getenv('REGENERATE_REFUSALS') === '1') {
+            file_put_contents(
+                self::STRING_ARTIFACT,
+                json_encode($computed, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)."\n",
+            );
+        }
+
+        /** @var array<string, array{code: string|null, message: string}> $expected */
+        $expected = json_decode((string) file_get_contents(self::STRING_ARTIFACT), true);
+
+        $this->assertSame(
+            $expected,
+            $computed,
+            'A string refusal changed. If that was deliberate, regenerate the artifact with '
+                .'REGENERATE_REFUSALS=1 and check the TypeScript sweep still matches it.',
+        );
+    }
+
+    /**
+     * One violation per constraint per string or enum member, plus one email per probed
+     * whitespace-like code point, and what the validator says about each.
+     *
+     * @return array<string, array{code: string|null, message: string}>
+     */
+    public static function stringRefusals(): array
+    {
+        $refusals = [];
+
+        foreach (StringContractSweep::members() as $path => $member) {
+            foreach (StringContractSweep::violations($member) as $constraint => $value) {
+                $refusals[$path.' / '.$constraint] = self::firstProblem(
+                    StringContractSweep::documentWith($path, $value),
+                    StringContractSweep::pointer($path),
+                );
+            }
+        }
+
+        foreach (self::EMAIL_WHITESPACE_PROBES as $codePoint) {
+            $refusals[sprintf('recipients[].email / U+%04X', $codePoint)] = self::firstProblem(
+                StringContractSweep::documentWith('recipients[].email', 'bu'.mb_chr($codePoint, 'UTF-8').'yer@example.test'),
+                StringContractSweep::pointer('recipients[].email'),
+            );
+        }
+
+        ksort($refusals);
+
+        return $refusals;
+    }
+
+    /**
+     * @param  array<string, mixed>  $document
+     * @return array{code: string|null, message: string}
+     */
+    private static function firstProblem(array $document, string $pointer): array
+    {
+        $errors = (new FieldSchemaValidator)->validate($document)->at($pointer);
+
+        return $errors === []
+            ? ['code' => null, 'message' => 'ACCEPTED']
+            : ['code' => $errors[0]->code->value, 'message' => $errors[0]->message];
     }
 
     /**

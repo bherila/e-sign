@@ -64,6 +64,9 @@ class DocumentStorageKeyTest extends TestCase
             'uppercase digest' => [self::WORKSPACE, self::DOCUMENT, strtoupper(self::DIGEST)],
             'truncated digest' => [self::WORKSPACE, self::DOCUMENT, substr(self::DIGEST, 0, 32)],
             'digest with a separator' => [self::WORKSPACE, self::DOCUMENT, str_repeat('a', 63).'/'],
+            // PCRE's `$` matches before a final newline unless the pattern says `D`.
+            'trailing newline in a segment' => [self::WORKSPACE, self::DOCUMENT."\n", self::DIGEST],
+            'trailing newline in the digest' => [self::WORKSPACE, self::DOCUMENT, self::DIGEST."\n"],
         ];
     }
 

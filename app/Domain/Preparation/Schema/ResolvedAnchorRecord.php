@@ -48,7 +48,7 @@ final readonly class ResolvedAnchorRecord
         public MeasuredRect $anchorRect,
         public Rect $rect,
     ) {
-        if (preg_match('/^[0-9a-f]{64}$/', $documentSha256) !== 1) {
+        if (preg_match('/^[0-9a-f]{64}$/D', $documentSha256) !== 1) {
             throw new InvalidArgumentException('anchor.resolved.document_sha256 must be 64 lowercase hexadecimal characters.');
         }
 

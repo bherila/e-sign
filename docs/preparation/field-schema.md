@@ -273,6 +273,25 @@ independent implementations has to hold three things, and each has its own sweep
 | the round-trip cases in the same files | a value the importer accepts survives being stored: accepted, canonicalised, still acceptable |
 | `RefusalAgreementSweepTest` / `refusalAgreement.test.ts` | a refusal means the same thing on both sides — same code, same message, for every stated constraint |
 
+**String and enum members are swept the same way** (issue #106): `StringContractSweepTest` /
+`stringContract.test.ts` for bounds and round trip, and the string half of the refusal sweep through
+`tests/Fixtures/schema/string-refusals.json`. The member list is walked out of the same contract
+file (every `pattern`, `minLength`, `maxLength`, `enum` and `const`), each pattern's probes are
+keyed by the pattern text so a new pattern with no probes fails, and lengths are probed with
+astral characters, because JSON Schema counts code points where PHP's `strlen()` counts bytes and
+JavaScript's `length` counts UTF-16 units. Its first run found four divergences, all now fixed:
+PHP's `$` matched before a trailing newline, so `"buyer\n"` was a valid identifier to the API and
+not to the editor or the contract; PHP's `\s` was ASCII where the contract's (ECMA-262) is Unicode;
+the email length was bytes on one side and UTF-16 units on the other; and a refused
+`coordinate_space` value was quoted differently by the two projections. The PHP importer now
+matches the contract's patterns through `FieldSchemaValidator::matchesContractPattern()`, which
+gives them their ECMA-262 meaning. None of those changes the contract. Each brings an importer
+back in line with what the published file already said.
+
+The sweeps make two hand-written projections *safe*. They do not remove the duplication. If the
+importers ever diverge in a way these sweeps cannot express, the fix is probably to stop writing
+them twice by hand, not to add a fourth sweep.
+
 The third exists because only *verdicts* had ever been compared between the projections. Codes are
 API surface, an integration branches on them, and a message is what a person reads when their
 document is refused; two implementations that agree a document is invalid and disagree about why

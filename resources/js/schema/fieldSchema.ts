@@ -716,7 +716,7 @@ function checkCoordinateSpace(document: Record<string, unknown>, issues: Validat
         issue(
           `/coordinate_space/${key}`,
           "unsupported_coordinate_space",
-          `Unsupported coordinate_space.${key}: schema ${FIELD_SCHEMA_VERSION} implements only ${JSON.stringify(value)}, got ${JSON.stringify(space[key])}. ` +
+          `Unsupported coordinate_space.${key}: schema ${FIELD_SCHEMA_VERSION} implements only ${describeDeclared(value)}, got ${describeDeclared(space[key])}. ` +
             "A document declaring another convention is rejected, never reinterpreted.",
         ),
       );
@@ -1251,7 +1251,7 @@ function checkPrefill(
     return;
   }
 
-  if (variable === "" || variable.length > VARIABLE_MAX_LENGTH || !VARIABLE_PATTERN.test(variable)) {
+  if (variable === "" || codePointLength(variable) > VARIABLE_MAX_LENGTH || !VARIABLE_PATTERN.test(variable)) {
     issues.push(
       issue(
         `${path}/variable`,
@@ -1913,7 +1913,7 @@ function checkIdentifier(path: string, label: string, value: unknown, issues: Va
     return null;
   }
 
-  if (value === "" || value.length > IDENTIFIER_MAX_LENGTH || !IDENTIFIER_PATTERN.test(value)) {
+  if (value === "" || codePointLength(value) > IDENTIFIER_MAX_LENGTH || !IDENTIFIER_PATTERN.test(value)) {
     issues.push(
       issue(
         path,
@@ -1948,11 +1948,38 @@ function checkNonEmptyString(
     return;
   }
 
-  if ([...value].length > maxLength) {
+  if (codePointLength(value) > maxLength) {
     issues.push(
-      issue(path, "invalid_format", `${label} must be at most ${maxLength} characters; got ${[...value].length}.`),
+      issue(path, "invalid_format", `${label} must be at most ${maxLength} characters; got ${codePointLength(value)}.`),
     );
   }
+}
+
+/**
+ * How a refusal quotes a value a document declared, identically in both projections: strings,
+ * booleans, null and safe integers as JSON, anything else by its kind. PHP decodes `{}` and `[]`
+ * to the same array and spells large numbers differently (issue #106), so those are named rather
+ * than spelled. The PHP twin is `FieldSchemaValidator::describeDeclared()`.
+ */
+function describeDeclared(value: unknown): string {
+  if (typeof value === "string" || typeof value === "boolean" || value === null) {
+    return JSON.stringify(value);
+  }
+
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) ? String(value) : "a number";
+  }
+
+  return "an object or array";
+}
+
+/**
+ * Length in code points, which is what JSON Schema's `maxLength` counts and what PHP's
+ * `mb_strlen()` returns. `String.prototype.length` counts UTF-16 units, so an astral character
+ * is two of them, and an email the contract admits was refused here (issue #106).
+ */
+function codePointLength(value: string): number {
+  return [...value].length;
 }
 
 function checkEmail(path: string, value: unknown, issues: ValidationIssue[]): void {
@@ -1962,7 +1989,7 @@ function checkEmail(path: string, value: unknown, issues: ValidationIssue[]): vo
     return;
   }
 
-  if (value === "" || value.length > EMAIL_MAX_LENGTH || !EMAIL_PATTERN.test(value)) {
+  if (value === "" || codePointLength(value) > EMAIL_MAX_LENGTH || !EMAIL_PATTERN.test(value)) {
     issues.push(issue(path, "invalid_email", `recipient email must be a deliverable-looking address; got "${value}".`));
   }
 }

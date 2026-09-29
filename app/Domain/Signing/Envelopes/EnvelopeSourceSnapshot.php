@@ -106,7 +106,7 @@ final readonly class EnvelopeSourceSnapshot
         );
         $documentSha256 = self::requiredString($snapshot, 'document_sha256', 64);
 
-        if (preg_match('/^[0-9a-f]{64}$/', $documentSha256) !== 1) {
+        if (preg_match('/^[0-9a-f]{64}$/D', $documentSha256) !== 1) {
             throw InvalidEnvelopeSnapshot::invalidProperty(
                 'document_sha256',
                 'expected 64 lowercase hexadecimal characters.',

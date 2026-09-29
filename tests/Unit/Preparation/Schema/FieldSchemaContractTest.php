@@ -14,6 +14,8 @@ use App\Domain\Preparation\Schema\FieldType;
 use App\Domain\Preparation\Schema\SchemaVersion;
 use App\Domain\Preparation\Schema\ValidationCode;
 use App\Domain\Preparation\Text\AnchorOrigin;
+use LogicException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\FieldSchemaFixture;
 
@@ -138,6 +140,35 @@ class FieldSchemaContractTest extends TestCase
         );
     }
 
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function untranslatablePatterns(): array
+    {
+        return [
+            'whitespace outside a class' => ['/^a\\s+b$/'],
+            'negated whitespace' => ['/^\\S+$/'],
+            'digit class' => ['/^\\d+$/'],
+            'word class' => ['/^\\w+$/'],
+            'word boundary' => ['/\\bword\\b/'],
+            'counted quantifier over a negated class' => ['/^[^@]{1,5}$/'],
+            'the contract spelling without its translation' => ['^[0-9a-f]{64}$'],
+        ];
+    }
+
+    /**
+     * The PHP importer gives contract patterns their ECMA-262 meaning through hand-checked
+     * translations. A pattern without one must fail loudly rather than be matched with PCRE's
+     * meaning by default (issue #106).
+     */
+    #[DataProvider('untranslatablePatterns')]
+    public function test_a_contract_pattern_outside_the_translated_subset_is_refused(string $pattern): void
+    {
+        $this->expectException(LogicException::class);
+
+        FieldSchemaValidator::matchesContractPattern($pattern, 'a b');
+    }
+
     public function test_the_patterns_and_limits_match_the_php_importer(): void
     {
         $identifier = self::definition('identifier');
@@ -157,6 +188,11 @@ class FieldSchemaContractTest extends TestCase
         $this->assertSame(FieldSchemaValidator::EMAIL_MAX_LENGTH, $recipient['properties']['email']['maxLength']);
         $this->assertSame(FieldSchemaValidator::NAME_MAX_LENGTH, $recipient['properties']['name']['maxLength']);
         $this->assertSame(FieldSchemaValidator::ROLE_MAX_LENGTH, $recipient['properties']['role']['maxLength']);
+
+        $this->assertSame(
+            trim(FieldSchemaValidator::DOCUMENT_SHA256_PATTERN, '/'),
+            self::definition('resolved_anchor')['properties']['document_sha256']['pattern'],
+        );
 
         $field = self::definition('field');
         $this->assertSame(FieldSchemaValidator::LABEL_MAX_LENGTH, $field['properties']['label']['maxLength']);

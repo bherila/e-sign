@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Preparation\Schema;
 
 use App\Domain\Preparation\Text\AnchorOrigin;
+use LogicException;
 
 /**
  * Validates a decoded native field document against field schema 1.0.
@@ -69,6 +70,28 @@ final class FieldSchemaValidator
     public const LABEL_MAX_LENGTH = 200;
 
     public const ANCHOR_TEXT_MAX_LENGTH = 255;
+
+    /** Lowercase hex SHA-256 of the document revision an anchor was resolved in. */
+    public const DOCUMENT_SHA256_PATTERN = '/^[0-9a-f]{64}$/';
+
+    /**
+     * ECMA-262's `\s`, spelled out for PCRE: tab through carriage return, space, no-break space,
+     * the Unicode space separators, the line and paragraph separators, and the byte-order mark.
+     * PCRE's own `\s` is ASCII-only without UCP, so the published pattern and this importer
+     * would otherwise disagree about an address containing a no-break space.
+     */
+    private const ECMA_WHITESPACE = '\x{0009}-\x{000D}\x{0020}\x{00A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}';
+
+    /**
+     * Each contract pattern, keyed by its contract spelling, with the PCRE that means the same
+     * thing. See {@see self::matchesContractPattern()}.
+     */
+    private const PCRE = [
+        self::IDENTIFIER_PATTERN => '/^[A-Za-z0-9][A-Za-z0-9._-]*$/D',
+        self::VARIABLE_PATTERN => '/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/D',
+        self::EMAIL_PATTERN => '/^[^@'.self::ECMA_WHITESPACE.']+@[^@'.self::ECMA_WHITESPACE.']+\.[^@'.self::ECMA_WHITESPACE.']+$/Du',
+        self::DOCUMENT_SHA256_PATTERN => '/^[0-9a-f]{64}$/D',
+    ];
 
     /** @var list<string> */
     public const DOCUMENT_REQUIRED = [
@@ -289,7 +312,7 @@ final class FieldSchemaValidator
                     '/coordinate_space/'.$key,
                     ValidationCode::UnsupportedCoordinateSpace,
                     'Unsupported coordinate_space.'.$key.': schema '.SchemaVersion::CURRENT.' implements only '
-                        .var_export($value, true).', got '.var_export($space[$key], true)
+                        .self::describeDeclared($value).', got '.self::describeDeclared($declared)
                         .'. A document declaring another convention is rejected, never reinterpreted.',
                 );
             }
@@ -839,7 +862,7 @@ final class FieldSchemaValidator
             return;
         }
 
-        if ($variable === '' || strlen($variable) > self::VARIABLE_MAX_LENGTH || preg_match(self::VARIABLE_PATTERN, $variable) !== 1) {
+        if ($variable === '' || mb_strlen($variable) > self::VARIABLE_MAX_LENGTH || ! self::matchesContractPattern(self::VARIABLE_PATTERN, $variable)) {
             $errors[] = new ValidationError(
                 $path.'/variable',
                 ValidationCode::InvalidFormat,
@@ -1231,7 +1254,7 @@ final class FieldSchemaValidator
         if (array_key_exists('document_sha256', $resolved)) {
             $digest = $resolved['document_sha256'];
 
-            if (! is_string($digest) || preg_match('/^[0-9a-f]{64}$/', $digest) !== 1) {
+            if (! is_string($digest) || ! self::matchesContractPattern(self::DOCUMENT_SHA256_PATTERN, $digest)) {
                 $errors[] = new ValidationError(
                     $path.'/document_sha256',
                     ValidationCode::InvalidFormat,
@@ -1637,7 +1660,7 @@ final class FieldSchemaValidator
             return null;
         }
 
-        if ($value === '' || strlen($value) > self::IDENTIFIER_MAX_LENGTH || preg_match(self::IDENTIFIER_PATTERN, $value) !== 1) {
+        if ($value === '' || mb_strlen($value) > self::IDENTIFIER_MAX_LENGTH || ! self::matchesContractPattern(self::IDENTIFIER_PATTERN, $value)) {
             $errors[] = new ValidationError(
                 $path,
                 ValidationCode::InvalidFormat,
@@ -1648,6 +1671,62 @@ final class FieldSchemaValidator
         }
 
         return $value;
+    }
+
+    /**
+     * How a refusal quotes a value a document declared, identically in both projections.
+     *
+     * Strings, booleans, null and safe integers are quoted as JSON. Anything else is named by
+     * its kind rather than spelled, because the two runtimes cannot spell it the same way: PHP
+     * decodes `{}` and `[]` to the same array, writes `1.0e+20` where JavaScript writes
+     * `100000000000000000000`, and has no JSON for infinity at all (issue #106; the same spelling
+     * divergence as #105). The TypeScript twin is `describeDeclared()` in `fieldSchema.ts`.
+     */
+    private static function describeDeclared(mixed $value): string
+    {
+        if (is_float($value) && is_finite($value) && floor($value) === $value && abs($value) <= CanonicalNumber::MAX_INTEGER) {
+            $value = (int) $value;
+        }
+
+        return match (true) {
+            is_string($value), is_bool($value), $value === null => (string) json_encode(
+                $value,
+                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_LINE_TERMINATORS,
+            ),
+            is_int($value) => abs($value) <= CanonicalNumber::MAX_INTEGER ? (string) $value : 'a number',
+            is_float($value) => 'a number',
+            default => 'an object or array',
+        };
+    }
+
+    /**
+     * Whether `$value` satisfies a pattern with the meaning the published contract gives it.
+     *
+     * The contract's patterns are JSON Schema patterns, which are ECMA-262 regular expressions,
+     * and the constants above are spelled exactly as the contract spells them (asserted by
+     * FieldSchemaContractTest). PCRE reads the same text differently in two ways that matter
+     * here, and both were found by the string contract sweep (issue #106) accepting what the
+     * contract and the editor refuse:
+     *
+     * - `$` also matches before a final newline, so `"buyer\n"` was a valid identifier here.
+     *   `D` (dollar-end-only) makes it mean end of input, as it does in ECMA-262.
+     * - `\s` is ASCII-only, where ECMA-262's includes the Unicode spaces.
+     *
+     * Each pattern is therefore translated **by hand**, once, in {@see self::PCRE}, rather than
+     * by a general rewriter: the two dialects differ in more places than any short rewrite would
+     * cover (`.`, `\d` and `\w` under `u`, counted quantifiers over code points against UTF-16
+     * units), and a rewriter that misses one fails silently. A pattern with no translation is
+     * refused outright, so a new contract pattern cannot be matched with PCRE's meaning by
+     * default. The string sweep then checks every translation against the editor's.
+     */
+    public static function matchesContractPattern(string $pattern, string $value): bool
+    {
+        $pcre = self::PCRE[$pattern] ?? throw new LogicException(
+            'Contract pattern '.$pattern.' has no hand-checked PCRE translation in '.self::class.'::PCRE. '
+                .'Add one before the importer uses it, and let the string contract sweep check it.',
+        );
+
+        return preg_match($pcre, $value) === 1;
     }
 
     /**
@@ -1687,7 +1766,7 @@ final class FieldSchemaValidator
             return;
         }
 
-        if ($value === '' || strlen($value) > self::EMAIL_MAX_LENGTH || preg_match(self::EMAIL_PATTERN, $value) !== 1) {
+        if ($value === '' || mb_strlen($value) > self::EMAIL_MAX_LENGTH || ! self::matchesContractPattern(self::EMAIL_PATTERN, $value)) {
             $errors[] = new ValidationError(
                 $path,
                 ValidationCode::InvalidEmail,

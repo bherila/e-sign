@@ -1,0 +1,542 @@
+{
+    "coordinate_space.origin / enum / case": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.origin: schema 1.1 implements only \"top-left\", got \"TOP-LEFT\". A document declaring another convention is rejected, never reinterpreted."
+    },
+    "coordinate_space.origin / enum / trailing newline": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.origin: schema 1.1 implements only \"top-left\", got \"top-left\\n\". A document declaring another convention is rejected, never reinterpreted."
+    },
+    "coordinate_space.origin / type": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.origin: schema 1.1 implements only \"top-left\", got true. A document declaring another convention is rejected, never reinterpreted."
+    },
+    "coordinate_space.origin / type / fraction": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.origin: schema 1.1 implements only \"top-left\", got a number. A document declaring another convention is rejected, never reinterpreted."
+    },
+    "coordinate_space.origin / type / large number": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.origin: schema 1.1 implements only \"top-left\", got a number. A document declaring another convention is rejected, never reinterpreted."
+    },
+    "coordinate_space.origin / type / object": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.origin: schema 1.1 implements only \"top-left\", got an object or array. A document declaring another convention is rejected, never reinterpreted."
+    },
+    "coordinate_space.page_box / enum / case": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.page_box: schema 1.1 implements only \"crop\", got \"CROP\". A document declaring another convention is rejected, never reinterpreted."
+    },
+    "coordinate_space.page_box / enum / trailing newline": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.page_box: schema 1.1 implements only \"crop\", got \"crop\\n\". A document declaring another convention is rejected, never reinterpreted."
+    },
+    "coordinate_space.page_box / type": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.page_box: schema 1.1 implements only \"crop\", got true. A document declaring another convention is rejected, never reinterpreted."
+    },
+    "coordinate_space.page_box / type / fraction": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.page_box: schema 1.1 implements only \"crop\", got a number. A document declaring another convention is rejected, never reinterpreted."
+    },
+    "coordinate_space.page_box / type / large number": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.page_box: schema 1.1 implements only \"crop\", got a number. A document declaring another convention is rejected, never reinterpreted."
+    },
+    "coordinate_space.page_box / type / object": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.page_box: schema 1.1 implements only \"crop\", got an object or array. A document declaring another convention is rejected, never reinterpreted."
+    },
+    "coordinate_space.page_index_base / enum / other": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.page_index_base: schema 1.1 implements only 1, got 2. A document declaring another convention is rejected, never reinterpreted."
+    },
+    "coordinate_space.page_index_base / type": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.page_index_base: schema 1.1 implements only 1, got true. A document declaring another convention is rejected, never reinterpreted."
+    },
+    "coordinate_space.page_index_base / type / fraction": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.page_index_base: schema 1.1 implements only 1, got a number. A document declaring another convention is rejected, never reinterpreted."
+    },
+    "coordinate_space.page_index_base / type / large number": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.page_index_base: schema 1.1 implements only 1, got a number. A document declaring another convention is rejected, never reinterpreted."
+    },
+    "coordinate_space.page_index_base / type / object": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.page_index_base: schema 1.1 implements only 1, got an object or array. A document declaring another convention is rejected, never reinterpreted."
+    },
+    "coordinate_space.rotation / enum / case": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.rotation: schema 1.1 implements only \"displayed\", got \"DISPLAYED\". A document declaring another convention is rejected, never reinterpreted."
+    },
+    "coordinate_space.rotation / enum / trailing newline": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.rotation: schema 1.1 implements only \"displayed\", got \"displayed\\n\". A document declaring another convention is rejected, never reinterpreted."
+    },
+    "coordinate_space.rotation / type": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.rotation: schema 1.1 implements only \"displayed\", got true. A document declaring another convention is rejected, never reinterpreted."
+    },
+    "coordinate_space.rotation / type / fraction": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.rotation: schema 1.1 implements only \"displayed\", got a number. A document declaring another convention is rejected, never reinterpreted."
+    },
+    "coordinate_space.rotation / type / large number": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.rotation: schema 1.1 implements only \"displayed\", got a number. A document declaring another convention is rejected, never reinterpreted."
+    },
+    "coordinate_space.rotation / type / object": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.rotation: schema 1.1 implements only \"displayed\", got an object or array. A document declaring another convention is rejected, never reinterpreted."
+    },
+    "coordinate_space.unit / enum / case": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.unit: schema 1.1 implements only \"pt\", got \"PT\". A document declaring another convention is rejected, never reinterpreted."
+    },
+    "coordinate_space.unit / enum / trailing newline": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.unit: schema 1.1 implements only \"pt\", got \"pt\\n\". A document declaring another convention is rejected, never reinterpreted."
+    },
+    "coordinate_space.unit / type": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.unit: schema 1.1 implements only \"pt\", got true. A document declaring another convention is rejected, never reinterpreted."
+    },
+    "coordinate_space.unit / type / fraction": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.unit: schema 1.1 implements only \"pt\", got a number. A document declaring another convention is rejected, never reinterpreted."
+    },
+    "coordinate_space.unit / type / large number": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.unit: schema 1.1 implements only \"pt\", got a number. A document declaring another convention is rejected, never reinterpreted."
+    },
+    "coordinate_space.unit / type / object": {
+        "code": "unsupported_coordinate_space",
+        "message": "Unsupported coordinate_space.unit: schema 1.1 implements only \"pt\", got an object or array. A document declaring another convention is rejected, never reinterpreted."
+    },
+    "document_id / maxLength": {
+        "code": "invalid_format",
+        "message": "document_id must be 1 to 64 characters of letters, digits, dot, underscore, or hyphen, starting with a letter or digit; got \"a9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-\"."
+    },
+    "document_id / minLength": {
+        "code": "invalid_format",
+        "message": "document_id must be 1 to 64 characters of letters, digits, dot, underscore, or hyphen, starting with a letter or digit; got \"\"."
+    },
+    "document_id / pattern / leading punctuation": {
+        "code": "invalid_format",
+        "message": "document_id must be 1 to 64 characters of letters, digits, dot, underscore, or hyphen, starting with a letter or digit; got \"-a\"."
+    },
+    "document_id / pattern / trailing newline": {
+        "code": "invalid_format",
+        "message": "document_id must be 1 to 64 characters of letters, digits, dot, underscore, or hyphen, starting with a letter or digit; got \"a\n\"."
+    },
+    "document_id / type": {
+        "code": "invalid_type",
+        "message": "document_id must be a string."
+    },
+    "fields[].alias / maxLength": {
+        "code": "invalid_format",
+        "message": "field alias must be 1 to 64 characters of letters, digits, dot, underscore, or hyphen, starting with a letter or digit; got \"a9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-\"."
+    },
+    "fields[].alias / minLength": {
+        "code": "invalid_format",
+        "message": "field alias must be 1 to 64 characters of letters, digits, dot, underscore, or hyphen, starting with a letter or digit; got \"\"."
+    },
+    "fields[].alias / pattern / leading punctuation": {
+        "code": "invalid_format",
+        "message": "field alias must be 1 to 64 characters of letters, digits, dot, underscore, or hyphen, starting with a letter or digit; got \"-a\"."
+    },
+    "fields[].alias / pattern / trailing newline": {
+        "code": "invalid_format",
+        "message": "field alias must be 1 to 64 characters of letters, digits, dot, underscore, or hyphen, starting with a letter or digit; got \"a\n\"."
+    },
+    "fields[].alias / type": {
+        "code": "invalid_type",
+        "message": "field alias must be a string."
+    },
+    "fields[].anchor.occurrence / enum / case": {
+        "code": "invalid_format",
+        "message": "anchor.occurrence must be \"sole\" or a 1-based index; got \"SOLE\". \"all\" places one box per match, which a single field cannot represent: use one field per box."
+    },
+    "fields[].anchor.occurrence / enum / trailing newline": {
+        "code": "invalid_format",
+        "message": "anchor.occurrence must be \"sole\" or a 1-based index; got \"sole\n\". \"all\" places one box per match, which a single field cannot represent: use one field per box."
+    },
+    "fields[].anchor.occurrence / type": {
+        "code": "invalid_type",
+        "message": "anchor.occurrence must be \"sole\" or an integer index."
+    },
+    "fields[].anchor.occurrence / type / fraction": {
+        "code": "invalid_type",
+        "message": "anchor.occurrence must be \"sole\" or an integer index."
+    },
+    "fields[].anchor.occurrence / type / large number": {
+        "code": "invalid_format",
+        "message": "anchor.occurrence is at most 9007199254740991, the largest integer this schema's two implementations agree on: PHP counts to 2^63 and JavaScript stops being exact at 2^53, so a larger value means one thing in the editor and another in the API."
+    },
+    "fields[].anchor.occurrence / type / object": {
+        "code": "invalid_type",
+        "message": "anchor.occurrence must be \"sole\" or an integer index."
+    },
+    "fields[].anchor.origin / enum / case": {
+        "code": "invalid_format",
+        "message": "anchor.origin must be one of top_left, top_right, bottom_left, bottom_right; got \"TOP_LEFT\". Nothing is inferred from the sign of the offset."
+    },
+    "fields[].anchor.origin / enum / trailing newline": {
+        "code": "invalid_format",
+        "message": "anchor.origin must be one of top_left, top_right, bottom_left, bottom_right; got \"top_left\n\". Nothing is inferred from the sign of the offset."
+    },
+    "fields[].anchor.origin / type": {
+        "code": "invalid_type",
+        "message": "anchor.origin must be a string."
+    },
+    "fields[].anchor.origin / type / fraction": {
+        "code": "invalid_type",
+        "message": "anchor.origin must be a string."
+    },
+    "fields[].anchor.origin / type / large number": {
+        "code": "invalid_type",
+        "message": "anchor.origin must be a string."
+    },
+    "fields[].anchor.origin / type / object": {
+        "code": "invalid_type",
+        "message": "anchor.origin must be a string."
+    },
+    "fields[].anchor.placement / enum / case": {
+        "code": "invalid_format",
+        "message": "anchor.placement must be one of replace, cross_check; got \"REPLACE\". \"replace\" lets the anchor decide where the field goes and keeps only the rectangle's size; \"cross_check\" keeps the declared rectangle and requires the anchor to agree with it. Omitting the property is \"replace\", which is what an anchor has always meant here; \"cross_check\" is the narrower mode and has to be stated."
+    },
+    "fields[].anchor.placement / enum / trailing newline": {
+        "code": "invalid_format",
+        "message": "anchor.placement must be one of replace, cross_check; got \"replace\n\". \"replace\" lets the anchor decide where the field goes and keeps only the rectangle's size; \"cross_check\" keeps the declared rectangle and requires the anchor to agree with it. Omitting the property is \"replace\", which is what an anchor has always meant here; \"cross_check\" is the narrower mode and has to be stated."
+    },
+    "fields[].anchor.placement / type": {
+        "code": "invalid_type",
+        "message": "anchor.placement must be a string."
+    },
+    "fields[].anchor.placement / type / fraction": {
+        "code": "invalid_type",
+        "message": "anchor.placement must be a string."
+    },
+    "fields[].anchor.placement / type / large number": {
+        "code": "invalid_type",
+        "message": "anchor.placement must be a string."
+    },
+    "fields[].anchor.placement / type / object": {
+        "code": "invalid_type",
+        "message": "anchor.placement must be a string."
+    },
+    "fields[].anchor.resolved.document_sha256 / pattern / trailing newline": {
+        "code": "invalid_format",
+        "message": "anchor.resolved.document_sha256 must be 64 lowercase hexadecimal characters: the digest of the exact bytes the text was located in."
+    },
+    "fields[].anchor.resolved.document_sha256 / pattern / upper case": {
+        "code": "invalid_format",
+        "message": "anchor.resolved.document_sha256 must be 64 lowercase hexadecimal characters: the digest of the exact bytes the text was located in."
+    },
+    "fields[].anchor.resolved.document_sha256 / type": {
+        "code": "invalid_format",
+        "message": "anchor.resolved.document_sha256 must be 64 lowercase hexadecimal characters: the digest of the exact bytes the text was located in."
+    },
+    "fields[].anchor.text / maxLength": {
+        "code": "invalid_format",
+        "message": "anchor.text must be at most 255 characters; got 256."
+    },
+    "fields[].anchor.text / minLength": {
+        "code": "invalid_format",
+        "message": "anchor.text must not be empty. Omit the property instead."
+    },
+    "fields[].anchor.text / type": {
+        "code": "invalid_type",
+        "message": "anchor.text must be a string."
+    },
+    "fields[].id / maxLength": {
+        "code": "invalid_format",
+        "message": "field id must be 1 to 64 characters of letters, digits, dot, underscore, or hyphen, starting with a letter or digit; got \"a9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-\"."
+    },
+    "fields[].id / minLength": {
+        "code": "invalid_format",
+        "message": "field id must be 1 to 64 characters of letters, digits, dot, underscore, or hyphen, starting with a letter or digit; got \"\"."
+    },
+    "fields[].id / pattern / leading punctuation": {
+        "code": "invalid_format",
+        "message": "field id must be 1 to 64 characters of letters, digits, dot, underscore, or hyphen, starting with a letter or digit; got \"-a\"."
+    },
+    "fields[].id / pattern / trailing newline": {
+        "code": "invalid_format",
+        "message": "field id must be 1 to 64 characters of letters, digits, dot, underscore, or hyphen, starting with a letter or digit; got \"a\n\"."
+    },
+    "fields[].id / type": {
+        "code": "invalid_type",
+        "message": "field id must be a string."
+    },
+    "fields[].label / maxLength": {
+        "code": "invalid_format",
+        "message": "label must be at most 200 characters; got 201."
+    },
+    "fields[].label / minLength": {
+        "code": "invalid_format",
+        "message": "label must not be empty. Omit the property instead."
+    },
+    "fields[].label / type": {
+        "code": "invalid_type",
+        "message": "label must be a string."
+    },
+    "fields[].prefill.variable / maxLength": {
+        "code": "invalid_format",
+        "message": "prefill.variable must be a dotted lower-snake name such as \"recipient.name\"; got \"a.b______________________________________________________________________________________________________________________________\"."
+    },
+    "fields[].prefill.variable / minLength": {
+        "code": "invalid_format",
+        "message": "prefill.variable must be a dotted lower-snake name such as \"recipient.name\"; got \"\"."
+    },
+    "fields[].prefill.variable / pattern / trailing newline": {
+        "code": "invalid_format",
+        "message": "prefill.variable must be a dotted lower-snake name such as \"recipient.name\"; got \"recipient.name\n\"."
+    },
+    "fields[].prefill.variable / pattern / upper case": {
+        "code": "invalid_format",
+        "message": "prefill.variable must be a dotted lower-snake name such as \"recipient.name\"; got \"Recipient.name\"."
+    },
+    "fields[].prefill.variable / type": {
+        "code": "invalid_type",
+        "message": "prefill.variable must be a string."
+    },
+    "fields[].recipient_id / maxLength": {
+        "code": "invalid_format",
+        "message": "recipient_id must be 1 to 64 characters of letters, digits, dot, underscore, or hyphen, starting with a letter or digit; got \"a9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-\"."
+    },
+    "fields[].recipient_id / minLength": {
+        "code": "invalid_format",
+        "message": "recipient_id must be 1 to 64 characters of letters, digits, dot, underscore, or hyphen, starting with a letter or digit; got \"\"."
+    },
+    "fields[].recipient_id / pattern / leading punctuation": {
+        "code": "invalid_format",
+        "message": "recipient_id must be 1 to 64 characters of letters, digits, dot, underscore, or hyphen, starting with a letter or digit; got \"-a\"."
+    },
+    "fields[].recipient_id / pattern / trailing newline": {
+        "code": "invalid_format",
+        "message": "recipient_id must be 1 to 64 characters of letters, digits, dot, underscore, or hyphen, starting with a letter or digit; got \"a\n\"."
+    },
+    "fields[].recipient_id / type": {
+        "code": "invalid_type",
+        "message": "recipient_id must be a string."
+    },
+    "fields[].type / enum / case": {
+        "code": "unsupported_field_type",
+        "message": "Unsupported field type \"SIGNATURE\". Schema 1.1 implements signature, initials, text, name, company, title, agreement_date, signing_date, checkbox. An unsupported type is rejected, never ignored: a silently dropped field is a field nobody was asked to complete."
+    },
+    "fields[].type / enum / trailing newline": {
+        "code": "unsupported_field_type",
+        "message": "Unsupported field type \"signature\n\". Schema 1.1 implements signature, initials, text, name, company, title, agreement_date, signing_date, checkbox. An unsupported type is rejected, never ignored: a silently dropped field is a field nobody was asked to complete."
+    },
+    "fields[].type / type": {
+        "code": "invalid_type",
+        "message": "type must be a string."
+    },
+    "fields[].type / type / fraction": {
+        "code": "invalid_type",
+        "message": "type must be a string."
+    },
+    "fields[].type / type / large number": {
+        "code": "invalid_type",
+        "message": "type must be a string."
+    },
+    "fields[].type / type / object": {
+        "code": "invalid_type",
+        "message": "type must be a string."
+    },
+    "recipients[].email / U+0009": {
+        "code": "invalid_email",
+        "message": "recipient email must be a deliverable-looking address; got \"bu\tyer@example.test\"."
+    },
+    "recipients[].email / U+000A": {
+        "code": "invalid_email",
+        "message": "recipient email must be a deliverable-looking address; got \"bu\nyer@example.test\"."
+    },
+    "recipients[].email / U+000B": {
+        "code": "invalid_email",
+        "message": "recipient email must be a deliverable-looking address; got \"bu\u000byer@example.test\"."
+    },
+    "recipients[].email / U+000C": {
+        "code": "invalid_email",
+        "message": "recipient email must be a deliverable-looking address; got \"bu\fyer@example.test\"."
+    },
+    "recipients[].email / U+000D": {
+        "code": "invalid_email",
+        "message": "recipient email must be a deliverable-looking address; got \"bu\ryer@example.test\"."
+    },
+    "recipients[].email / U+0020": {
+        "code": "invalid_email",
+        "message": "recipient email must be a deliverable-looking address; got \"bu yer@example.test\"."
+    },
+    "recipients[].email / U+0085": {
+        "code": null,
+        "message": "ACCEPTED"
+    },
+    "recipients[].email / U+00A0": {
+        "code": "invalid_email",
+        "message": "recipient email must be a deliverable-looking address; got \"bu yer@example.test\"."
+    },
+    "recipients[].email / U+1680": {
+        "code": "invalid_email",
+        "message": "recipient email must be a deliverable-looking address; got \"bu yer@example.test\"."
+    },
+    "recipients[].email / U+180E": {
+        "code": null,
+        "message": "ACCEPTED"
+    },
+    "recipients[].email / U+2000": {
+        "code": "invalid_email",
+        "message": "recipient email must be a deliverable-looking address; got \"bu yer@example.test\"."
+    },
+    "recipients[].email / U+2005": {
+        "code": "invalid_email",
+        "message": "recipient email must be a deliverable-looking address; got \"bu yer@example.test\"."
+    },
+    "recipients[].email / U+200A": {
+        "code": "invalid_email",
+        "message": "recipient email must be a deliverable-looking address; got \"bu yer@example.test\"."
+    },
+    "recipients[].email / U+200B": {
+        "code": null,
+        "message": "ACCEPTED"
+    },
+    "recipients[].email / U+200D": {
+        "code": null,
+        "message": "ACCEPTED"
+    },
+    "recipients[].email / U+2028": {
+        "code": "invalid_email",
+        "message": "recipient email must be a deliverable-looking address; got \"bu\u2028yer@example.test\"."
+    },
+    "recipients[].email / U+2029": {
+        "code": "invalid_email",
+        "message": "recipient email must be a deliverable-looking address; got \"bu\u2029yer@example.test\"."
+    },
+    "recipients[].email / U+202F": {
+        "code": "invalid_email",
+        "message": "recipient email must be a deliverable-looking address; got \"bu yer@example.test\"."
+    },
+    "recipients[].email / U+205F": {
+        "code": "invalid_email",
+        "message": "recipient email must be a deliverable-looking address; got \"bu yer@example.test\"."
+    },
+    "recipients[].email / U+3000": {
+        "code": "invalid_email",
+        "message": "recipient email must be a deliverable-looking address; got \"bu　yer@example.test\"."
+    },
+    "recipients[].email / U+FEFF": {
+        "code": "invalid_email",
+        "message": "recipient email must be a deliverable-looking address; got \"bu﻿yer@example.test\"."
+    },
+    "recipients[].email / maxLength": {
+        "code": "invalid_email",
+        "message": "recipient email must be a deliverable-looking address; got \"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀@example.test\"."
+    },
+    "recipients[].email / minLength": {
+        "code": "invalid_email",
+        "message": "recipient email must be a deliverable-looking address; got \"aa\"."
+    },
+    "recipients[].email / pattern / no domain dot": {
+        "code": "invalid_email",
+        "message": "recipient email must be a deliverable-looking address; got \"buyer@example\"."
+    },
+    "recipients[].email / pattern / trailing newline": {
+        "code": "invalid_email",
+        "message": "recipient email must be a deliverable-looking address; got \"buyer@example.test\n\"."
+    },
+    "recipients[].email / pattern / unicode whitespace": {
+        "code": "invalid_email",
+        "message": "recipient email must be a deliverable-looking address; got \"bu yer@example.test\"."
+    },
+    "recipients[].email / type": {
+        "code": "invalid_type",
+        "message": "recipient email must be a string."
+    },
+    "recipients[].id / maxLength": {
+        "code": "invalid_format",
+        "message": "recipient id must be 1 to 64 characters of letters, digits, dot, underscore, or hyphen, starting with a letter or digit; got \"a9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-\"."
+    },
+    "recipients[].id / minLength": {
+        "code": "invalid_format",
+        "message": "recipient id must be 1 to 64 characters of letters, digits, dot, underscore, or hyphen, starting with a letter or digit; got \"\"."
+    },
+    "recipients[].id / pattern / leading punctuation": {
+        "code": "invalid_format",
+        "message": "recipient id must be 1 to 64 characters of letters, digits, dot, underscore, or hyphen, starting with a letter or digit; got \"-a\"."
+    },
+    "recipients[].id / pattern / trailing newline": {
+        "code": "invalid_format",
+        "message": "recipient id must be 1 to 64 characters of letters, digits, dot, underscore, or hyphen, starting with a letter or digit; got \"a\n\"."
+    },
+    "recipients[].id / type": {
+        "code": "invalid_type",
+        "message": "recipient id must be a string."
+    },
+    "recipients[].name / maxLength": {
+        "code": "invalid_format",
+        "message": "recipient name must be at most 255 characters; got 256."
+    },
+    "recipients[].name / minLength": {
+        "code": "invalid_format",
+        "message": "recipient name must not be empty. Omit the property instead."
+    },
+    "recipients[].name / type": {
+        "code": "invalid_type",
+        "message": "recipient name must be a string."
+    },
+    "recipients[].role / maxLength": {
+        "code": "invalid_format",
+        "message": "recipient role label must be at most 128 characters; got 129."
+    },
+    "recipients[].role / minLength": {
+        "code": "invalid_format",
+        "message": "recipient role label must not be empty. Omit the property instead."
+    },
+    "recipients[].role / type": {
+        "code": "invalid_type",
+        "message": "recipient role label must be a string."
+    },
+    "schema_version / enum / trailing newline": {
+        "code": "schema_version_unsupported",
+        "message": "schema_version must be exactly MAJOR.MINOR, for example \"1.1\"; got \"1.1\n\"."
+    },
+    "schema_version / type": {
+        "code": "invalid_type",
+        "message": "schema_version must be a string such as \"1.1\"."
+    },
+    "schema_version / type / fraction": {
+        "code": "invalid_type",
+        "message": "schema_version must be a string such as \"1.1\"."
+    },
+    "schema_version / type / large number": {
+        "code": "invalid_type",
+        "message": "schema_version must be a string such as \"1.1\"."
+    },
+    "schema_version / type / object": {
+        "code": "invalid_type",
+        "message": "schema_version must be a string such as \"1.1\"."
+    },
+    "signing_order[][] / maxLength": {
+        "code": "unknown_recipient",
+        "message": "signing_order names recipient \"a9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-Z9._-\", which is not declared in recipients."
+    },
+    "signing_order[][] / minLength": {
+        "code": "unknown_recipient",
+        "message": "signing_order names recipient \"\", which is not declared in recipients."
+    },
+    "signing_order[][] / pattern / leading punctuation": {
+        "code": "unknown_recipient",
+        "message": "signing_order names recipient \"-a\", which is not declared in recipients."
+    },
+    "signing_order[][] / pattern / trailing newline": {
+        "code": "unknown_recipient",
+        "message": "signing_order names recipient \"a\n\", which is not declared in recipients."
+    },
+    "signing_order[][] / type": {
+        "code": "invalid_type",
+        "message": "A signing stage entry must be a recipient id string."
+    }
+}
