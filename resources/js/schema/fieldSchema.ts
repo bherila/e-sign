@@ -385,6 +385,29 @@ export function isCanonical(value: number): boolean {
   return Number.isFinite(value) && roundCoordinate(value) === value;
 }
 
+/**
+ * Whether a document carries a coordinate the server will round when it stores it.
+ *
+ * Only a 1.0 document can: 1.1 refuses one. The editor passes such a value through rather than
+ * rounding it itself (#105), so after saving one the document the server stored differs from
+ * the one the editor holds, and the editor re-reads the server's.
+ */
+export function carriesUnroundedCoordinate(document: FieldSchemaDocument): boolean {
+  const rects = document.fields.flatMap((field) => [
+    field.rect,
+    ...(field.anchor?.resolved === undefined ? [] : [field.anchor.resolved.anchor_rect, field.anchor.resolved.rect]),
+  ]);
+  const numbers = [
+    ...rects.flatMap((rect) => [rect.x, rect.y, rect.width, rect.height]),
+    ...document.fields.flatMap((field) =>
+      field.anchor?.offset === undefined ? [] : [field.anchor.offset.dx, field.anchor.offset.dy],
+    ),
+    ...document.fields.flatMap((field) => (field.anchor?.tolerance === undefined ? [] : [field.anchor.tolerance])),
+  ];
+
+  return numbers.some((value) => !isCanonical(value));
+}
+
 export function roundCoordinate(value: number): number {
   if (!Number.isFinite(value)) {
     return value;
@@ -490,15 +513,35 @@ export function parseFieldSchema(input: unknown, options: ValidationOptions = {}
 }
 
 /**
- * Export a document as deterministic JSON: canonical property order, canonical numbers, no
- * insignificant whitespace. Byte-identical to `FieldSchemaDocument::canonicalJson()` in PHP,
- * so the same document hashes the same on both sides.
+ * Export a document as deterministic JSON: canonical property order, stated defaults, no
+ * insignificant whitespace. Numbers are written as they are, not rounded (#105).
+ *
+ * This is the editor's wire form, not the reference canonical form. `field_schema_sha256` is
+ * computed only by the server, from `FieldSchemaDocument::canonicalJson()` in PHP, and that is
+ * the canonical form a digest is verified against. The two agree byte for byte for every 1.1
+ * document and every value the editor produces. They can differ for a 1.0 document the editor
+ * did not touch:
+ * - a coordinate finer than the schema's precision, which PHP rounds on import and this
+ *   leaves for it to round;
+ * - a magnitude from about 1e17 up, which PHP spells `1.0e+20` where JavaScript writes the
+ *   digits.
+ * See `docs/preparation/field-schema.md`.
  */
 export function serializeFieldSchema(document: FieldSchemaDocument): string {
   return JSON.stringify(canonicaliseDocument(document));
 }
 
-/** The canonical object form: property order fixed, defaults stated, coordinates rounded. */
+/**
+ * The canonical object form: property order fixed, defaults stated, numbers as given.
+ *
+ * Coordinates are not rounded here. A 1.1 document cannot hold a value finer than the schema's
+ * precision (the validator refuses `coordinate_too_precise`), so rounding it would change
+ * nothing. A 1.0 document can, and this runtime and PHP do not round every such value alike:
+ * `1.6484999999999999` rounds to 1.649 here and to 1.648 in PHP. Rounding here made the stored
+ * bytes, and the digest, depend on whether the document went through the editor first. The
+ * editor rounds only what it produces (`editorReducer`), and the server canonicalises the rest
+ * (#105).
+ */
 export function canonicaliseDocument(document: FieldSchemaDocument): FieldSchemaDocument {
   return {
     // The version the document arrived with, not the one this build writes: a 1.0 document that
@@ -565,10 +608,10 @@ function canonicaliseField(field: FieldDefinition): FieldDefinition {
 
 function canonicaliseRect(rect: Rect): Rect {
   return {
-    x: roundCoordinate(rect.x),
-    y: roundCoordinate(rect.y),
-    width: roundCoordinate(rect.width),
-    height: roundCoordinate(rect.height),
+    x: rect.x,
+    y: rect.y,
+    width: rect.width,
+    height: rect.height,
   };
 }
 
@@ -594,8 +637,8 @@ function canonicaliseAnchor(anchor: Anchor): Anchor {
 
   if (anchor.offset !== undefined) {
     canonical.offset = {
-      dx: roundCoordinate(anchor.offset.dx),
-      dy: roundCoordinate(anchor.offset.dy),
+      dx: anchor.offset.dx,
+      dy: anchor.offset.dy,
     };
   }
 
@@ -604,7 +647,7 @@ function canonicaliseAnchor(anchor: Anchor): Anchor {
   }
 
   if (anchor.tolerance !== undefined) {
-    canonical.tolerance = roundCoordinate(anchor.tolerance);
+    canonical.tolerance = anchor.tolerance;
   }
 
   if (anchor.resolved !== undefined) {
@@ -1159,6 +1202,12 @@ function checkRect(
     // ({@link PRECISION_REFUSED_SINCE_MINOR}). Rounding *before* the checks rather than after is
     // the one change 1.0 gets, and it takes nothing away: it refuses only values that rounded into
     // an invalid state, which were never documents that worked.
+    //
+    // As in PHP, the sign is checked on the value as submitted and the extent on the value as it
+    // will be stored. Rounding moves toward zero, so it can only hide a sign problem: `-0.0004`
+    // rounds to `-0`, which is not below zero. The editor now sends a 1.0 value it did not
+    // produce unrounded (#105), so a sign this checked only after rounding would pass here and be
+    // refused by the server on save.
     let value = raw;
 
     if (refuseImprecise) {
@@ -1169,7 +1218,7 @@ function checkRect(
       value = roundCoordinate(value);
     }
 
-    if ((name === "x" || name === "y") && value < 0) {
+    if ((name === "x" || name === "y") && raw < 0) {
       issues.push(
         issue(
           `${path}/${name}`,

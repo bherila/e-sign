@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  carriesUnroundedCoordinate,
   describeIssue,
   type FieldDefinition,
   type FieldSchemaDocument,
@@ -16,7 +17,7 @@ import {
   type ValidationIssue,
 } from "@/schema/fieldSchema";
 
-import { readVersion, saveFieldSchema, type ServerIssue } from "./api";
+import { readSavedSchema, readVersion, saveFieldSchema, type ServerIssue } from "./api";
 import { canRedo, canUndo, createEditorState, createField, editorReducer, findField, isDirty } from "./editorReducer";
 import { clampZoom,EditorToolbar } from "./EditorToolbar";
 import { FieldInspector } from "./FieldInspector";
@@ -329,7 +330,15 @@ function LoadedFieldEditor({ payload, initial, pages }: LoadedFieldEditorProps) 
       switch (outcome.status) {
         case "saved":
           setSavedSha(outcome.version.fieldSchemaSha256);
-          dispatch({ type: "mark_saved", document: state.document });
+          // A 1.0 coordinate the editor did not produce is sent unrounded and rounded by the
+          // server (#105), so what it stored - and hashed - is not what the editor holds. The
+          // saved state is the server's, so Export and the unsaved-changes check agree with it.
+          dispatch({
+            type: "mark_saved",
+            document: carriesUnroundedCoordinate(state.document)
+              ? ((await readSavedSchema(payload.urls.schema, pageSizes)) ?? state.document)
+              : state.document,
+          });
           break;
         case "rejected":
           setServerMessage(outcome.message);
@@ -343,7 +352,7 @@ function LoadedFieldEditor({ payload, initial, pages }: LoadedFieldEditorProps) 
           break;
       }
     },
-    [payload.urls.version, payload.urls.save, payload.csrf_token, savedSha, state.document],
+    [payload.urls.version, payload.urls.save, payload.urls.schema, payload.csrf_token, savedSha, state.document, pageSizes],
   );
 
   const reloadFromServer = useCallback(async () => {

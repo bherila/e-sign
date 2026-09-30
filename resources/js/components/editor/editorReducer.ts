@@ -5,10 +5,12 @@
  * "editor -> JSON -> editor without drift" a property of the state machine rather than of
  * whichever component happened to write the last value. Three rules hold it up:
  *
- * 1. **Every coordinate is rounded once, on the way in**, with the schema's own
- *    `roundCoordinate`. State therefore always holds canonical numbers, so serialising it
- *    cannot move a rectangle and a round trip is byte-stable by construction rather than by
- *    a tolerance in a test.
+ * 1. **Every coordinate the editor produces is rounded once, on the way in**, with the
+ *    schema's own `roundCoordinate`, and nothing else is rounded. An edit rounds the members
+ *    it changed and leaves the rest exactly as they arrived, so serialising cannot move a
+ *    rectangle and a round trip is byte-stable by construction rather than by a tolerance in a
+ *    test. A 1.0 document may carry a value finer than the schema's precision; the editor
+ *    passes it through untouched and the server's canonical form decides it (#105).
  * 2. **No screen units reach this file.** A drag converts through `PageTransform` before it
  *    dispatches; a nudge is stated in points. There is no zoom level here to be stale.
  * 3. **History entries are documents, not diffs.** Undo restores a whole document, so an
@@ -33,7 +35,7 @@ export const NUDGE_STEP = 1;
 export const NUDGE_STEP_LARGE = 10;
 
 export interface EditorState {
-  /** The document as it is now. Always canonical numbers. */
+  /** The document as it is now. Every number the editor produced is canonical. */
   document: FieldSchemaDocument;
   /** The field the inspector and the keyboard act on, or null. */
   selectedFieldId: string | null;
@@ -343,7 +345,7 @@ function mapField(
 }
 
 function withRect(field: FieldDefinition, rect: Rect): FieldDefinition {
-  return settled(field, { ...field, rect: roundRect(rect) });
+  return settled(field, { ...field, rect: roundChanged(field.rect, rect) });
 }
 
 const RECT_KEYS = ["x", "y", "width", "height"] as const;
@@ -385,6 +387,27 @@ function settled(before: FieldDefinition, after: FieldDefinition): FieldDefiniti
 /** Canonical equality: the comparison the importer will make, on the values it will be given. */
 function sameRect(a: Rect, b: Rect): boolean {
   return RECT_KEYS.every((key) => roundCoordinate(a[key]) === roundCoordinate(b[key]));
+}
+
+/**
+ * Round the members an edit changed, and keep the others exactly as they were.
+ *
+ * Moving a field produces a new x and y; its width and height are not the editor's to
+ * rewrite. A 1.0 document can carry a value finer than the schema's precision, and the
+ * editor and the server do not round every such value alike, so re-rounding one the editor
+ * did not produce would make the stored bytes - and the digest - depend on whether the
+ * document passed through the editor (#105).
+ */
+function roundChanged(before: Rect, after: Rect): Rect {
+  const rect = { ...after };
+
+  for (const key of RECT_KEYS) {
+    if (after[key] !== before[key]) {
+      rect[key] = roundCoordinate(after[key]);
+    }
+  }
+
+  return rect;
 }
 
 function roundRect(rect: Rect): Rect {
@@ -432,7 +455,7 @@ function applyPatch(field: FieldDefinition, patch: FieldPatch): FieldDefinition 
   }
 
   if (patch.rect !== undefined) {
-    next.rect = roundRect({ ...field.rect, ...patch.rect });
+    next.rect = roundChanged(field.rect, { ...field.rect, ...patch.rect });
   }
 
   if (patch.required !== undefined) {
@@ -498,7 +521,7 @@ function duplicateField(source: FieldDefinition, document: FieldSchemaDocument):
   const copy: FieldDefinition = {
     ...source,
     id: nextFieldId(document, `${source.id}_copy`),
-    rect: roundRect({ ...source.rect, x: source.rect.x + 12, y: source.rect.y + 12 }),
+    rect: roundChanged(source.rect, { ...source.rect, x: source.rect.x + 12, y: source.rect.y + 12 }),
   };
 
   // An alias is unique within the document and addresses this field from outside it. Copying

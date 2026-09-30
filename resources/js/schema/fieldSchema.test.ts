@@ -2,6 +2,7 @@ import fixtureJson from "../../../tests/Fixtures/schema/nda-two-signers.json";
 import {
   ANCHOR_TOLERANCE_MAX,
   CANONICAL_DECIMALS,
+  carriesUnroundedCoordinate,
   FIELD_SCHEMA_VERSION,
   FIELD_TYPES,
   type FieldSchemaDocument,
@@ -246,6 +247,53 @@ describe("serializeFieldSchema", () => {
     );
 
     expect(issues.map((problem) => problem.code)).toEqual(["coordinate_too_precise", "coordinate_too_precise"]);
+  });
+
+  /**
+   * 1.0 accepts that finer value, and the server's canonical form rounds it. This runtime passes
+   * it through rather than rounding it first, because it would not always round it the same way
+   * (#105).
+   */
+  it("passes a 1.0 coordinate finer than the canonical precision through unrounded", () => {
+    const json = serializeFieldSchema(
+      parseFieldSchema({
+        schema_version: "1.0",
+        document_id: fixture().document_id,
+        coordinate_space: fixture().coordinate_space,
+        recipients: fixture().recipients,
+        signing_order: fixture().signing_order,
+        fields: [
+          {
+            id: "legacy_signature",
+            recipient_id: fixture().recipients[0]?.id,
+            type: "signature",
+            page: 1,
+            rect: { x: 1.6484999999999999, y: 650, width: 170.4567, height: 36 },
+            required: true,
+            read_only: false,
+          },
+        ],
+      }),
+    );
+
+    expect(JSON.parse(json).fields[0].rect).toEqual({ x: 1.6484999999999999, y: 650, width: 170.4567, height: 36 });
+  });
+
+  /**
+   * The sign is checked on the value as submitted, as PHP checks it. Rounding `-0.0004` gives
+   * `-0`, which is not below zero, so a check after rounding passed a document the server refuses;
+   * with 1.0 values now sent unrounded (#105) that would have failed only on save.
+   */
+  it("refuses a negative 1.0 coordinate that rounds to zero, as the server does", () => {
+    const issues = validateFieldSchema(legacyDocument({ x: -0.0004, y: 650, width: 170, height: 36 }));
+
+    expect(issues.map((problem) => problem.code)).toEqual(["coordinate_negative"]);
+  });
+
+  it("says a document carries an unrounded coordinate only when one would be rounded on save", () => {
+    expect(carriesUnroundedCoordinate(fixture())).toBe(false);
+    expect(carriesUnroundedCoordinate(parseFieldSchema(legacyDocument({ x: 60, y: 650, width: 170, height: 36 })))).toBe(false);
+    expect(carriesUnroundedCoordinate(parseFieldSchema(legacyDocument({ x: 60, y: 650, width: 170.0004, height: 36 })))).toBe(true);
   });
 
   it("survives a thousand round trips of generated documents without coordinate drift", () => {
@@ -838,3 +886,27 @@ describe("validateFieldSchema", () => {
     expect(issues.map((found) => found.code)).toEqual(["invalid_type"]);
   });
 });
+
+/** A one-field 1.0 document, the version that still accepts a coordinate finer than 0.001. */
+function legacyDocument(rect: { x: number; y: number; width: number; height: number }): Record<string, unknown> {
+  const source = fixture();
+
+  return {
+    schema_version: "1.0",
+    document_id: source.document_id,
+    coordinate_space: source.coordinate_space,
+    recipients: source.recipients,
+    signing_order: source.signing_order,
+    fields: [
+      {
+        id: "legacy_signature",
+        recipient_id: source.recipients[0]?.id,
+        type: "signature",
+        page: 1,
+        rect,
+        required: true,
+        read_only: false,
+      },
+    ],
+  };
+}

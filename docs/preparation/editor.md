@@ -91,9 +91,12 @@ Four rules hold it together:
    preflight report, embedded in the page payload rather than fetched separately, so the editor
    can never open with the PDF drawn and the geometry still in flight. PDF.js's own viewport is
    *fitted to* that size; it does not define it.
-3. **State is always canonical.** Every mutation rounds once, to three decimals, with the
-   schema's `roundCoordinate`. Serialising the state at any moment produces the bytes the
-   server would store, so the round trip is exact rather than within a tolerance.
+3. **The editor rounds only what it produces.** A mutation rounds the members it changed,
+   once, to three decimals, with the schema's `roundCoordinate`, and leaves every other value
+   exactly as it arrived. A 1.0 document may carry a coordinate finer than that; the editor
+   passes it through and the server's canonical form rounds it, so the stored bytes do not
+   depend on whether the document went through the editor (#105). The round trip is exact
+   rather than within a tolerance.
 4. **Nothing is inferred.** `PageTransform` refuses a `/Rotate` that is not a multiple of 90,
    a CropBox without positive extent, and a non-positive zoom, rather than guessing. No number
    is read as a percentage because it happens to be small.

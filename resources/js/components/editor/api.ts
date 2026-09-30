@@ -1,5 +1,6 @@
 /**
- * The editor's two network calls: re-read a version, and PATCH its field schema.
+ * The editor's network calls: re-read a version, PATCH its field schema, and read back the
+ * field schema the server stored.
  *
  * Written against `fetch` directly rather than `@/fetchWrapper`, and the reason is the whole
  * point of the save path: `fetchWrapper` collapses a failed response to `data.message` and
@@ -14,7 +15,7 @@
  * error vocabulary that drifts from the one the API returns.
  */
 
-import type { FieldSchemaDocument } from "@/schema/fieldSchema";
+import { type FieldSchemaDocument, type PageSize, parseFieldSchema } from "@/schema/fieldSchema";
 
 /** One problem, exactly as the server reported it. Not narrowed to the client's own code union. */
 export interface ServerIssue {
@@ -170,4 +171,25 @@ function describeNetworkError(error: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * The field schema exactly as the server stored it, or null when it cannot be read back.
+ *
+ * Used after a save that sent a 1.0 coordinate the server rounds (#105). A failure here is not a
+ * failed save - the save already succeeded - so the caller keeps its own document rather than
+ * reporting an error.
+ */
+export async function readSavedSchema(url: string, pageSizes: PageSize[]): Promise<FieldSchemaDocument | null> {
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      credentials: "include",
+      headers: { Accept: "application/json" },
+    });
+
+    return response.ok ? parseFieldSchema(await response.text(), { pageSizes }) : null;
+  } catch {
+    return null;
+  }
 }
