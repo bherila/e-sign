@@ -385,6 +385,29 @@ export function isCanonical(value: number): boolean {
   return Number.isFinite(value) && roundCoordinate(value) === value;
 }
 
+/**
+ * Whether a document carries a coordinate the server will round when it stores it.
+ *
+ * Only a 1.0 document can: 1.1 refuses one. The editor passes such a value through rather than
+ * rounding it itself (#105), so after saving one the document the server stored differs from
+ * the one the editor holds, and the editor re-reads the server's.
+ */
+export function carriesUnroundedCoordinate(document: FieldSchemaDocument): boolean {
+  const rects = document.fields.flatMap((field) => [
+    field.rect,
+    ...(field.anchor?.resolved === undefined ? [] : [field.anchor.resolved.anchor_rect, field.anchor.resolved.rect]),
+  ]);
+  const numbers = [
+    ...rects.flatMap((rect) => [rect.x, rect.y, rect.width, rect.height]),
+    ...document.fields.flatMap((field) =>
+      field.anchor?.offset === undefined ? [] : [field.anchor.offset.dx, field.anchor.offset.dy],
+    ),
+    ...document.fields.flatMap((field) => (field.anchor?.tolerance === undefined ? [] : [field.anchor.tolerance])),
+  ];
+
+  return numbers.some((value) => !isCanonical(value));
+}
+
 export function roundCoordinate(value: number): number {
   if (!Number.isFinite(value)) {
     return value;
@@ -1179,6 +1202,12 @@ function checkRect(
     // ({@link PRECISION_REFUSED_SINCE_MINOR}). Rounding *before* the checks rather than after is
     // the one change 1.0 gets, and it takes nothing away: it refuses only values that rounded into
     // an invalid state, which were never documents that worked.
+    //
+    // As in PHP, the sign is checked on the value as submitted and the extent on the value as it
+    // will be stored. Rounding moves toward zero, so it can only hide a sign problem: `-0.0004`
+    // rounds to `-0`, which is not below zero. The editor now sends a 1.0 value it did not
+    // produce unrounded (#105), so a sign this checked only after rounding would pass here and be
+    // refused by the server on save.
     let value = raw;
 
     if (refuseImprecise) {
@@ -1189,7 +1218,7 @@ function checkRect(
       value = roundCoordinate(value);
     }
 
-    if ((name === "x" || name === "y") && value < 0) {
+    if ((name === "x" || name === "y") && raw < 0) {
       issues.push(
         issue(
           `${path}/${name}`,

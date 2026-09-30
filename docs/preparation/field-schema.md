@@ -200,8 +200,9 @@ grows.
 
 ## Canonical form
 
-Import canonicalises, and export is deterministic, so the same document always produces the same
-bytes on both the server and the client:
+Import canonicalises, and export is deterministic, so the same document produces the same bytes on
+both the server and the client, with one exception: an untouched 1.0 document, where the server's
+form is the reference (see the end of this section). The rules:
 
 1. Properties in the order above, at every level. Fixed, not alphabetical, so the emitted document
    reads like the schema file and the specification example.

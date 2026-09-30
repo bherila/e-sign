@@ -20,15 +20,17 @@ import {
  *
  * Import goes through `parseFieldSchema`, never through `JSON.parse` and a cast. That is what
  * makes "editor -> JSON -> editor without drift" true rather than hoped for: the importer
- * canonicalises on the way in, so a document pasted in a different property order, with
- * defaults omitted, or with coordinates finer than a thousandth of a point, becomes exactly the
- * document the server would have stored. It also fails closed and reports **every** problem at
- * once, which is the difference between "your JSON is wrong" and a list of what to fix.
+ * canonicalises on the way in, so a document pasted in a different property order or with
+ * defaults omitted becomes the document the server would have stored. It also fails closed and
+ * reports **every** problem at once, which is the difference between "your JSON is wrong" and a
+ * list of what to fix.
  *
- * Export is `serializeFieldSchema`, which is byte-identical to the server's
- * `FieldSchemaDocument::canonicalJson()`. Downloading here and downloading the version's
- * `schema.json` therefore produce the same bytes for the same document — which is what makes
- * the export usable for diffing two versions or checking a digest.
+ * Export is `serializeFieldSchema`, which matches the server's
+ * `FieldSchemaDocument::canonicalJson()` byte for byte for every 1.1 document and every value
+ * the editor produces. A 1.0 document may carry a coordinate finer than a thousandth of a point;
+ * the editor passes it through and the server rounds it (#105), and after a save the editor
+ * adopts what the server stored. For checking a digest, the version's `schema.json` from the
+ * server is the reference.
  *
  * There is deliberately no "import anyway" escape hatch. A partial import is a document with
  * fields nobody was asked to sign.
