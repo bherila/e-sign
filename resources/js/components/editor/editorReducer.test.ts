@@ -96,6 +96,92 @@ describe("round trip", () => {
   });
 });
 
+/**
+ * A 1.0 document may carry a coordinate finer than the schema's precision: 1.0 accepts one and
+ * the server rounds it when it canonicalises. The editor must not round it first. This runtime
+ * and PHP do not round every such value alike, so a value the editor re-rounded would make the
+ * stored bytes, and the digest, depend on whether the document passed through the editor (#105).
+ * The editor rounds what it produces and nothing else.
+ */
+describe("a 1.0 coordinate the editor did not produce", () => {
+  const FINE = 170.0004;
+
+  function legacy(): EditorState {
+    const document = fixture();
+    const field = findField(document, "buyer_signature");
+
+    if (field === undefined) {
+      throw new Error("The fixture lost buyer_signature");
+    }
+
+    const legacyDocument = parseFieldSchema({
+      schema_version: "1.0",
+      document_id: document.document_id,
+      coordinate_space: document.coordinate_space,
+      recipients: document.recipients,
+      signing_order: document.signing_order,
+      fields: [
+        {
+          id: field.id,
+          recipient_id: field.recipient_id,
+          type: field.type,
+          page: field.page,
+          rect: { x: 60.0004, y: 650, width: FINE, height: 36 },
+          required: true,
+          read_only: false,
+        },
+      ],
+    });
+
+    return createEditorState(legacyDocument);
+  }
+
+  function rect(current: EditorState) {
+    return findField(current.document, "buyer_signature")?.rect;
+  }
+
+  it("is loaded and serialised exactly as it arrived", () => {
+    const start = legacy();
+
+    expect(rect(start)).toEqual({ x: 60.0004, y: 650, width: FINE, height: 36 });
+    expect(serializeFieldSchema(start.document)).toContain(`"width":${FINE}`);
+    expect(isDirty(start)).toBe(false);
+  });
+
+  it("keeps the members a move did not change", () => {
+    const moved = editorReducer(legacy(), { type: "move_field", id: "buyer_signature", x: 61.00049, y: 650 });
+
+    expect(rect(moved)).toEqual({ x: 61, y: 650, width: FINE, height: 36 });
+  });
+
+  it("keeps the members a patch did not change", () => {
+    const patched = editorReducer(legacy(), {
+      type: "update_field",
+      id: "buyer_signature",
+      patch: { rect: { y: 640.00049 } },
+    });
+
+    expect(rect(patched)).toEqual({ x: 60.0004, y: 640, width: FINE, height: 36 });
+  });
+
+  it("keeps the size a duplicate copied", () => {
+    const duplicated = editorReducer(legacy(), { type: "duplicate_field", id: "buyer_signature" });
+    const copy = duplicated.document.fields[1];
+
+    expect(copy?.rect).toEqual({ x: 72, y: 662, width: FINE, height: 36 });
+  });
+
+  it("still rounds a value the editor produced", () => {
+    const resized = editorReducer(legacy(), {
+      type: "resize_field",
+      id: "buyer_signature",
+      rect: { x: 60.0004, y: 650, width: 180.00051, height: 36 },
+    });
+
+    expect(rect(resized)).toEqual({ x: 60.0004, y: 650, width: 180.001, height: 36 });
+  });
+});
+
 describe("placing and sizing", () => {
   it("adds a field and selects it", () => {
     const start = state();

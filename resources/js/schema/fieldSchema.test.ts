@@ -248,6 +248,36 @@ describe("serializeFieldSchema", () => {
     expect(issues.map((problem) => problem.code)).toEqual(["coordinate_too_precise", "coordinate_too_precise"]);
   });
 
+  /**
+   * 1.0 accepts that finer value, and the server's canonical form rounds it. This runtime passes
+   * it through rather than rounding it first, because it would not always round it the same way
+   * (#105).
+   */
+  it("passes a 1.0 coordinate finer than the canonical precision through unrounded", () => {
+    const json = serializeFieldSchema(
+      parseFieldSchema({
+        schema_version: "1.0",
+        document_id: fixture().document_id,
+        coordinate_space: fixture().coordinate_space,
+        recipients: fixture().recipients,
+        signing_order: fixture().signing_order,
+        fields: [
+          {
+            id: "legacy_signature",
+            recipient_id: fixture().recipients[0]?.id,
+            type: "signature",
+            page: 1,
+            rect: { x: 1.6484999999999999, y: 650, width: 170.4567, height: 36 },
+            required: true,
+            read_only: false,
+          },
+        ],
+      }),
+    );
+
+    expect(JSON.parse(json).fields[0].rect).toEqual({ x: 1.6484999999999999, y: 650, width: 170.4567, height: 36 });
+  });
+
   it("survives a thousand round trips of generated documents without coordinate drift", () => {
     let seed = 20250908;
     const random = (): number => {

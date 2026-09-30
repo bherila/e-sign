@@ -214,11 +214,15 @@ bytes on both the server and the client:
    written `60`, never `60.0`.
 4. No insignificant whitespace; slashes and non-ASCII characters unescaped.
 
-`FieldSchemaDocument::canonicalJson()` and `serializeFieldSchema()` produce identical bytes for
-identical documents. A document already in canonical form round trips exactly — in PHP,
-`toArray(fromArray($x)) === $x` including property order and number types. A document that merely
-validates (defaults omitted, `60.0` for `60`, coordinates finer than a thousandth of a point) is
-canonicalised on first import, and every round trip after that is byte-identical. The property
+**The canonical form is PHP's.** `FieldSchemaDocument::canonicalJson()` is the only producer of
+`field_schema_sha256`, and it is the form a digest is verified against. `serializeFieldSchema()` is
+the editor's wire form. The two produce identical bytes for every 1.1 document and every value the
+editor produces. For a 1.0 document the editor did not touch, they can differ in the two ways
+[below](#precision-is-refused-from-11-and-rounded-in-10), and there the server's form decides.
+A document already in canonical form round trips exactly — in PHP, `toArray(fromArray($x)) === $x`
+including property order and number types. A document that merely validates (defaults omitted,
+`60.0` for `60`, and in 1.0 coordinates finer than a thousandth of a point) is canonicalised by the
+server on first import, and every round trip after that is byte-identical. The property
 tests generate a thousand documents on each side and assert exactly that, with strict identity
 rather than a float tolerance.
 
@@ -332,9 +336,24 @@ an integration that calculates positions, and one that posts to the API and neve
 had a single canonical form for it, deterministically.
 
 The cost is that a 1.0 document can still canonicalise two ways across the two implementations.
-That is real, it is [issue #105](https://github.com/bherila/e-sign/issues/105), and it is a 2.0
-question rather than something a minor version fixes underneath its consumers. The same gate covers
-the integer range: 1.1 refuses a whole number past 2^53, and 1.0 does not, for the same reason.
+That is [issue #105](https://github.com/bherila/e-sign/issues/105). Making the contract total is a
+2.0 question (bounding `rect` and `anchor.offset`, refusing precision in every version) rather than
+something a minor version fixes underneath its consumers. The same gate covers the integer range:
+1.1 refuses a whole number past 2^53, and 1.0 does not, for the same reason.
+
+Until then, 1.x settles it by **declaring one canonical form and keeping every other runtime from
+transforming a value it did not produce**:
+- **PHP's canonical form is the reference.** Only the server computes `field_schema_sha256`, and it
+  rounds a 1.0 coordinate once, on import.
+- **The editor does not round a 1.0 value it did not produce.** `canonicaliseDocument()` passes
+  numbers through, and an edit rounds only the members it changed; moving a field does not
+  rewrite its width. Before this, a value such as `1.6484999999999999` stored `1.649` or `1.648`
+  depending on whether the document had passed through the editor first. Now the server alone
+  rounds it, so the stored bytes do not depend on the path.
+- **Magnitude is left as it is.** A 1.0 `rect` from about 1e17 up is still spelled `1.0e+20` by
+  PHP and as digits by JavaScript. No document a real PDF could produce reaches that range, and the
+  service always re-canonicalises in PHP. Anyone **re-verifying a published digest must use the
+  reference (PHP) canonical form**, not a JavaScript `JSON.stringify` of the same document.
 
 1.0 does get one change, and it takes nothing away: rounding happens *before* the sign and
 dimension checks rather than after, so a width of `0.0004` — which rounded to zero and produced a
