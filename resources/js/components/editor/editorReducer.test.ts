@@ -182,6 +182,50 @@ describe("a 1.0 coordinate the editor did not produce", () => {
   });
 });
 
+/**
+ * After a save, the editor holds what the server stored. When the server rounded a 1.0 value it
+ * reads that back (#105), and edits made while the save was in flight must survive it.
+ */
+describe("adopting what the server saved", () => {
+  function savedFrom(start: EditorState): { sent: string; stored: FieldSchemaDocument } {
+    const sent = serializeFieldSchema(start.document);
+    const stored = parseFieldSchema(sent.replace('"width":170', '"width":171'));
+
+    return { sent, stored };
+  }
+
+  it("adopts the server's copy when nothing changed during the save", () => {
+    const start = editorReducer(state(), { type: "move_field", id: "buyer_signature", x: 61, y: 650 });
+    const { sent, stored } = savedFrom(start);
+
+    const adopted = editorReducer(start, { type: "adopt_saved", sent, stored });
+
+    expect(adopted.document).toEqual(stored);
+    expect(isDirty(adopted)).toBe(false);
+  });
+
+  it("keeps an edit made during the save, measured against what the server stored", () => {
+    const start = editorReducer(state(), { type: "move_field", id: "buyer_signature", x: 61, y: 650 });
+    const { sent, stored } = savedFrom(start);
+    const editedMeanwhile = editorReducer(start, { type: "move_field", id: "buyer_signature", x: 90, y: 650 });
+
+    const adopted = editorReducer(editedMeanwhile, { type: "adopt_saved", sent, stored });
+
+    expect(findField(adopted.document, "buyer_signature")?.rect.x).toBe(90);
+    expect(adopted.savedJson).toBe(serializeFieldSchema(stored));
+    expect(isDirty(adopted)).toBe(true);
+  });
+
+  it("marks nothing saved when the server's copy could not be read back", () => {
+    const start = editorReducer(state(), { type: "move_field", id: "buyer_signature", x: 61, y: 650 });
+
+    const unread = editorReducer(start, { type: "adopt_saved", sent: serializeFieldSchema(start.document), stored: null });
+
+    expect(unread).toBe(start);
+    expect(isDirty(unread)).toBe(true);
+  });
+});
+
 describe("placing and sizing", () => {
   it("adds a field and selects it", () => {
     const start = state();

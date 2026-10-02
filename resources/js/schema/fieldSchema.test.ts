@@ -296,6 +296,19 @@ describe("serializeFieldSchema", () => {
     expect(carriesUnroundedCoordinate(parseFieldSchema(legacyDocument({ x: 60, y: 650, width: 170.0004, height: 36 })))).toBe(true);
   });
 
+  /**
+   * PHP's rounding can move even an integer far beyond any page: `round(4999999999999.0, 3)` is
+   * `4999999999999.001`. 1.0 bounds neither `rect` nor `anchor.offset`, so such a value counts.
+   */
+  it("treats a magnitude beyond any page as one the server may change", () => {
+    const offset = legacyDocument({ x: 60, y: 650, width: 170, height: 36 }) as unknown as FieldSchemaDocument;
+    offset.fields[0] = { ...offset.fields[0]!, anchor: { text: "Signature", occurrence: 1, offset: { dx: 4999999999999, dy: 0 } } };
+
+    expect(carriesUnroundedCoordinate(offset)).toBe(true);
+    expect(carriesUnroundedCoordinate(parseFieldSchema(legacyDocument({ x: 14401, y: 650, width: 170, height: 36 })))).toBe(true);
+    expect(carriesUnroundedCoordinate(parseFieldSchema(legacyDocument({ x: 14400, y: 650, width: 170, height: 36 })))).toBe(false);
+  });
+
   it("survives a thousand round trips of generated documents without coordinate drift", () => {
     let seed = 20250908;
     const random = (): number => {
