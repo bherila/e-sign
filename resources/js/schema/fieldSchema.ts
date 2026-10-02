@@ -405,7 +405,10 @@ export function carriesUnroundedCoordinate(document: FieldSchemaDocument): boole
     ...document.fields.flatMap((field) => (field.anchor?.tolerance === undefined ? [] : [field.anchor.tolerance])),
   ];
 
-  return numbers.some((value) => !isCanonical(value));
+  // Beyond the largest page side PDF allows (the bound `measured_rect` uses), a value is no real coordinate, and PHP's rounding
+  // can move even an integer there (`round(4999999999999.0, 3)` gives `...999.001`). Reading
+  // back costs one request, so any such value counts.
+  return numbers.some((value) => !isCanonical(value) || Math.abs(value) > MEASURED_RECT_MAX_MAGNITUDE);
 }
 
 export function roundCoordinate(value: number): number {

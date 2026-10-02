@@ -13,6 +13,7 @@ import {
   type FieldType,
   type PageSize,
   parseFieldSchema,
+  serializeFieldSchema,
   validateFieldSchema,
   type ValidationIssue,
 } from "@/schema/fieldSchema";
@@ -324,22 +325,33 @@ function LoadedFieldEditor({ payload, initial, pages }: LoadedFieldEditorProps) 
         }
       }
 
+      const sent = serializeFieldSchema(state.document);
       const outcome = await saveFieldSchema(payload.urls.save, payload.csrf_token, state.document);
-      setSaving(false);
+
+      if (outcome.status !== "saved") {
+        setSaving(false);
+      }
 
       switch (outcome.status) {
-        case "saved":
+        case "saved": {
           setSavedSha(outcome.version.fieldSchemaSha256);
-          // A 1.0 coordinate the editor did not produce is sent unrounded and rounded by the
-          // server (#105), so what it stored - and hashed - is not what the editor holds. The
-          // saved state is the server's, so Export and the unsaved-changes check agree with it.
-          dispatch({
-            type: "mark_saved",
-            document: carriesUnroundedCoordinate(state.document)
-              ? ((await readSavedSchema(payload.urls.schema, pageSizes)) ?? state.document)
-              : state.document,
-          });
+
+          // What the server stored is what was sent, unless the document carried a 1.0 value the
+          // server rounds (#105): then it is read back. Either way the reducer replaces the
+          // document only if nothing was edited while the save was in flight.
+          const stored = carriesUnroundedCoordinate(state.document)
+            ? await readSavedSchema(payload.urls.schema, pageSizes)
+            : state.document;
+          setSaving(false);
+          dispatch({ type: "adopt_saved", sent, stored });
+
+          if (stored === null) {
+            setServerMessage(
+              "Saved, but the saved field set could not be read back, so this copy may differ from it. Reload from the server before exporting.",
+            );
+          }
           break;
+        }
         case "rejected":
           setServerMessage(outcome.message);
           setServerIssues(outcome.issues);

@@ -56,6 +56,11 @@ export type EditorAction =
   | { type: "delete_field"; id: string }
   | { type: "import_document"; document: FieldSchemaDocument }
   | { type: "mark_saved"; document: FieldSchemaDocument }
+  /**
+   * After a save the server rounded (#105): `sent` is the serialised document that was saved,
+   * `stored` what the server stored, or null when it could not be read back.
+   */
+  | { type: "adopt_saved"; sent: string; stored: FieldSchemaDocument | null }
   | { type: "undo" }
   | { type: "redo" };
 
@@ -194,6 +199,26 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         document: action.document,
         savedJson: serializeFieldSchema(action.document),
       };
+
+    case "adopt_saved": {
+      // Unread, nothing is known to match the server, so nothing is marked saved: the document
+      // stays dirty rather than claiming bytes the server never stored.
+      if (action.stored === null) {
+        return state;
+      }
+
+      // Edited while the read-back was in flight: keep the edits, and measure them against what
+      // the server stored, so they show as unsaved rather than being replaced.
+      if (serializeFieldSchema(state.document) !== action.sent) {
+        return { ...state, savedJson: serializeFieldSchema(action.stored) };
+      }
+
+      return {
+        ...state,
+        document: action.stored,
+        savedJson: serializeFieldSchema(action.stored),
+      };
+    }
 
     case "undo": {
       const previous = state.past.at(-1);
