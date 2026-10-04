@@ -65,7 +65,7 @@ jobs:
       # health checks. eSign keeps only its application-specific checks below.
       - name: Deploy to cPanel
         id: cpanel
-        uses: bherila/shared-cpanel-deployment@2da7295138423742e0987787abaaf2e9b55f82dd # v1.0.1
+        uses: bherila/shared-cpanel-deployment@8c76222308502feb35e037c806c92922cf13b6fd # v1.0.1 runtime-probe backport; shared-cpanel-deployment#37
         with:
           ssh-host: ${{ secrets.SSH_HOST }}
           ssh-username: ${{ secrets.SSH_USERNAME }}
