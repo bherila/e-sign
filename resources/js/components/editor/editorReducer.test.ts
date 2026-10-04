@@ -221,7 +221,27 @@ describe("adopting what the server saved", () => {
 
     const unread = editorReducer(start, { type: "adopt_saved", sent: serializeFieldSchema(start.document), stored: null });
 
-    expect(unread).toBe(start);
+    expect(unread.document).toBe(start.document);
+    expect(unread.savedJson).toBeNull();
+    expect(isDirty(unread)).toBe(true);
+  });
+
+  it("invalidates the old baseline after undoing during an unread save", () => {
+    const baseline = state();
+    const sentState = editorReducer(baseline, { type: "move_field", id: "buyer_signature", x: 61, y: 650 });
+    const undone = editorReducer(sentState, { type: "undo" });
+    expect(isDirty(undone)).toBe(false);
+
+    const unread = editorReducer(undone, {
+      type: "adopt_saved",
+      sent: serializeFieldSchema(sentState.document),
+      stored: null,
+    });
+
+    expect(unread.document).toBe(undone.document);
+    expect(unread.past).toBe(undone.past);
+    expect(unread.future).toBe(undone.future);
+    expect(unread.savedJson).toBeNull();
     expect(isDirty(unread)).toBe(true);
   });
 });

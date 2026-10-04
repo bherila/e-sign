@@ -309,6 +309,16 @@ describe("serializeFieldSchema", () => {
     expect(carriesUnroundedCoordinate(parseFieldSchema(legacyDocument({ x: 14400, y: 650, width: 170, height: 36 })))).toBe(false);
   });
 
+  it("does not require legacy read-back for a valid large 1.1 anchor offset", () => {
+    const document = fixture();
+    const anchored = document.fields.find((field) => field.anchor !== undefined)!;
+    anchored.anchor!.offset = { dx: 14401, dy: 0 };
+
+    const parsed = parseFieldSchema(document);
+    expect(parsed.schema_version).toBe("1.1");
+    expect(carriesUnroundedCoordinate(parsed)).toBe(false);
+  });
+
   it("survives a thousand round trips of generated documents without coordinate drift", () => {
     let seed = 20250908;
     const random = (): number => {

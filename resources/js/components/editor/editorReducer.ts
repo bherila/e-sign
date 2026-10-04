@@ -41,8 +41,8 @@ export interface EditorState {
   selectedFieldId: string | null;
   past: FieldSchemaDocument[];
   future: FieldSchemaDocument[];
-  /** Canonical JSON of the last document the server acknowledged, for the dirty check. */
-  savedJson: string;
+  /** Last acknowledged JSON, or null when a successful save could not be read back. */
+  savedJson: string | null;
 }
 
 export type EditorAction =
@@ -201,10 +201,10 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       };
 
     case "adopt_saved": {
-      // Unread, nothing is known to match the server, so nothing is marked saved: the document
-      // stays dirty rather than claiming bytes the server never stored.
+      // The PATCH changed the server even if an undo restored the previous local baseline.
+      // Without its stored copy, invalidate that baseline and keep every current edit.
       if (action.stored === null) {
-        return state;
+        return { ...state, savedJson: null };
       }
 
       // Edited while the read-back was in flight: keep the edits, and measure them against what
