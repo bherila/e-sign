@@ -525,13 +525,14 @@ export function parseFieldSchema(input: unknown, options: ValidationOptions = {}
  *
  * This is the editor's wire form, not the reference canonical form. `field_schema_sha256` is
  * computed only by the server, from `FieldSchemaDocument::canonicalJson()` in PHP, and that is
- * the canonical form a digest is verified against. The two agree byte for byte for every 1.1
- * document and every value the editor produces. They can differ for a 1.0 document the editor
- * did not touch:
- * - a coordinate finer than the schema's precision, which PHP rounds on import and this
+ * the canonical form a digest is verified against. Externally supplied numbers can differ:
+ * - a 1.0 coordinate finer than the schema's precision, which PHP rounds on import and this
  *   leaves for it to round;
- * - a magnitude from about 1e17 up, which PHP spells `1.0e+20` where JavaScript writes the
- *   digits.
+ * - an unbounded legacy rect/anchor.offset magnitude retained by both 1.0 and 1.1, which
+ *   PHP may spell `1.0e+20` where JavaScript writes the digits.
+ * Reading the saved schema back preserves its numeric values, not its original JSON spelling:
+ * parsing and serializing it uses JavaScript's spelling again. Verify a published digest
+ * against the server's schema.json bytes, not this wire form.
  * See `docs/preparation/field-schema.md`.
  */
 export function serializeFieldSchema(document: FieldSchemaDocument): string {
