@@ -319,6 +319,19 @@ describe("serializeFieldSchema", () => {
     expect(carriesUnroundedCoordinate(parsed)).toBe(false);
   });
 
+  it("does not preserve PHP number spelling through a parsed 1.1 read-back", () => {
+    const document = fixture();
+    const anchored = document.fields.find((field) => field.anchor !== undefined)!;
+    anchored.anchor!.offset = { dx: 1e20, dy: 0 };
+    const wire = serializeFieldSchema(parseFieldSchema(document));
+    expect(wire).toContain('"dx":100000000000000000000');
+    const serverBytes = wire.replace('"dx":100000000000000000000', '"dx":1.0e+20');
+
+    const readBack = parseFieldSchema(serverBytes);
+    expect(serializeFieldSchema(readBack)).toBe(wire);
+    expect(carriesUnroundedCoordinate(readBack)).toBe(false);
+  });
+
   it("survives a thousand round trips of generated documents without coordinate drift", () => {
     let seed = 20250908;
     const random = (): number => {

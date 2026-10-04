@@ -351,10 +351,12 @@ transforming a value it did not produce**:
   rewrite its width. Before this, a value such as `1.6484999999999999` stored `1.649` or `1.648`
   depending on whether the document had passed through the editor first. Now the server alone
   rounds it, so the stored bytes do not depend on the path.
-- **Magnitude is left as it is.** A 1.0 `rect` from about 1e17 up is still spelled `1.0e+20` by
-  PHP and as digits by JavaScript. No document a real PDF could produce reaches that range, and the
-  service always re-canonicalises in PHP. Anyone **re-verifying a published digest must use the
-  reference (PHP) canonical form**, not a JavaScript `JSON.stringify` of the same document.
+- **Magnitude is left as it is.** The unbounded legacy `rect` and `anchor.offset` members remain
+  unbounded in both 1.0 and 1.1. PHP can spell a value such as `1e20` as `1.0e+20` while JavaScript
+  writes its digits. Reading the saved JSON back does not retain that spelling: the editor parses
+  it into numbers and serializes them again. Anyone **re-verifying a published digest must use the
+  reference (PHP) canonical form** from the server's `schema.json` endpoint, not the editor's wire
+  JSON. The endpoint also returns the digest in `X-Field-Schema-Sha256`.
 
 1.0 does get one change, and it takes nothing away: rounding happens *before* the sign and
 dimension checks rather than after, so a width of `0.0004` — which rounded to zero and produced a
