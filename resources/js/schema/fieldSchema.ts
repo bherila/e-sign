@@ -393,6 +393,10 @@ export function isCanonical(value: number): boolean {
  * the one the editor holds, and the editor re-reads the server's.
  */
 export function carriesUnroundedCoordinate(document: FieldSchemaDocument): boolean {
+  if (document.schema_version !== "1.0") {
+    return false;
+  }
+
   const rects = document.fields.flatMap((field) => [
     field.rect,
     ...(field.anchor?.resolved === undefined ? [] : [field.anchor.resolved.anchor_rect, field.anchor.resolved.rect]),
