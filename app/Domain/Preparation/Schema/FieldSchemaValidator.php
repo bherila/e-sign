@@ -144,7 +144,8 @@ final class FieldSchemaValidator
      * bumps the **major** version. Applying the new rule to 1.0 because it makes a tidier
      * invariant would be the quiet contract violation this schema exists to refuse; the price of
      * that discipline is that a 1.0 document can still canonicalise two ways across the two
-     * implementations, which is issue #105 and is a 2.0 question rather than a bug fix.
+     * implementations. That is a permanent, documented residual (issue #105, closed won't-fix); see
+     * docs/preparation/field-schema.md "The residual, and the 2.0 policy".
      *
      * 1.1 refuses, which is a rule of the version rather than of this build, so it is expressed
      * here and not in a deployment gate.
