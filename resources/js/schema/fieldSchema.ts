@@ -346,8 +346,9 @@ export const ANCHOR_MEMBERS_MINOR = 1;
  *
  * 1.0 rounds, as it always has. Refusing is a semantic tightening — a document 1.0 accepted stops
  * being accepted — and this schema's policy reserves those for a **major** bump. The price is that
- * a 1.0 document can still canonicalise two ways across the two implementations (issue #105); that
- * is a 2.0 question, not something a minor version fixes by tightening underneath its consumers.
+ * a 1.0 document can still canonicalise two ways across the two implementations. That is a
+ * permanent, documented residual (issue #105, closed won't-fix), not something a minor version
+ * fixes by tightening underneath its consumers; see docs/preparation/field-schema.md.
  */
 export const PRECISION_REFUSED_SINCE_MINOR = 1;
 

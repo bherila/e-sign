@@ -337,12 +337,10 @@ an integration that calculates positions, and one that posts to the API and neve
 had a single canonical form for it, deterministically.
 
 The cost is that a 1.0 document can still canonicalise two ways across the two implementations.
-That is [issue #105](https://github.com/bherila/e-sign/issues/105). Making the contract total is a
-2.0 question (bounding `rect` and `anchor.offset`, refusing precision in every version) rather than
-something a minor version fixes underneath its consumers. The same gate covers the integer range:
-1.1 refuses a whole number past 2^53, and 1.0 does not, for the same reason.
+That is [issue #105](https://github.com/bherila/e-sign/issues/105). The same gate covers the integer
+range: 1.1 refuses a whole number past 2^53, and 1.0 does not, for the same reason.
 
-Until then, 1.x settles it by **declaring one canonical form and keeping every other runtime from
+1.x settles it by **declaring one canonical form and keeping every other runtime from
 transforming a value it did not produce**:
 - **PHP's canonical form is the reference.** Only the server computes `field_schema_sha256`, and it
   rounds a 1.0 coordinate once, on import.
@@ -357,6 +355,27 @@ transforming a value it did not produce**:
   it into numbers and serializes them again. Anyone **re-verifying a published digest must use the
   reference (PHP) canonical form** from the server's `schema.json` endpoint, not the editor's wire
   JSON. The endpoint also returns the digest in `X-Field-Schema-Sha256`.
+
+### The residual, and the 2.0 policy
+
+What remains is accepted as a **permanent property of 1.x** (decided 2026-10-08; #105 is closed as
+won't-fix). It is reachable only by values no real PDF produces:
+- A `rect` or `anchor.offset` member of 1e17 or more, where the two encoders spell numbers
+  differently.
+- A whole number past 2^53 in 1.0.
+
+The case that could reach a real digest, an editor round trip re-rounding a coordinate, is closed by
+the rules above. Anyone re-verifying a digest uses the reference (PHP) canonical form.
+
+No major version is cut for this alone. If a schema 2.0 is ever cut for another reason, this is the
+policy it follows:
+- **What 2.0 enforces.** 2.0 bounds `rect.*` and `anchor.offset.*` on the same ±14400 pt basis as
+  `tolerance` and `measured_rect`. It refuses precision finer than 0.001 and whole numbers past 2^53
+  in every member. That makes the contract canonical-form-total.
+- **What happens to 1.x.** 1.x becomes **read-only**. Stored 1.x documents stay readable and
+  verifiable exactly as today, but the API refuses new 1.x submissions.
+- **What the editor writes.** The editor writes 2.0 by default. Opening a stored 1.x document still
+  works.
 
 1.0 does get one change, and it takes nothing away: rounding happens *before* the sign and
 dimension checks rather than after, so a width of `0.0004` — which rounded to zero and produced a
