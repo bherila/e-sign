@@ -55,13 +55,16 @@ the payload. Provisioning also writes `identity.user_provisioned`.
 | Variable | Meaning |
 |---|---|
 | `ESIGN_DELEGATED_ACCESS_ENABLED` | `true` to register the behaviour; the route answers 404 otherwise |
-| `ESIGN_DELEGATED_ACCESS_ISSUER` | the provider's exact HTTPS issuer URL |
+| `ESIGN_DELEGATED_ACCESS_WRITES_ENABLED` | `true` to accept updates and provisioning; off by default, so reads can be piloted with writes impossible |
+| `ESIGN_DELEGATED_ACCESS_ISSUER` | the provider's exact HTTPS issuer URL; must equal `OAUTH_PROVIDER_URL` (a trailing slash aside), or every request is refused |
 | `ESIGN_DELEGATED_ACCESS_ENDPOINT` | this deployment's exact HTTPS `/application-access` URL, as the provider is configured to call it |
 | `ESIGN_DELEGATED_ACCESS_APPLICATION` | this application's key in the provider's registry |
-| `ESIGN_DELEGATED_ACCESS_PUBLIC_KEYS` | the provider's integration public keys, `key-id\|/path/to/public.pem`, comma-separated |
+| `ESIGN_DELEGATED_ACCESS_PUBLIC_KEYS` | the public half of this application's own key at the provider, `key-id\|/path/to/public.pem`; a second entry only while rotating |
 
-Use the provider's dedicated integration key pair, never its OAuth signing keys. To rotate, list
-both public keys, switch the provider to the new key id, then remove the old one. If any listed key
+Use a key pair the provider holds for this application alone, never its OAuth signing keys, a key
+shared with other applications, or another application's key: anyone holding a trusted private key
+can mint requests this deployment accepts. To rotate, list both public keys, switch the provider to
+the new key id, then remove the old one. If any listed key
 file cannot be read, every request is refused: a partly loaded key set would silently stop
 accepting one key.
 
@@ -69,7 +72,11 @@ At the provider, the application needs:
 - a registry entry with this key;
 - the endpoint URL above;
 - `contract_version: 2`;
-- delegated access (and writes) enabled.
+- its own signing key;
+- delegated access enabled, and writes listed for this application only once they are approved.
+
+Both sides gate writes: the provider's per-application list and this deployment's
+`ESIGN_DELEGATED_ACCESS_WRITES_ENABLED`. Either can stop them alone.
 
 ## Before enabling
 

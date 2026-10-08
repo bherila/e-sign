@@ -69,9 +69,12 @@ final class DelegatedAccessTest extends TestCase
 
         config([
             'bherila-auth.oauth_client.provider' => self::PROVIDER,
+            // The assertion issuer must be the sign-in provider.
+            'bherila-auth.oauth_client.base_url' => self::ISSUER,
             'esign.oauth_provider' => self::PROVIDER,
             'bherila-auth.delegated_access' => [
                 'enabled' => true,
+                'writes_enabled' => true,
                 'issuer' => self::ISSUER,
                 'endpoint' => self::ENDPOINT,
                 'application' => self::APPLICATION,
@@ -284,6 +287,23 @@ final class DelegatedAccessTest extends TestCase
             'expected_revision' => str_repeat('0', 64),
             'access' => ['application_admin' => false, 'workspaces' => []],
         ])->assertStatus(409)->assertJsonPath('error', 'revision_conflict');
+
+        $this->assertTrue(WorkspaceMembership::query()->where('workspace_id', $this->owned->getKey())->where('user_id', $this->target->getKey())->exists());
+    }
+
+    /** A read pilot: until this deployment switches writes on, no update reaches the adapter. */
+    public function test_updates_are_refused_until_writes_are_enabled_here(): void
+    {
+        config(['bherila-auth.delegated_access.writes_enabled' => false]);
+        $revision = $this->revisionOf('target-subject');
+
+        $this->send([
+            'operation' => 'update',
+            'subject' => 'target-subject',
+            'expected_revision' => $revision,
+            'access' => ['application_admin' => false, 'workspaces' => []],
+        ])->assertStatus(403)->assertJsonPath('error', 'not_authorized');
+        $this->validated($this->send(['operation' => 'read', 'subject' => 'target-subject']), 'read', 'target-subject');
 
         $this->assertTrue(WorkspaceMembership::query()->where('workspace_id', $this->owned->getKey())->where('user_id', $this->target->getKey())->exists());
     }
