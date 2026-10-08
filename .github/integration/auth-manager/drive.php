@@ -47,7 +47,10 @@ $application = 'e-sign';
 if ($step === 'seed') {
     $ids = [];
     foreach (['actor', 'target', 'newcomer'] as $who) {
-        $ids[$who] = (string) User::factory()->create(['user_role' => 'user'])->id;
+        // auth-manager restricts delegated administration per application: the actor manages e-sign
+        // and may browse its grant holders, as an operator would.
+        $role = $who === 'actor' ? "user,access-manage:{$application},access-directory:{$application}" : 'user';
+        $ids[$who] = (string) User::factory()->create(['user_role' => $role])->id;
     }
 
     $client = PassportClient::create([

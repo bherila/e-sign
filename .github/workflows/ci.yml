@@ -697,7 +697,10 @@ jobs:
         env:
           DB_DATABASE: esign_integration
           OAUTH_PROVIDER: ci-auth-manager
+          # The delegated assertion issuer must be the sign-in provider.
+          OAUTH_PROVIDER_URL: https://identity.example.test
           ESIGN_DELEGATED_ACCESS_ENABLED: 'true'
+          ESIGN_DELEGATED_ACCESS_WRITES_ENABLED: 'true'
           ESIGN_DELEGATED_ACCESS_ISSUER: https://identity.example.test
           ESIGN_DELEGATED_ACCESS_ENDPOINT: https://esign.example.test/application-access
           ESIGN_DELEGATED_ACCESS_APPLICATION: e-sign
@@ -729,9 +732,10 @@ jobs:
           DB_DATABASE: auth_manager_integration
           AUTH_MANAGER_DELEGATED_ACCESS_ENABLED: 'true'
           AUTH_MANAGER_DELEGATED_ACCESS_WRITES_ENABLED: 'true'
+          AUTH_MANAGER_DELEGATED_ACCESS_WRITES_APPLICATIONS: e-sign
           AUTH_MANAGER_DELEGATED_ACCESS_ISSUER: https://identity.example.test
-          AUTH_MANAGER_DELEGATED_ACCESS_KEY_ID: integration-v1
-          AUTH_MANAGER_DELEGATED_ACCESS_PRIVATE_KEY_PATH: /tmp/esign-integration/integration.key
+          # Writes are signed only with the application's own key; no instance-wide key is set.
+          AUTH_MANAGER_DELEGATED_ACCESS_KEYS: e-sign|integration-v1|/tmp/esign-integration/integration.key
         run: php ../.github/integration/auth-manager/drive.php run "$WORK/ids.json"
 
       - name: Show e-sign logs

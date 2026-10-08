@@ -161,6 +161,11 @@ return [
     // see docs/operations/delegated-access.md.
     'delegated_access' => [
         'enabled' => filter_var(env('ESIGN_DELEGATED_ACCESS_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
+        // Updates and provisioning are refused before the adapter until this is on, so reads can be
+        // piloted with writes impossible, whatever the provider allows.
+        'writes_enabled' => filter_var(env('ESIGN_DELEGATED_ACCESS_WRITES_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
+        // Must be the sign-in provider's oauth_client.base_url (a trailing slash aside), or every
+        // delegated request is refused with invalid_verifier_configuration.
         'issuer' => env('ESIGN_DELEGATED_ACCESS_ISSUER', ''),
         'endpoint' => env('ESIGN_DELEGATED_ACCESS_ENDPOINT', ''),
         'application' => env('ESIGN_DELEGATED_ACCESS_APPLICATION', ''),
