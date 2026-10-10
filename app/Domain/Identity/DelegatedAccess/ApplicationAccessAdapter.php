@@ -25,7 +25,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /**
- * Answers the identity provider's delegated access requests, contract version 2 (issue #111).
+ * Answers the identity provider's delegated access requests, contract version 3 (issue #111).
  *
  * The provider proves who is acting; this decides what they may see and change, with the same
  * rules the members page applies, because every change goes through {@see WorkspaceMembers}:
@@ -175,7 +175,7 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
                 'provisioned' => false,
                 'revision' => null,
                 'access' => null,
-                'allowed_edits' => ['application_admin' => false, 'workspaces' => false, 'provision' => true],
+                'allowed_edits' => ['application_admin' => false, 'workspaces' => false, 'provision' => true, 'remove' => false],
             ];
         }
 
@@ -195,7 +195,7 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
                         || $membership->role !== WorkspaceRole::Owner,
                 ], $memberships),
             ],
-            'allowed_edits' => ['application_admin' => false, 'workspaces' => true, 'provision' => false],
+            'allowed_edits' => ['application_admin' => false, 'workspaces' => true, 'provision' => false, 'remove' => false],
         ];
     }
 

@@ -28,7 +28,7 @@ use Tests\TestCase;
  * POST /application-access, driven the way the identity provider drives it (issue #111).
  *
  * Every request carries a real RS256 actor assertion bound to its exact body, and every answer is
- * checked against delegated access contract version 2 from `bherila/auth-laravel`, the same
+ * checked against delegated access contract version 3 from `bherila/auth-laravel`, the same
  * validator the provider applies. The membership rules themselves are `WorkspaceMembersTest`'s;
  * this pins what the provider can see and change, and what it cannot.
  */
@@ -154,11 +154,13 @@ final class DelegatedAccessTest extends TestCase
         $this->send(['operation' => 'capabilities'], subject: 'sender-subject')->assertForbidden();
     }
 
-    public function test_a_v1_request_is_refused(): void
+    public function test_a_v1_or_v2_request_is_refused(): void
     {
-        $body = (string) json_encode(['contract_version' => 1, 'application' => self::APPLICATION, 'operation' => 'capabilities']);
+        foreach ([1, 2] as $version) {
+            $body = (string) json_encode(['contract_version' => $version, 'application' => self::APPLICATION, 'operation' => 'capabilities']);
 
-        $this->send([], token: $this->assertion('actor-subject', $body), body: $body)->assertStatus(422);
+            $this->send([], token: $this->assertion('actor-subject', $body), body: $body)->assertStatus(422);
+        }
     }
 
     // ------------------------------------------------------------------------ reading
@@ -453,7 +455,12 @@ final class DelegatedAccessTest extends TestCase
      */
     private function body(array $input): string
     {
-        return (string) json_encode(['contract_version' => 2, 'application' => self::APPLICATION, ...$input], JSON_UNESCAPED_SLASHES);
+        // Every write carries the provider's operation id, one per user action.
+        if (in_array($input['operation'] ?? null, ['update', 'remove'], true)) {
+            $input += ['operation_id' => DelegatedContract::operationId()];
+        }
+
+        return (string) json_encode(['contract_version' => DelegatedContract::VERSION_3, 'application' => self::APPLICATION, ...$input], JSON_UNESCAPED_SLASHES);
     }
 
     /**
@@ -494,7 +501,7 @@ final class DelegatedAccessTest extends TestCase
     {
         $response->assertOk();
 
-        return (new DelegatedContract)->response($response->json(), self::APPLICATION, $operation, $subject, DelegatedContract::VERSION_2);
+        return (new DelegatedContract)->response($response->json(), self::APPLICATION, $operation, $subject, DelegatedContract::VERSION_3);
     }
 
     private function revisionOf(string $subject): string

@@ -54,6 +54,17 @@ Schedule::command('esign:api:prune-idempotency-keys')
     ->name('api:prune-idempotency-keys');
 
 /*
+ * Delegated access bookkeeping (docs/operations/delegated-access.md): expired assertion nonces,
+ * and operation receipts older than the 30 days a provider may still ask about. The package
+ * command never deletes a nonce that could still be replayed, and succeeds before the receipts
+ * table exists.
+ */
+Schedule::command('bherila-auth:prune-delegated-nonces')
+    ->daily()
+    ->withoutOverlapping()
+    ->name('delegated-access:prune');
+
+/*
  * Re-read every published artifact once a week and check it still matches its row
  * (issue #40; docs/operations/retention.md).
  *
