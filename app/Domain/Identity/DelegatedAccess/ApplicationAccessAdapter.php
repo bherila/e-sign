@@ -18,7 +18,9 @@ use BWH\Auth\OAuth\DelegatedAccess\DelegatedAccessException;
 use BWH\Auth\OAuth\DelegatedAccess\DelegatedAccessSettings;
 use BWH\Auth\OAuth\DelegatedAccess\DelegatedContract;
 use BWH\Auth\OAuth\DelegatedAccess\DelegatedCursor;
+use BWH\Auth\OAuth\DelegatedAccess\DelegatedRequestContext;
 use BWH\Auth\OAuth\PendingAccount;
+use Illuminate\Contracts\Container\Container;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
@@ -49,14 +51,12 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
 {
     public const PAGE_SIZE = 50;
 
-    /** Recorded on every audit event this surface causes. */
-    private const AUDIT_CONTEXT = ['via' => 'delegated_access'];
-
     public function __construct(
         private WorkspaceMembers $members,
         private AuditRecorder $audit,
         private DelegatedCursor $cursors,
         private DelegatedAccessSettings $settings,
+        private Container $container,
     ) {}
 
     /**
@@ -335,14 +335,14 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
             ]);
 
             $this->audit->record(AuditActor::user($actor), 'identity.user_provisioned', $user, [
-                ...self::AUDIT_CONTEXT,
+                ...$this->auditContext(),
                 'issuer' => $issuer,
                 'subject' => $subject,
                 'workspace_memberships' => count($desired),
             ]);
 
             foreach ($desired as $workspaceId => $role) {
-                $this->members->grant($managed[$workspaceId], $actor, $user, $role, self::AUDIT_CONTEXT);
+                $this->members->grant($managed[$workspaceId], $actor, $user, $role, $this->auditContext());
             }
         });
     }
@@ -390,18 +390,36 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
                 $membership = $existing[$workspaceId] ?? null;
 
                 if (! $membership instanceof WorkspaceMembership) {
-                    $this->members->grant($managed[$workspaceId], $actor, $target, $role, self::AUDIT_CONTEXT);
+                    $this->members->grant($managed[$workspaceId], $actor, $target, $role, $this->auditContext());
                 } elseif ($membership->role !== $role) {
-                    $this->members->changeRole($managed[$workspaceId], $actor, $membership, $role, self::AUDIT_CONTEXT);
+                    $this->members->changeRole($managed[$workspaceId], $actor, $membership, $role, $this->auditContext());
                 }
             }
 
             foreach ($existing as $workspaceId => $membership) {
                 if (! array_key_exists($workspaceId, $desired)) {
-                    $this->members->remove($managed[$workspaceId], $actor, $membership, self::AUDIT_CONTEXT);
+                    $this->members->remove($managed[$workspaceId], $actor, $membership, $this->auditContext());
                 }
             }
         });
+    }
+
+    /**
+     * Recorded on every audit event this surface causes: the surface itself, the provider's request
+     * id (the assertion's single-use `jti`) and, for a write, its operation id (the same on every
+     * retry of one action), so this trail lines up with the provider's attempt and result records.
+     *
+     * @return array<string, string>
+     */
+    private function auditContext(): array
+    {
+        $request = $this->container->bound(DelegatedRequestContext::class) ? $this->container->make(DelegatedRequestContext::class) : null;
+
+        return array_filter([
+            'via' => 'delegated_access',
+            'request_id' => $request?->jti,
+            'operation_id' => $request?->operationId,
+        ], static fn (?string $value): bool => $value !== null);
     }
 
     /**

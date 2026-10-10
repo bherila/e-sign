@@ -307,12 +307,14 @@ final class DelegatedAccessTest extends TestCase
     public function test_an_update_changes_adds_and_removes_memberships_through_the_members_service(): void
     {
         $revision = $this->revisionOf('target-subject');
+        $operationId = DelegatedContract::operationId();
 
         $response = $this->validated($this->send([
             'operation' => 'update',
             'subject' => 'target-subject',
             'expected_revision' => $revision,
             'access' => ['application_admin' => false, 'workspaces' => [['id' => $this->administered->public_id, 'role' => 'auditor']]],
+            'operation_id' => $operationId,
         ]), 'update', 'target-subject');
 
         $this->assertSame([['id' => $this->administered->public_id, 'role' => 'auditor', 'editable' => true]], $response['access']['workspaces']);
@@ -322,8 +324,14 @@ final class DelegatedAccessTest extends TestCase
         // A membership the actor cannot see is untouched.
         $this->assertTrue(WorkspaceMembership::query()->where('workspace_id', $this->elsewhere->getKey())->where('user_id', $this->target->getKey())->exists());
 
-        $this->assertSame(['delegated_access'], AuditEvent::query()->whereIn('action', ['identity.member_granted', 'identity.member_removed'])->get()
-            ->map(static fn (AuditEvent $event): mixed => $event->payload['via'] ?? null)->unique()->values()->all());
+        // Each event names the surface, the provider's request (one per HTTP request) and the
+        // operation (one per user action), so the two trails can be lined up.
+        $events = AuditEvent::query()->whereIn('action', ['identity.member_granted', 'identity.member_removed'])->get();
+        $this->assertCount(2, $events);
+        $this->assertSame([['delegated_access', $operationId]], $events
+            ->map(static fn (AuditEvent $event): array => [$event->payload['via'] ?? null, $event->payload['operation_id'] ?? null])->unique()->values()->all());
+        $this->assertCount(1, $events->map(static fn (AuditEvent $event): mixed => $event->payload['request_id'] ?? null)->unique());
+        $this->assertMatchesRegularExpression('/\A[0-9a-f]{64}\z/', (string) $events->first()?->payload['request_id']);
     }
 
     public function test_a_stale_revision_is_a_conflict_and_changes_nothing(): void
