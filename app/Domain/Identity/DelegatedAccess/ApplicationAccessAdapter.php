@@ -18,14 +18,16 @@ use BWH\Auth\OAuth\DelegatedAccess\DelegatedAccessException;
 use BWH\Auth\OAuth\DelegatedAccess\DelegatedAccessSettings;
 use BWH\Auth\OAuth\DelegatedAccess\DelegatedContract;
 use BWH\Auth\OAuth\DelegatedAccess\DelegatedCursor;
+use BWH\Auth\OAuth\DelegatedAccess\DelegatedRequestContext;
 use BWH\Auth\OAuth\PendingAccount;
+use Illuminate\Contracts\Container\Container;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /**
- * Answers the identity provider's delegated access requests, contract version 2 (issue #111).
+ * Answers the identity provider's delegated access requests, contract version 3 (issue #111).
  *
  * The provider proves who is acting; this decides what they may see and change, with the same
  * rules the members page applies, because every change goes through {@see WorkspaceMembers}:
@@ -44,19 +46,20 @@ use Illuminate\Support\Str;
  * - **Provisioning.** An update with a null revision creates the account for a subject nobody has
  *   bound yet, bound to this provider's issuer and that exact subject, and grants the memberships
  *   asked for. It never adopts an existing row found by address.
+ * - **Search.** A query narrows the actor's own listing of people or workspaces, never past it.
+ * - **Removal.** Takes every membership the actor manages, or refuses and takes nothing; the
+ *   account and everything it did stay.
  */
 final readonly class ApplicationAccessAdapter implements AccessAdapter
 {
     public const PAGE_SIZE = 50;
-
-    /** Recorded on every audit event this surface causes. */
-    private const AUDIT_CONTEXT = ['via' => 'delegated_access'];
 
     public function __construct(
         private WorkspaceMembers $members,
         private AuditRecorder $audit,
         private DelegatedCursor $cursors,
         private DelegatedAccessSettings $settings,
+        private Container $container,
     ) {}
 
     /**
@@ -85,6 +88,7 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
             'subjects' => $this->subjectsPage($actorSubject, $managed, $payload),
             'read' => $this->state($actor, $managed, (string) $payload['subject']),
             'update' => $this->update($actor, $managed, $payload),
+            'remove' => $this->remove($actor, $managed, $payload),
             default => throw new DelegatedAccessException('invalid_request', 422),
         };
     }
@@ -97,7 +101,7 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
         return ['controls' => [
             'application_admin' => false,
             'workspace_roles' => array_map(
-                static fn (WorkspaceRole $role): array => ['id' => $role->value, 'label' => $role->label()],
+                static fn (WorkspaceRole $role): array => ['id' => $role->value, 'label' => $role->label(), 'description' => $role->description()],
                 WorkspaceRole::cases(),
             ),
             'provisioning' => true,
@@ -113,7 +117,11 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
     {
         $after = $this->cursors->after($actorSubject, 'workspaces', $payload);
         $limit = (int) ($payload['limit'] ?? self::PAGE_SIZE);
-        $remaining = array_values(array_filter($managed, static fn (Workspace $workspace): bool => $workspace->getKey() > $after));
+        $query = self::query($payload);
+        // A search filters the managed workspaces and nothing else, so it can find nothing the
+        // unfiltered listing would not show. Workspaces have no email; the label is the name.
+        $remaining = array_values(array_filter($managed, static fn (Workspace $workspace): bool => $workspace->getKey() > $after
+            && ($query === null || mb_stripos($workspace->name, $query) !== false)));
         $page = array_slice($remaining, 0, $limit);
 
         return [
@@ -122,12 +130,13 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
                 // The contract bounds labels to 250 characters; a workspace name may be longer.
                 'label' => Str::limit($workspace->name, 250, ''),
             ], $page),
-            'next_cursor' => count($remaining) > $limit ? $this->cursors->encode($actorSubject, 'workspaces', (int) $page[array_key_last($page)]->getKey()) : null,
+            'next_cursor' => count($remaining) > $limit ? $this->cursors->encode($actorSubject, 'workspaces', (int) $page[array_key_last($page)]->getKey(), $query) : null,
         ];
     }
 
     /**
-     * People bound under this provider who belong to a workspace the actor manages.
+     * People bound under this provider who belong to a workspace the actor manages, optionally
+     * those whose name or stored email contains the query.
      *
      * @param  array<int, Workspace>  $managed
      * @param  array<string, mixed>  $payload
@@ -138,11 +147,20 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
         $after = $this->cursors->after($actorSubject, 'subjects', $payload);
         $limit = (int) ($payload['limit'] ?? self::PAGE_SIZE);
         $workspaceIds = array_keys($managed);
+        $query = self::query($payload);
 
         $bindings = IdentityBinding::query()
             ->with('user')
             ->where('issuer', $this->settings->bindingIssuer())
             ->whereHas('user.workspaceMemberships', static fn (Builder $memberships): Builder => $memberships->whereIn('workspace_id', $workspaceIds))
+            // Added to the scoped listing, never instead of it: a search narrows what the actor may
+            // already see. Lowered on both sides so the match ignores case whatever the collation.
+            ->when($query !== null, static fn (Builder $bindings): Builder => $bindings->whereHas('user', static function (Builder $users) use ($query): void {
+                $pattern = '%'.self::escapeLike(mb_strtolower((string) $query)).'%';
+                $users->where(static fn (Builder $match): Builder => $match
+                    ->whereRaw("LOWER(users.name) LIKE ? ESCAPE '!'", [$pattern])
+                    ->orWhereRaw("LOWER(users.email) LIKE ? ESCAPE '!'", [$pattern]));
+            }))
             ->where('id', '>', $after)
             ->orderBy('id')
             ->limit($limit + 1)
@@ -154,8 +172,9 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
             'subjects' => $page->map(static fn (IdentityBinding $binding): array => [
                 'subject' => $binding->subject,
                 'label' => Str::limit((string) $binding->user?->name, 250, '') ?: $binding->subject,
+                ...self::observations($binding),
             ])->values()->all(),
-            'next_cursor' => $bindings->count() > $limit ? $this->cursors->encode($actorSubject, 'subjects', (int) $page->last()?->getKey()) : null,
+            'next_cursor' => $bindings->count() > $limit ? $this->cursors->encode($actorSubject, 'subjects', (int) $page->last()?->getKey(), $query) : null,
         ];
     }
 
@@ -167,35 +186,44 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
      */
     private function state(User $actor, array $managed, string $subject): array
     {
-        $target = $this->boundUser($subject);
+        $binding = $this->binding($subject);
+        $target = $binding?->user;
 
-        if (! $target instanceof User) {
+        if (! $binding instanceof IdentityBinding || ! $target instanceof User) {
             return [
                 'subject' => $subject,
                 'provisioned' => false,
                 'revision' => null,
                 'access' => null,
-                'allowed_edits' => ['application_admin' => false, 'workspaces' => false, 'provision' => true],
+                'allowed_edits' => ['application_admin' => false, 'workspaces' => false, 'provision' => true, 'remove' => false],
             ];
         }
 
         $memberships = $this->visibleMemberships($target, $managed);
         $actorRoles = $this->actorRoles($actor, $managed);
+        $owners = $this->ownerCounts($managed, $memberships);
 
         return [
             'subject' => $subject,
             'provisioned' => true,
+            ...self::observations($binding),
             'revision' => self::revision($target, $memberships),
             'access' => [
                 'application_admin' => false,
                 'workspaces' => array_map(static fn (WorkspaceMembership $membership): array => [
                     'id' => $managed[$membership->workspace_id]->public_id,
                     'role' => $membership->role->value,
-                    'editable' => ($actorRoles[$membership->workspace_id] ?? null) === WorkspaceRole::Owner
-                        || $membership->role !== WorkspaceRole::Owner,
+                    'editable' => self::editable($membership, $actorRoles, $owners),
                 ], $memberships),
             ],
-            'allowed_edits' => ['application_admin' => false, 'workspaces' => true, 'provision' => false],
+            'allowed_edits' => [
+                'application_admin' => false,
+                'workspaces' => true,
+                'provision' => false,
+                // Exactly when remove() would go through: everything shown may be removed, or there
+                // is nothing to remove and it is a no-op.
+                'remove' => array_all($memberships, static fn (WorkspaceMembership $membership): bool => self::editable($membership, $actorRoles, $owners)),
+            ],
         ];
     }
 
@@ -321,14 +349,14 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
             ]);
 
             $this->audit->record(AuditActor::user($actor), 'identity.user_provisioned', $user, [
-                ...self::AUDIT_CONTEXT,
+                ...$this->auditContext(),
                 'issuer' => $issuer,
                 'subject' => $subject,
                 'workspace_memberships' => count($desired),
             ]);
 
             foreach ($desired as $workspaceId => $role) {
-                $this->members->grant($managed[$workspaceId], $actor, $user, $role, self::AUDIT_CONTEXT);
+                $this->members->grant($managed[$workspaceId], $actor, $user, $role, $this->auditContext());
             }
         });
     }
@@ -351,15 +379,7 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
         }
 
         DB::transaction(function () use ($actor, $managed, $target, $expectedRevision, $desired): void {
-            $workspaceIds = array_keys($managed);
-
-            // The order every membership change takes: owner rows first, then the actor's and the
-            // target's rows in id order. Holding them here means nobody can change what the revision
-            // describes between comparing it and changing it.
-            WorkspaceMembership::query()->whereIn('workspace_id', $workspaceIds)->where('role', WorkspaceRole::Owner->value)
-                ->orderBy('workspace_id')->orderBy('id')->lockForUpdate()->get();
-            WorkspaceMembership::query()->whereIn('workspace_id', $workspaceIds)->whereIn('user_id', [$actor->getKey(), $target->getKey()])
-                ->orderBy('id')->lockForUpdate()->get();
+            $this->lockMemberships($actor, $managed, $target);
 
             $current = $this->visibleMemberships($target, $managed);
 
@@ -376,18 +396,115 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
                 $membership = $existing[$workspaceId] ?? null;
 
                 if (! $membership instanceof WorkspaceMembership) {
-                    $this->members->grant($managed[$workspaceId], $actor, $target, $role, self::AUDIT_CONTEXT);
+                    $this->members->grant($managed[$workspaceId], $actor, $target, $role, $this->auditContext());
                 } elseif ($membership->role !== $role) {
-                    $this->members->changeRole($managed[$workspaceId], $actor, $membership, $role, self::AUDIT_CONTEXT);
+                    $this->members->changeRole($managed[$workspaceId], $actor, $membership, $role, $this->auditContext());
                 }
             }
 
             foreach ($existing as $workspaceId => $membership) {
                 if (! array_key_exists($workspaceId, $desired)) {
-                    $this->members->remove($managed[$workspaceId], $actor, $membership, self::AUDIT_CONTEXT);
+                    $this->members->remove($managed[$workspaceId], $actor, $membership, $this->auditContext());
                 }
             }
         });
+    }
+
+    /**
+     * Take away every membership the actor manages from the target, or nothing.
+     *
+     * The account, its identity binding, its memberships in workspaces the actor cannot see, and
+     * every envelope, artifact and audit event stay: each membership goes through
+     * {@see WorkspaceMembers::remove()}, which deletes the row and nothing else. If anything shown is
+     * protected (an owner the actor may not change, or a workspace's only owner) the whole removal
+     * is refused before anything changes. With nothing to remove it changes nothing, writes no
+     * audit event and answers the same revision.
+     *
+     * @param  array<int, Workspace>  $managed
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     *
+     * @throws DelegatedAccessException
+     */
+    private function remove(User $actor, array $managed, array $payload): array
+    {
+        $subject = (string) $payload['subject'];
+        $expectedRevision = (string) $payload['expected_revision'];
+        $target = $this->boundUser($subject);
+
+        if (! $target instanceof User) {
+            throw new DelegatedAccessException('not_provisioned', 404);
+        }
+
+        try {
+            DB::transaction(function () use ($actor, $managed, $target, $expectedRevision): void {
+                $this->lockMemberships($actor, $managed, $target);
+
+                $current = $this->visibleMemberships($target, $managed);
+
+                if (! hash_equals(self::revision($target, $current), $expectedRevision)) {
+                    throw new DelegatedAccessException('revision_conflict', 409);
+                }
+
+                // Decided on the locked rows, all of them before any is removed: never a partial removal.
+                $actorRoles = $this->actorRoles($actor, $managed);
+                $owners = $this->ownerCounts($managed, $current);
+                foreach ($current as $membership) {
+                    if (! self::editable($membership, $actorRoles, $owners)) {
+                        throw new DelegatedAccessException('protected_membership', 403);
+                    }
+                }
+
+                foreach ($current as $membership) {
+                    $this->members->remove($managed[$membership->workspace_id], $actor, $membership, $this->auditContext());
+                }
+            });
+        } catch (MembershipChangeRefused $refusal) {
+            // The checks above make these unreachable; they still refuse, and the transaction has
+            // undone any membership already removed.
+            throw match ($refusal->reason) {
+                MembershipChangeRefused::NOT_PERMITTED => new DelegatedAccessException('not_authorized', 403),
+                MembershipChangeRefused::OWNER_ONLY, MembershipChangeRefused::LAST_OWNER => new DelegatedAccessException('protected_membership', 403),
+                default => new DelegatedAccessException('invalid_request', 422),
+            };
+        }
+
+        return $this->state($actor, $managed, $subject);
+    }
+
+    /**
+     * Take the locks every membership change takes, in the same order: the managed workspaces'
+     * owner rows first, then the actor's and the target's rows in id order. Holding them means
+     * nobody can change what the revision describes between comparing it and changing it.
+     *
+     * @param  array<int, Workspace>  $managed
+     */
+    private function lockMemberships(User $actor, array $managed, User $target): void
+    {
+        $workspaceIds = array_keys($managed);
+
+        WorkspaceMembership::query()->whereIn('workspace_id', $workspaceIds)->where('role', WorkspaceRole::Owner->value)
+            ->orderBy('workspace_id')->orderBy('id')->lockForUpdate()->get();
+        WorkspaceMembership::query()->whereIn('workspace_id', $workspaceIds)->whereIn('user_id', [$actor->getKey(), $target->getKey()])
+            ->orderBy('id')->lockForUpdate()->get();
+    }
+
+    /**
+     * Recorded on every audit event this surface causes: the surface itself, the provider's request
+     * id (the assertion's single-use `jti`) and, for a write, its operation id (the same on every
+     * retry of one action), so this trail lines up with the provider's attempt and result records.
+     *
+     * @return array<string, string>
+     */
+    private function auditContext(): array
+    {
+        $request = $this->container->bound(DelegatedRequestContext::class) ? $this->container->make(DelegatedRequestContext::class) : null;
+
+        return array_filter([
+            'via' => 'delegated_access',
+            'request_id' => $request?->jti,
+            'operation_id' => $request?->operationId,
+        ], static fn (?string $value): bool => $value !== null);
     }
 
     /**
@@ -426,6 +543,54 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
     }
 
     /**
+     * Whether the actor may change or remove this membership, exactly as {@see WorkspaceMembers}
+     * decides it: an owner's membership only by an owner of that workspace, and never the
+     * workspace's only owner (in practice the actor themselves).
+     *
+     * @param  array<int, WorkspaceRole>  $actorRoles  workspace id => the actor's role
+     * @param  array<int, int>  $owners  workspace id => how many owners it has
+     */
+    private static function editable(WorkspaceMembership $membership, array $actorRoles, array $owners): bool
+    {
+        if ($membership->role !== WorkspaceRole::Owner) {
+            return true;
+        }
+
+        return ($actorRoles[$membership->workspace_id] ?? null) === WorkspaceRole::Owner
+            && ($owners[$membership->workspace_id] ?? 0) > 1;
+    }
+
+    /**
+     * How many owners each workspace holding one of these memberships as an owner has. Only those
+     * are ever asked about, so nothing is counted for a target who owns nothing here.
+     *
+     * @param  array<int, Workspace>  $managed
+     * @param  list<WorkspaceMembership>  $memberships
+     * @return array<int, int> workspace id => owners
+     */
+    private function ownerCounts(array $managed, array $memberships): array
+    {
+        $owned = array_values(array_unique(array_map(
+            static fn (WorkspaceMembership $membership): int => $membership->workspace_id,
+            array_filter($memberships, static fn (WorkspaceMembership $membership): bool => $membership->role === WorkspaceRole::Owner),
+        )));
+
+        if ($owned === []) {
+            return [];
+        }
+
+        $counts = [];
+        foreach (WorkspaceMembership::query()
+            ->whereIn('workspace_id', array_intersect($owned, array_keys($managed)))
+            ->where('role', WorkspaceRole::Owner->value)
+            ->pluck('workspace_id') as $workspaceId) {
+            $counts[(int) $workspaceId] = ($counts[(int) $workspaceId] ?? 0) + 1;
+        }
+
+        return $counts;
+    }
+
+    /**
      * @param  array<int, Workspace>  $managed
      * @return list<WorkspaceMembership>
      */
@@ -439,11 +604,48 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
             ->all();
     }
 
+    /**
+     * The search a listing asked for, already held to the contract's bounds; null for none.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    private static function query(array $payload): ?string
+    {
+        return is_string($payload['query'] ?? null) ? $payload['query'] : null;
+    }
+
+    /** Make every character of a search literal in a `LIKE … ESCAPE '!'` pattern. */
+    private static function escapeLike(string $value): string
+    {
+        return str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $value);
+    }
+
     private function boundUser(string $subject): ?User
     {
-        $binding = IdentityBinding::query()->forIssuerSubject($this->settings->bindingIssuer(), $subject)->with('user')->first();
+        $user = $this->binding($subject)?->user;
 
-        return $binding?->user instanceof User ? $binding->user : null;
+        return $user instanceof User ? $user : null;
+    }
+
+    private function binding(string $subject): ?IdentityBinding
+    {
+        return IdentityBinding::query()->forIssuerSubject($this->settings->bindingIssuer(), $subject)->with('user')->first();
+    }
+
+    /**
+     * What this application knows of a person's history, read-only and never part of the revision:
+     * when the account was created (by sign-in, provisioning or bootstrap) and when they last signed
+     * in through this provider, null until they have. A first sign-in is not recorded separately,
+     * so it is left out rather than guessed.
+     *
+     * @return array{provisioned_at: string|null, last_seen_at: string|null}
+     */
+    private static function observations(IdentityBinding $binding): array
+    {
+        return [
+            'provisioned_at' => $binding->user?->created_at?->toIso8601ZuluString(),
+            'last_seen_at' => $binding->last_seen_at?->toIso8601ZuluString(),
+        ];
     }
 
     /**

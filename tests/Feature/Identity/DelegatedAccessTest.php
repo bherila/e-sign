@@ -28,7 +28,7 @@ use Tests\TestCase;
  * POST /application-access, driven the way the identity provider drives it (issue #111).
  *
  * Every request carries a real RS256 actor assertion bound to its exact body, and every answer is
- * checked against delegated access contract version 2 from `bherila/auth-laravel`, the same
+ * checked against delegated access contract version 3 from `bherila/auth-laravel`, the same
  * validator the provider applies. The membership rules themselves are `WorkspaceMembersTest`'s;
  * this pins what the provider can see and change, and what it cannot.
  */
@@ -154,11 +154,13 @@ final class DelegatedAccessTest extends TestCase
         $this->send(['operation' => 'capabilities'], subject: 'sender-subject')->assertForbidden();
     }
 
-    public function test_a_v1_request_is_refused(): void
+    public function test_a_v1_or_v2_request_is_refused(): void
     {
-        $body = (string) json_encode(['contract_version' => 1, 'application' => self::APPLICATION, 'operation' => 'capabilities']);
+        foreach ([1, 2] as $version) {
+            $body = (string) json_encode(['contract_version' => $version, 'application' => self::APPLICATION, 'operation' => 'capabilities']);
 
-        $this->send([], token: $this->assertion('actor-subject', $body), body: $body)->assertStatus(422);
+            $this->send([], token: $this->assertion('actor-subject', $body), body: $body)->assertStatus(422);
+        }
     }
 
     // ------------------------------------------------------------------------ reading
@@ -168,6 +170,7 @@ final class DelegatedAccessTest extends TestCase
         $response = $this->validated($this->send(['operation' => 'capabilities']), 'capabilities');
 
         $this->assertSame(['owner', 'admin', 'sender', 'auditor'], array_column($response['controls']['workspace_roles'], 'id'));
+        $this->assertSame(array_map(static fn (WorkspaceRole $role): string => $role->description(), WorkspaceRole::cases()), array_column($response['controls']['workspace_roles'], 'description'));
         $this->assertFalse($response['controls']['application_admin']);
         $this->assertTrue($response['controls']['provisioning']);
     }
@@ -219,6 +222,36 @@ final class DelegatedAccessTest extends TestCase
         $this->assertTrue($byId[$this->owned->public_id]['editable']);
     }
 
+    /** The members page never removes or demotes a workspace's only owner, so neither may this. */
+    public function test_a_workspaces_only_owner_is_not_editable_until_another_owner_exists(): void
+    {
+        $read = fn (): array => array_column($this->validated($this->send(['operation' => 'read', 'subject' => 'actor-subject']), 'read', 'actor-subject')['access']['workspaces'], 'editable', 'id');
+
+        $this->assertSame([$this->owned->public_id => false, $this->administered->public_id => true], $read());
+
+        $this->member($this->owned, $this->bound('co-owner-subject', 'Example Co-owner'), WorkspaceRole::Owner);
+
+        $this->assertSame([$this->owned->public_id => true, $this->administered->public_id => true], $read());
+    }
+
+    /** Read-only observations, in the read and in the listing, and never part of the revision. */
+    public function test_a_read_and_the_listing_carry_when_the_account_was_created_and_last_signed_in(): void
+    {
+        $this->target->forceFill(['created_at' => '2026-09-01 08:00:00'])->save();
+        $revision = $this->revisionOf('target-subject');
+        IdentityBinding::query()->forIssuerSubject(self::PROVIDER, 'target-subject')->update(['last_seen_at' => '2026-10-01 09:30:00']);
+
+        $read = $this->validated($this->send(['operation' => 'read', 'subject' => 'target-subject']), 'read', 'target-subject');
+        $this->assertSame(['2026-09-01T08:00:00Z', '2026-10-01T09:30:00Z'], [$read['provisioned_at'], $read['last_seen_at']]);
+        $this->assertArrayNotHasKey('first_sign_in_at', $read, 'Not recorded, so not guessed');
+        $this->assertSame($revision, $read['revision'], 'Signing in does not change the revision');
+
+        $listed = array_column($this->validated($this->send(['operation' => 'subjects']), 'subjects')['subjects'], null, 'subject');
+        $this->assertSame('2026-10-01T09:30:00Z', $listed['target-subject']['last_seen_at']);
+        $this->assertSame('2026-09-01T08:00:00Z', $listed['target-subject']['provisioned_at']);
+        $this->assertNull($listed['actor-subject']['last_seen_at'], 'Never signed in through this provider');
+    }
+
     public function test_an_unknown_subject_is_unprovisioned_and_may_be_provisioned(): void
     {
         $response = $this->validated($this->send(['operation' => 'read', 'subject' => 'new-subject']), 'read', 'new-subject');
@@ -243,6 +276,51 @@ final class DelegatedAccessTest extends TestCase
         $this->assertNull($next['next_cursor']);
     }
 
+    /** A search narrows each actor's own listing: what one manager finds, another may not. */
+    public function test_a_search_stays_within_the_workspaces_each_actor_manages(): void
+    {
+        $hidden = $this->bound('hidden-subject', 'Example Hidden');
+        $this->member($this->elsewhere, $hidden, WorkspaceRole::Sender);
+        $other = $this->bound('other-manager-subject', 'Other Manager');
+        $this->member($this->elsewhere, $other, WorkspaceRole::Owner);
+        foreach (['actor' => $this->actor, 'target' => $this->target, 'hidden' => $hidden, 'other' => $other] as $who => $user) {
+            $user->forceFill(['email' => "{$who}.person@directory.test"])->save();
+        }
+
+        $search = fn (string $operation, string $query, string $as = 'actor-subject'): array => array_column(
+            $this->validated($this->send(['operation' => $operation, 'query' => $query], subject: $as), $operation)[$operation],
+            $operation === 'subjects' ? 'subject' : 'id',
+        );
+
+        // Case-insensitive, on the name and on the stored email.
+        $this->assertSame(['target-subject'], $search('subjects', 'eXaMpLe TaRgEt'));
+        $this->assertSame(['target-subject'], $search('subjects', 'TARGET.PERSON@'));
+
+        // Each manager finds only people in a workspace it manages, the target in both.
+        $this->assertSame(['actor-subject', 'target-subject'], $search('subjects', 'example'));
+        $this->assertSame(['actor-subject', 'target-subject'], $search('subjects', 'DIRECTORY.test'));
+        $this->assertSame([], $search('subjects', 'hidden'));
+        $this->assertSame(['target-subject', 'hidden-subject'], $search('subjects', 'example', 'other-manager-subject'));
+
+        $this->assertSame([$this->owned->public_id, $this->administered->public_id], $search('workspaces', 'WORKSPACE'));
+        $this->assertSame([], $search('workspaces', 'elsewhere'));
+        $this->assertSame([$this->elsewhere->public_id], $search('workspaces', 'elsewhere', 'other-manager-subject'));
+
+        // LIKE wildcards in a search are literal characters.
+        $this->assertSame([], $search('subjects', '%%'));
+        $this->assertSame([], $search('subjects', '__'));
+
+        // A cursor belongs to its search: another search cannot continue it.
+        $first = $this->validated($this->send(['operation' => 'subjects', 'query' => 'example', 'limit' => 1]), 'subjects');
+        $this->assertSame(['actor-subject'], array_column($first['subjects'], 'subject'));
+        $this->send(['operation' => 'subjects', 'query' => 'target', 'limit' => 1, 'cursor' => $first['next_cursor']])
+            ->assertStatus(422)->assertJsonPath('error', 'invalid_cursor');
+
+        $next = $this->validated($this->send(['operation' => 'subjects', 'query' => 'example', 'limit' => 1, 'cursor' => $first['next_cursor']]), 'subjects');
+        $this->assertSame(['target-subject'], array_column($next['subjects'], 'subject'));
+        $this->assertNull($next['next_cursor']);
+    }
+
     public function test_a_declared_oversize_body_is_refused_before_it_is_read(): void
     {
         $body = $this->body(['operation' => 'capabilities']);
@@ -260,12 +338,14 @@ final class DelegatedAccessTest extends TestCase
     public function test_an_update_changes_adds_and_removes_memberships_through_the_members_service(): void
     {
         $revision = $this->revisionOf('target-subject');
+        $operationId = DelegatedContract::operationId();
 
         $response = $this->validated($this->send([
             'operation' => 'update',
             'subject' => 'target-subject',
             'expected_revision' => $revision,
             'access' => ['application_admin' => false, 'workspaces' => [['id' => $this->administered->public_id, 'role' => 'auditor']]],
+            'operation_id' => $operationId,
         ]), 'update', 'target-subject');
 
         $this->assertSame([['id' => $this->administered->public_id, 'role' => 'auditor', 'editable' => true]], $response['access']['workspaces']);
@@ -275,8 +355,14 @@ final class DelegatedAccessTest extends TestCase
         // A membership the actor cannot see is untouched.
         $this->assertTrue(WorkspaceMembership::query()->where('workspace_id', $this->elsewhere->getKey())->where('user_id', $this->target->getKey())->exists());
 
-        $this->assertSame(['delegated_access'], AuditEvent::query()->whereIn('action', ['identity.member_granted', 'identity.member_removed'])->get()
-            ->map(static fn (AuditEvent $event): mixed => $event->payload['via'] ?? null)->unique()->values()->all());
+        // Each event names the surface, the provider's request (one per HTTP request) and the
+        // operation (one per user action), so the two trails can be lined up.
+        $events = AuditEvent::query()->whereIn('action', ['identity.member_granted', 'identity.member_removed'])->get();
+        $this->assertCount(2, $events);
+        $this->assertSame([['delegated_access', $operationId]], $events
+            ->map(static fn (AuditEvent $event): array => [$event->payload['via'] ?? null, $event->payload['operation_id'] ?? null])->unique()->values()->all());
+        $this->assertCount(1, $events->map(static fn (AuditEvent $event): mixed => $event->payload['request_id'] ?? null)->unique());
+        $this->assertMatchesRegularExpression('/\A[0-9a-f]{64}\z/', (string) $events->first()?->payload['request_id']);
     }
 
     public function test_a_stale_revision_is_a_conflict_and_changes_nothing(): void
@@ -346,6 +432,93 @@ final class DelegatedAccessTest extends TestCase
         ])->assertStatus(422);
 
         $this->assertTrue(WorkspaceMembership::query()->where('workspace_id', $this->owned->getKey())->where('user_id', $this->actor->getKey())->exists());
+    }
+
+    // ------------------------------------------------------------------------ removing
+
+    public function test_removal_takes_every_managed_membership_and_keeps_the_account_and_the_rest(): void
+    {
+        $this->member($this->administered, $this->target, WorkspaceRole::Auditor);
+        $before = $this->validated($this->send(['operation' => 'read', 'subject' => 'target-subject']), 'read', 'target-subject');
+        $this->assertTrue($before['allowed_edits']['remove']);
+        $operationId = DelegatedContract::operationId();
+
+        $removed = $this->validated($this->send([
+            'operation' => 'remove', 'subject' => 'target-subject', 'expected_revision' => $before['revision'], 'operation_id' => $operationId,
+        ]), 'remove', 'target-subject');
+
+        $this->assertTrue($removed['provisioned']);
+        $this->assertSame([], $removed['access']['workspaces']);
+        $this->assertTrue($removed['allowed_edits']['remove']);
+        $this->assertNotSame($before['revision'], $removed['revision']);
+
+        // Only the membership outside the actor's view is left; the account and its binding stay.
+        $this->assertSame([$this->elsewhere->getKey() => WorkspaceRole::Admin], WorkspaceMembership::query()->where('user_id', $this->target->getKey())
+            ->get()->mapWithKeys(static fn (WorkspaceMembership $membership): array => [$membership->workspace_id => $membership->role])->all());
+        $this->assertTrue(User::query()->whereKey($this->target->getKey())->exists());
+        $this->assertTrue(IdentityBinding::query()->forIssuerSubject(self::PROVIDER, 'target-subject')->exists());
+
+        $events = AuditEvent::query()->where('action', 'identity.member_removed')->get();
+        $this->assertCount(2, $events);
+        $this->assertSame([['delegated_access', $operationId]], $events
+            ->map(static fn (AuditEvent $event): array => [$event->payload['via'] ?? null, $event->payload['operation_id'] ?? null])->unique()->values()->all());
+    }
+
+    public function test_removing_a_subject_with_nothing_left_to_remove_is_a_no_op_that_keeps_the_revision(): void
+    {
+        $removed = $this->validated($this->send(['operation' => 'remove', 'subject' => 'target-subject', 'expected_revision' => $this->revisionOf('target-subject')]), 'remove', 'target-subject');
+        $events = AuditEvent::query()->count();
+
+        $again = $this->validated($this->send(['operation' => 'remove', 'subject' => 'target-subject', 'expected_revision' => $removed['revision']]), 'remove', 'target-subject');
+
+        $this->assertSame($removed['revision'], $again['revision']);
+        $this->assertTrue($again['allowed_edits']['remove']);
+        $this->assertSame($events, AuditEvent::query()->count(), 'A removal that changes nothing records nothing');
+        $this->assertTrue(WorkspaceMembership::query()->where('workspace_id', $this->elsewhere->getKey())->where('user_id', $this->target->getKey())->exists());
+    }
+
+    /** One membership the actor may not take away refuses the whole removal, including the parts it could. */
+    public function test_a_removal_reaching_an_owner_the_actor_cannot_change_is_refused_whole(): void
+    {
+        $admin = $this->bound('admin-subject', 'Example Admin');
+        $this->member($this->owned, $admin, WorkspaceRole::Admin);
+        $this->member($this->administered, $admin, WorkspaceRole::Admin);
+        $this->member($this->administered, $this->target, WorkspaceRole::Owner);
+
+        $read = $this->validated($this->send(['operation' => 'read', 'subject' => 'target-subject'], subject: 'admin-subject'), 'read', 'target-subject');
+        $this->assertSame([$this->owned->public_id => true, $this->administered->public_id => false], array_column($read['access']['workspaces'], 'editable', 'id'));
+        $this->assertFalse($read['allowed_edits']['remove']);
+
+        $this->send(['operation' => 'remove', 'subject' => 'target-subject', 'expected_revision' => $read['revision']], subject: 'admin-subject')
+            ->assertForbidden()->assertJsonPath('error', 'protected_membership');
+
+        $this->assertSame(3, WorkspaceMembership::query()->where('user_id', $this->target->getKey())->count(), 'Not even the sender membership the administrator could remove alone is taken');
+        $this->assertSame(0, AuditEvent::query()->where('action', 'identity.member_removed')->count());
+    }
+
+    public function test_removing_a_workspaces_only_owner_is_refused(): void
+    {
+        $read = $this->validated($this->send(['operation' => 'read', 'subject' => 'actor-subject']), 'read', 'actor-subject');
+        $this->assertFalse($read['allowed_edits']['remove']);
+
+        $this->send(['operation' => 'remove', 'subject' => 'actor-subject', 'expected_revision' => $read['revision']])
+            ->assertForbidden()->assertJsonPath('error', 'protected_membership');
+
+        $this->assertSame(2, WorkspaceMembership::query()->where('user_id', $this->actor->getKey())->count());
+    }
+
+    public function test_a_removal_is_refused_on_a_stale_revision_an_unknown_subject_or_with_writes_off(): void
+    {
+        $this->send(['operation' => 'remove', 'subject' => 'target-subject', 'expected_revision' => str_repeat('0', 64)])
+            ->assertStatus(409)->assertJsonPath('error', 'revision_conflict');
+        $this->send(['operation' => 'remove', 'subject' => 'new-subject', 'expected_revision' => str_repeat('0', 64)])
+            ->assertNotFound()->assertJsonPath('error', 'not_provisioned');
+
+        config(['bherila-auth.delegated_access.writes_enabled' => false]);
+        $this->send(['operation' => 'remove', 'subject' => 'target-subject', 'expected_revision' => $this->revisionOf('target-subject')])
+            ->assertForbidden()->assertJsonPath('error', 'not_authorized');
+
+        $this->assertSame(2, WorkspaceMembership::query()->where('user_id', $this->target->getKey())->count());
     }
 
     // ------------------------------------------------------------------------ provisioning
@@ -453,7 +626,12 @@ final class DelegatedAccessTest extends TestCase
      */
     private function body(array $input): string
     {
-        return (string) json_encode(['contract_version' => 2, 'application' => self::APPLICATION, ...$input], JSON_UNESCAPED_SLASHES);
+        // Every write carries the provider's operation id, one per user action.
+        if (in_array($input['operation'] ?? null, ['update', 'remove'], true)) {
+            $input += ['operation_id' => DelegatedContract::operationId()];
+        }
+
+        return (string) json_encode(['contract_version' => DelegatedContract::VERSION_3, 'application' => self::APPLICATION, ...$input], JSON_UNESCAPED_SLASHES);
     }
 
     /**
@@ -494,7 +672,7 @@ final class DelegatedAccessTest extends TestCase
     {
         $response->assertOk();
 
-        return (new DelegatedContract)->response($response->json(), self::APPLICATION, $operation, $subject, DelegatedContract::VERSION_2);
+        return (new DelegatedContract)->response($response->json(), self::APPLICATION, $operation, $subject, DelegatedContract::VERSION_3);
     }
 
     private function revisionOf(string $subject): string
