@@ -415,6 +415,93 @@ final class DelegatedAccessTest extends TestCase
         $this->assertTrue(WorkspaceMembership::query()->where('workspace_id', $this->owned->getKey())->where('user_id', $this->actor->getKey())->exists());
     }
 
+    // ------------------------------------------------------------------------ removing
+
+    public function test_removal_takes_every_managed_membership_and_keeps_the_account_and_the_rest(): void
+    {
+        $this->member($this->administered, $this->target, WorkspaceRole::Auditor);
+        $before = $this->validated($this->send(['operation' => 'read', 'subject' => 'target-subject']), 'read', 'target-subject');
+        $this->assertTrue($before['allowed_edits']['remove']);
+        $operationId = DelegatedContract::operationId();
+
+        $removed = $this->validated($this->send([
+            'operation' => 'remove', 'subject' => 'target-subject', 'expected_revision' => $before['revision'], 'operation_id' => $operationId,
+        ]), 'remove', 'target-subject');
+
+        $this->assertTrue($removed['provisioned']);
+        $this->assertSame([], $removed['access']['workspaces']);
+        $this->assertTrue($removed['allowed_edits']['remove']);
+        $this->assertNotSame($before['revision'], $removed['revision']);
+
+        // Only the membership outside the actor's view is left; the account and its binding stay.
+        $this->assertSame([$this->elsewhere->getKey() => WorkspaceRole::Admin], WorkspaceMembership::query()->where('user_id', $this->target->getKey())
+            ->get()->mapWithKeys(static fn (WorkspaceMembership $membership): array => [$membership->workspace_id => $membership->role])->all());
+        $this->assertTrue(User::query()->whereKey($this->target->getKey())->exists());
+        $this->assertTrue(IdentityBinding::query()->forIssuerSubject(self::PROVIDER, 'target-subject')->exists());
+
+        $events = AuditEvent::query()->where('action', 'identity.member_removed')->get();
+        $this->assertCount(2, $events);
+        $this->assertSame([['delegated_access', $operationId]], $events
+            ->map(static fn (AuditEvent $event): array => [$event->payload['via'] ?? null, $event->payload['operation_id'] ?? null])->unique()->values()->all());
+    }
+
+    public function test_removing_a_subject_with_nothing_left_to_remove_is_a_no_op_that_keeps_the_revision(): void
+    {
+        $removed = $this->validated($this->send(['operation' => 'remove', 'subject' => 'target-subject', 'expected_revision' => $this->revisionOf('target-subject')]), 'remove', 'target-subject');
+        $events = AuditEvent::query()->count();
+
+        $again = $this->validated($this->send(['operation' => 'remove', 'subject' => 'target-subject', 'expected_revision' => $removed['revision']]), 'remove', 'target-subject');
+
+        $this->assertSame($removed['revision'], $again['revision']);
+        $this->assertTrue($again['allowed_edits']['remove']);
+        $this->assertSame($events, AuditEvent::query()->count(), 'A removal that changes nothing records nothing');
+        $this->assertTrue(WorkspaceMembership::query()->where('workspace_id', $this->elsewhere->getKey())->where('user_id', $this->target->getKey())->exists());
+    }
+
+    /** One membership the actor may not take away refuses the whole removal, including the parts it could. */
+    public function test_a_removal_reaching_an_owner_the_actor_cannot_change_is_refused_whole(): void
+    {
+        $admin = $this->bound('admin-subject', 'Example Admin');
+        $this->member($this->owned, $admin, WorkspaceRole::Admin);
+        $this->member($this->administered, $admin, WorkspaceRole::Admin);
+        $this->member($this->administered, $this->target, WorkspaceRole::Owner);
+
+        $read = $this->validated($this->send(['operation' => 'read', 'subject' => 'target-subject'], subject: 'admin-subject'), 'read', 'target-subject');
+        $this->assertSame([$this->owned->public_id => true, $this->administered->public_id => false], array_column($read['access']['workspaces'], 'editable', 'id'));
+        $this->assertFalse($read['allowed_edits']['remove']);
+
+        $this->send(['operation' => 'remove', 'subject' => 'target-subject', 'expected_revision' => $read['revision']], subject: 'admin-subject')
+            ->assertForbidden()->assertJsonPath('error', 'protected_membership');
+
+        $this->assertSame(3, WorkspaceMembership::query()->where('user_id', $this->target->getKey())->count(), 'Not even the sender membership the administrator could remove alone is taken');
+        $this->assertSame(0, AuditEvent::query()->where('action', 'identity.member_removed')->count());
+    }
+
+    public function test_removing_a_workspaces_only_owner_is_refused(): void
+    {
+        $read = $this->validated($this->send(['operation' => 'read', 'subject' => 'actor-subject']), 'read', 'actor-subject');
+        $this->assertFalse($read['allowed_edits']['remove']);
+
+        $this->send(['operation' => 'remove', 'subject' => 'actor-subject', 'expected_revision' => $read['revision']])
+            ->assertForbidden()->assertJsonPath('error', 'protected_membership');
+
+        $this->assertSame(2, WorkspaceMembership::query()->where('user_id', $this->actor->getKey())->count());
+    }
+
+    public function test_a_removal_is_refused_on_a_stale_revision_an_unknown_subject_or_with_writes_off(): void
+    {
+        $this->send(['operation' => 'remove', 'subject' => 'target-subject', 'expected_revision' => str_repeat('0', 64)])
+            ->assertStatus(409)->assertJsonPath('error', 'revision_conflict');
+        $this->send(['operation' => 'remove', 'subject' => 'new-subject', 'expected_revision' => str_repeat('0', 64)])
+            ->assertNotFound()->assertJsonPath('error', 'not_provisioned');
+
+        config(['bherila-auth.delegated_access.writes_enabled' => false]);
+        $this->send(['operation' => 'remove', 'subject' => 'target-subject', 'expected_revision' => $this->revisionOf('target-subject')])
+            ->assertForbidden()->assertJsonPath('error', 'not_authorized');
+
+        $this->assertSame(2, WorkspaceMembership::query()->where('user_id', $this->target->getKey())->count());
+    }
+
     // ------------------------------------------------------------------------ provisioning
 
     public function test_provisioning_creates_a_bound_account_with_the_memberships_asked_for(): void

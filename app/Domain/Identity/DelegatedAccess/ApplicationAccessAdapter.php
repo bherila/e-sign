@@ -85,6 +85,7 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
             'subjects' => $this->subjectsPage($actorSubject, $managed, $payload),
             'read' => $this->state($actor, $managed, (string) $payload['subject']),
             'update' => $this->update($actor, $managed, $payload),
+            'remove' => $this->remove($actor, $managed, $payload),
             default => throw new DelegatedAccessException('invalid_request', 422),
         };
     }
@@ -209,7 +210,14 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
                     'editable' => self::editable($membership, $actorRoles, $owners),
                 ], $memberships),
             ],
-            'allowed_edits' => ['application_admin' => false, 'workspaces' => true, 'provision' => false, 'remove' => false],
+            'allowed_edits' => [
+                'application_admin' => false,
+                'workspaces' => true,
+                'provision' => false,
+                // Exactly when remove() would go through: everything shown may be removed, or there
+                // is nothing to remove and it is a no-op.
+                'remove' => array_all($memberships, static fn (WorkspaceMembership $membership): bool => self::editable($membership, $actorRoles, $owners)),
+            ],
         ];
     }
 
@@ -365,15 +373,7 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
         }
 
         DB::transaction(function () use ($actor, $managed, $target, $expectedRevision, $desired): void {
-            $workspaceIds = array_keys($managed);
-
-            // The order every membership change takes: owner rows first, then the actor's and the
-            // target's rows in id order. Holding them here means nobody can change what the revision
-            // describes between comparing it and changing it.
-            WorkspaceMembership::query()->whereIn('workspace_id', $workspaceIds)->where('role', WorkspaceRole::Owner->value)
-                ->orderBy('workspace_id')->orderBy('id')->lockForUpdate()->get();
-            WorkspaceMembership::query()->whereIn('workspace_id', $workspaceIds)->whereIn('user_id', [$actor->getKey(), $target->getKey()])
-                ->orderBy('id')->lockForUpdate()->get();
+            $this->lockMemberships($actor, $managed, $target);
 
             $current = $this->visibleMemberships($target, $managed);
 
@@ -402,6 +402,85 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
                 }
             }
         });
+    }
+
+    /**
+     * Take away every membership the actor manages from the target, or nothing.
+     *
+     * The account, its identity binding, its memberships in workspaces the actor cannot see, and
+     * every envelope, artifact and audit event stay: each membership goes through
+     * {@see WorkspaceMembers::remove()}, which deletes the row and nothing else. If anything shown is
+     * protected (an owner the actor may not change, or a workspace's only owner) the whole removal
+     * is refused before anything changes. With nothing to remove it changes nothing, writes no
+     * audit event and answers the same revision.
+     *
+     * @param  array<int, Workspace>  $managed
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     *
+     * @throws DelegatedAccessException
+     */
+    private function remove(User $actor, array $managed, array $payload): array
+    {
+        $subject = (string) $payload['subject'];
+        $expectedRevision = (string) $payload['expected_revision'];
+        $target = $this->boundUser($subject);
+
+        if (! $target instanceof User) {
+            throw new DelegatedAccessException('not_provisioned', 404);
+        }
+
+        try {
+            DB::transaction(function () use ($actor, $managed, $target, $expectedRevision): void {
+                $this->lockMemberships($actor, $managed, $target);
+
+                $current = $this->visibleMemberships($target, $managed);
+
+                if (! hash_equals(self::revision($target, $current), $expectedRevision)) {
+                    throw new DelegatedAccessException('revision_conflict', 409);
+                }
+
+                // Decided on the locked rows, all of them before any is removed: never a partial removal.
+                $actorRoles = $this->actorRoles($actor, $managed);
+                $owners = $this->ownerCounts($managed, $current);
+                foreach ($current as $membership) {
+                    if (! self::editable($membership, $actorRoles, $owners)) {
+                        throw new DelegatedAccessException('protected_membership', 403);
+                    }
+                }
+
+                foreach ($current as $membership) {
+                    $this->members->remove($managed[$membership->workspace_id], $actor, $membership, $this->auditContext());
+                }
+            });
+        } catch (MembershipChangeRefused $refusal) {
+            // The checks above make these unreachable; they still refuse, and the transaction has
+            // undone any membership already removed.
+            throw match ($refusal->reason) {
+                MembershipChangeRefused::NOT_PERMITTED => new DelegatedAccessException('not_authorized', 403),
+                MembershipChangeRefused::OWNER_ONLY, MembershipChangeRefused::LAST_OWNER => new DelegatedAccessException('protected_membership', 403),
+                default => new DelegatedAccessException('invalid_request', 422),
+            };
+        }
+
+        return $this->state($actor, $managed, $subject);
+    }
+
+    /**
+     * Take the locks every membership change takes, in the same order: the managed workspaces'
+     * owner rows first, then the actor's and the target's rows in id order. Holding them means
+     * nobody can change what the revision describes between comparing it and changing it.
+     *
+     * @param  array<int, Workspace>  $managed
+     */
+    private function lockMemberships(User $actor, array $managed, User $target): void
+    {
+        $workspaceIds = array_keys($managed);
+
+        WorkspaceMembership::query()->whereIn('workspace_id', $workspaceIds)->where('role', WorkspaceRole::Owner->value)
+            ->orderBy('workspace_id')->orderBy('id')->lockForUpdate()->get();
+        WorkspaceMembership::query()->whereIn('workspace_id', $workspaceIds)->whereIn('user_id', [$actor->getKey(), $target->getKey()])
+            ->orderBy('id')->lockForUpdate()->get();
     }
 
     /**
