@@ -170,6 +170,7 @@ final class DelegatedAccessTest extends TestCase
         $response = $this->validated($this->send(['operation' => 'capabilities']), 'capabilities');
 
         $this->assertSame(['owner', 'admin', 'sender', 'auditor'], array_column($response['controls']['workspace_roles'], 'id'));
+        $this->assertSame(array_map(static fn (WorkspaceRole $role): string => $role->description(), WorkspaceRole::cases()), array_column($response['controls']['workspace_roles'], 'description'));
         $this->assertFalse($response['controls']['application_admin']);
         $this->assertTrue($response['controls']['provisioning']);
     }
@@ -231,6 +232,24 @@ final class DelegatedAccessTest extends TestCase
         $this->member($this->owned, $this->bound('co-owner-subject', 'Example Co-owner'), WorkspaceRole::Owner);
 
         $this->assertSame([$this->owned->public_id => true, $this->administered->public_id => true], $read());
+    }
+
+    /** Read-only observations, in the read and in the listing, and never part of the revision. */
+    public function test_a_read_and_the_listing_carry_when_the_account_was_created_and_last_signed_in(): void
+    {
+        $this->target->forceFill(['created_at' => '2026-09-01 08:00:00'])->save();
+        $revision = $this->revisionOf('target-subject');
+        IdentityBinding::query()->forIssuerSubject(self::PROVIDER, 'target-subject')->update(['last_seen_at' => '2026-10-01 09:30:00']);
+
+        $read = $this->validated($this->send(['operation' => 'read', 'subject' => 'target-subject']), 'read', 'target-subject');
+        $this->assertSame(['2026-09-01T08:00:00Z', '2026-10-01T09:30:00Z'], [$read['provisioned_at'], $read['last_seen_at']]);
+        $this->assertArrayNotHasKey('first_sign_in_at', $read, 'Not recorded, so not guessed');
+        $this->assertSame($revision, $read['revision'], 'Signing in does not change the revision');
+
+        $listed = array_column($this->validated($this->send(['operation' => 'subjects']), 'subjects')['subjects'], null, 'subject');
+        $this->assertSame('2026-10-01T09:30:00Z', $listed['target-subject']['last_seen_at']);
+        $this->assertSame('2026-09-01T08:00:00Z', $listed['target-subject']['provisioned_at']);
+        $this->assertNull($listed['actor-subject']['last_seen_at'], 'Never signed in through this provider');
     }
 
     public function test_an_unknown_subject_is_unprovisioned_and_may_be_provisioned(): void

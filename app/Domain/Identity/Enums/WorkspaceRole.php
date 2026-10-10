@@ -48,6 +48,20 @@ enum WorkspaceRole: string
     }
 
     /**
+     * One sentence on what the role may do, for people choosing it elsewhere (the identity
+     * provider's access page). Describes {@see permissions()}; it grants nothing.
+     */
+    public function description(): string
+    {
+        return match ($this) {
+            self::Owner => 'Everything an administrator can do, and also manages owners, rotates the workspace\'s service credentials and deletes the workspace.',
+            self::Admin => 'Manages members and workspace settings, creates templates, sends envelopes and reads the audit trail.',
+            self::Sender => 'Creates templates, sends envelopes and reads the audit trail.',
+            self::Auditor => 'Views the workspace and reads its audit trail.',
+        };
+    }
+
+    /**
      * The permission map. Everything the policy allows comes from here.
      *
      * @return list<WorkspacePermission>

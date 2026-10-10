@@ -98,7 +98,7 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
         return ['controls' => [
             'application_admin' => false,
             'workspace_roles' => array_map(
-                static fn (WorkspaceRole $role): array => ['id' => $role->value, 'label' => $role->label()],
+                static fn (WorkspaceRole $role): array => ['id' => $role->value, 'label' => $role->label(), 'description' => $role->description()],
                 WorkspaceRole::cases(),
             ),
             'provisioning' => true,
@@ -169,6 +169,7 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
             'subjects' => $page->map(static fn (IdentityBinding $binding): array => [
                 'subject' => $binding->subject,
                 'label' => Str::limit((string) $binding->user?->name, 250, '') ?: $binding->subject,
+                ...self::observations($binding),
             ])->values()->all(),
             'next_cursor' => $bindings->count() > $limit ? $this->cursors->encode($actorSubject, 'subjects', (int) $page->last()?->getKey(), $query) : null,
         ];
@@ -182,9 +183,10 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
      */
     private function state(User $actor, array $managed, string $subject): array
     {
-        $target = $this->boundUser($subject);
+        $binding = $this->binding($subject);
+        $target = $binding?->user;
 
-        if (! $target instanceof User) {
+        if (! $binding instanceof IdentityBinding || ! $target instanceof User) {
             return [
                 'subject' => $subject,
                 'provisioned' => false,
@@ -201,6 +203,7 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
         return [
             'subject' => $subject,
             'provisioned' => true,
+            ...self::observations($binding),
             'revision' => self::revision($target, $memberships),
             'access' => [
                 'application_admin' => false,
@@ -616,9 +619,30 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
 
     private function boundUser(string $subject): ?User
     {
-        $binding = IdentityBinding::query()->forIssuerSubject($this->settings->bindingIssuer(), $subject)->with('user')->first();
+        $user = $this->binding($subject)?->user;
 
-        return $binding?->user instanceof User ? $binding->user : null;
+        return $user instanceof User ? $user : null;
+    }
+
+    private function binding(string $subject): ?IdentityBinding
+    {
+        return IdentityBinding::query()->forIssuerSubject($this->settings->bindingIssuer(), $subject)->with('user')->first();
+    }
+
+    /**
+     * What this application knows of a person's history, read-only and never part of the revision:
+     * when the account was created (by sign-in, provisioning or bootstrap) and when they last signed
+     * in through this provider, null until they have. A first sign-in is not recorded separately,
+     * so it is left out rather than guessed.
+     *
+     * @return array{provisioned_at: string|null, last_seen_at: string|null}
+     */
+    private static function observations(IdentityBinding $binding): array
+    {
+        return [
+            'provisioned_at' => $binding->user?->created_at?->toIso8601ZuluString(),
+            'last_seen_at' => $binding->last_seen_at?->toIso8601ZuluString(),
+        ];
     }
 
     /**
