@@ -113,7 +113,11 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
     {
         $after = $this->cursors->after($actorSubject, 'workspaces', $payload);
         $limit = (int) ($payload['limit'] ?? self::PAGE_SIZE);
-        $remaining = array_values(array_filter($managed, static fn (Workspace $workspace): bool => $workspace->getKey() > $after));
+        $query = self::query($payload);
+        // A search filters the managed workspaces and nothing else, so it can find nothing the
+        // unfiltered listing would not show. Workspaces have no email; the label is the name.
+        $remaining = array_values(array_filter($managed, static fn (Workspace $workspace): bool => $workspace->getKey() > $after
+            && ($query === null || mb_stripos($workspace->name, $query) !== false)));
         $page = array_slice($remaining, 0, $limit);
 
         return [
@@ -122,12 +126,13 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
                 // The contract bounds labels to 250 characters; a workspace name may be longer.
                 'label' => Str::limit($workspace->name, 250, ''),
             ], $page),
-            'next_cursor' => count($remaining) > $limit ? $this->cursors->encode($actorSubject, 'workspaces', (int) $page[array_key_last($page)]->getKey()) : null,
+            'next_cursor' => count($remaining) > $limit ? $this->cursors->encode($actorSubject, 'workspaces', (int) $page[array_key_last($page)]->getKey(), $query) : null,
         ];
     }
 
     /**
-     * People bound under this provider who belong to a workspace the actor manages.
+     * People bound under this provider who belong to a workspace the actor manages, optionally
+     * those whose name or stored email contains the query.
      *
      * @param  array<int, Workspace>  $managed
      * @param  array<string, mixed>  $payload
@@ -138,11 +143,20 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
         $after = $this->cursors->after($actorSubject, 'subjects', $payload);
         $limit = (int) ($payload['limit'] ?? self::PAGE_SIZE);
         $workspaceIds = array_keys($managed);
+        $query = self::query($payload);
 
         $bindings = IdentityBinding::query()
             ->with('user')
             ->where('issuer', $this->settings->bindingIssuer())
             ->whereHas('user.workspaceMemberships', static fn (Builder $memberships): Builder => $memberships->whereIn('workspace_id', $workspaceIds))
+            // Added to the scoped listing, never instead of it: a search narrows what the actor may
+            // already see. Lowered on both sides so the match ignores case whatever the collation.
+            ->when($query !== null, static fn (Builder $bindings): Builder => $bindings->whereHas('user', static function (Builder $users) use ($query): void {
+                $pattern = '%'.self::escapeLike(mb_strtolower((string) $query)).'%';
+                $users->where(static fn (Builder $match): Builder => $match
+                    ->whereRaw("LOWER(users.name) LIKE ? ESCAPE '!'", [$pattern])
+                    ->orWhereRaw("LOWER(users.email) LIKE ? ESCAPE '!'", [$pattern]));
+            }))
             ->where('id', '>', $after)
             ->orderBy('id')
             ->limit($limit + 1)
@@ -155,7 +169,7 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
                 'subject' => $binding->subject,
                 'label' => Str::limit((string) $binding->user?->name, 250, '') ?: $binding->subject,
             ])->values()->all(),
-            'next_cursor' => $bindings->count() > $limit ? $this->cursors->encode($actorSubject, 'subjects', (int) $page->last()?->getKey()) : null,
+            'next_cursor' => $bindings->count() > $limit ? $this->cursors->encode($actorSubject, 'subjects', (int) $page->last()?->getKey(), $query) : null,
         ];
     }
 
@@ -437,6 +451,22 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
             ->orderBy('workspace_id')
             ->get()
             ->all();
+    }
+
+    /**
+     * The search a listing asked for, already held to the contract's bounds; null for none.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    private static function query(array $payload): ?string
+    {
+        return is_string($payload['query'] ?? null) ? $payload['query'] : null;
+    }
+
+    /** Make every character of a search literal in a `LIKE … ESCAPE '!'` pattern. */
+    private static function escapeLike(string $value): string
+    {
+        return str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $value);
     }
 
     private function boundUser(string $subject): ?User

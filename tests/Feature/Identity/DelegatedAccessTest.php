@@ -245,6 +245,51 @@ final class DelegatedAccessTest extends TestCase
         $this->assertNull($next['next_cursor']);
     }
 
+    /** A search narrows each actor's own listing: what one manager finds, another may not. */
+    public function test_a_search_stays_within_the_workspaces_each_actor_manages(): void
+    {
+        $hidden = $this->bound('hidden-subject', 'Example Hidden');
+        $this->member($this->elsewhere, $hidden, WorkspaceRole::Sender);
+        $other = $this->bound('other-manager-subject', 'Other Manager');
+        $this->member($this->elsewhere, $other, WorkspaceRole::Owner);
+        foreach (['actor' => $this->actor, 'target' => $this->target, 'hidden' => $hidden, 'other' => $other] as $who => $user) {
+            $user->forceFill(['email' => "{$who}.person@directory.test"])->save();
+        }
+
+        $search = fn (string $operation, string $query, string $as = 'actor-subject'): array => array_column(
+            $this->validated($this->send(['operation' => $operation, 'query' => $query], subject: $as), $operation)[$operation],
+            $operation === 'subjects' ? 'subject' : 'id',
+        );
+
+        // Case-insensitive, on the name and on the stored email.
+        $this->assertSame(['target-subject'], $search('subjects', 'eXaMpLe TaRgEt'));
+        $this->assertSame(['target-subject'], $search('subjects', 'TARGET.PERSON@'));
+
+        // Each manager finds only people in a workspace it manages, the target in both.
+        $this->assertSame(['actor-subject', 'target-subject'], $search('subjects', 'example'));
+        $this->assertSame(['actor-subject', 'target-subject'], $search('subjects', 'DIRECTORY.test'));
+        $this->assertSame([], $search('subjects', 'hidden'));
+        $this->assertSame(['target-subject', 'hidden-subject'], $search('subjects', 'example', 'other-manager-subject'));
+
+        $this->assertSame([$this->owned->public_id, $this->administered->public_id], $search('workspaces', 'WORKSPACE'));
+        $this->assertSame([], $search('workspaces', 'elsewhere'));
+        $this->assertSame([$this->elsewhere->public_id], $search('workspaces', 'elsewhere', 'other-manager-subject'));
+
+        // LIKE wildcards in a search are literal characters.
+        $this->assertSame([], $search('subjects', '%%'));
+        $this->assertSame([], $search('subjects', '__'));
+
+        // A cursor belongs to its search: another search cannot continue it.
+        $first = $this->validated($this->send(['operation' => 'subjects', 'query' => 'example', 'limit' => 1]), 'subjects');
+        $this->assertSame(['actor-subject'], array_column($first['subjects'], 'subject'));
+        $this->send(['operation' => 'subjects', 'query' => 'target', 'limit' => 1, 'cursor' => $first['next_cursor']])
+            ->assertStatus(422)->assertJsonPath('error', 'invalid_cursor');
+
+        $next = $this->validated($this->send(['operation' => 'subjects', 'query' => 'example', 'limit' => 1, 'cursor' => $first['next_cursor']]), 'subjects');
+        $this->assertSame(['target-subject'], array_column($next['subjects'], 'subject'));
+        $this->assertNull($next['next_cursor']);
+    }
+
     public function test_a_declared_oversize_body_is_refused_before_it_is_read(): void
     {
         $body = $this->body(['operation' => 'capabilities']);
