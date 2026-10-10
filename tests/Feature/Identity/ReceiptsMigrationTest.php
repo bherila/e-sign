@@ -22,7 +22,8 @@ class ReceiptsMigrationTest extends TestCase
         $migration = require database_path('migrations/2026_10_10_000000_create_delegated_access_receipts.php');
         $migration->up();
 
+        // The default connection may already be migrated (the database suites); what matters is
+        // the store's connection.
         $this->assertTrue(Schema::connection('receipts_elsewhere')->hasTable(DatabaseReceiptStore::TABLE));
-        $this->assertFalse(Schema::hasTable(DatabaseReceiptStore::TABLE));
     }
 }
