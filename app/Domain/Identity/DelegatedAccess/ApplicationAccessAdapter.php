@@ -46,6 +46,9 @@ use Illuminate\Support\Str;
  * - **Provisioning.** An update with a null revision creates the account for a subject nobody has
  *   bound yet, bound to this provider's issuer and that exact subject, and grants the memberships
  *   asked for. It never adopts an existing row found by address.
+ * - **Search.** A query narrows the actor's own listing of people or workspaces, never past it.
+ * - **Removal.** Takes every membership the actor manages, or refuses and takes nothing; the
+ *   account and everything it did stay.
  */
 final readonly class ApplicationAccessAdapter implements AccessAdapter
 {
