@@ -195,6 +195,7 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
 
         $memberships = $this->visibleMemberships($target, $managed);
         $actorRoles = $this->actorRoles($actor, $managed);
+        $owners = $this->ownerCounts($managed, $memberships);
 
         return [
             'subject' => $subject,
@@ -205,8 +206,7 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
                 'workspaces' => array_map(static fn (WorkspaceMembership $membership): array => [
                     'id' => $managed[$membership->workspace_id]->public_id,
                     'role' => $membership->role->value,
-                    'editable' => ($actorRoles[$membership->workspace_id] ?? null) === WorkspaceRole::Owner
-                        || $membership->role !== WorkspaceRole::Owner,
+                    'editable' => self::editable($membership, $actorRoles, $owners),
                 ], $memberships),
             ],
             'allowed_edits' => ['application_admin' => false, 'workspaces' => true, 'provision' => false, 'remove' => false],
@@ -455,6 +455,54 @@ final readonly class ApplicationAccessAdapter implements AccessAdapter
             ->get()
             ->mapWithKeys(static fn (WorkspaceMembership $membership): array => [$membership->workspace_id => $membership->role])
             ->all();
+    }
+
+    /**
+     * Whether the actor may change or remove this membership, exactly as {@see WorkspaceMembers}
+     * decides it: an owner's membership only by an owner of that workspace, and never the
+     * workspace's only owner (in practice the actor themselves).
+     *
+     * @param  array<int, WorkspaceRole>  $actorRoles  workspace id => the actor's role
+     * @param  array<int, int>  $owners  workspace id => how many owners it has
+     */
+    private static function editable(WorkspaceMembership $membership, array $actorRoles, array $owners): bool
+    {
+        if ($membership->role !== WorkspaceRole::Owner) {
+            return true;
+        }
+
+        return ($actorRoles[$membership->workspace_id] ?? null) === WorkspaceRole::Owner
+            && ($owners[$membership->workspace_id] ?? 0) > 1;
+    }
+
+    /**
+     * How many owners each workspace holding one of these memberships as an owner has. Only those
+     * are ever asked about, so nothing is counted for a target who owns nothing here.
+     *
+     * @param  array<int, Workspace>  $managed
+     * @param  list<WorkspaceMembership>  $memberships
+     * @return array<int, int> workspace id => owners
+     */
+    private function ownerCounts(array $managed, array $memberships): array
+    {
+        $owned = array_values(array_unique(array_map(
+            static fn (WorkspaceMembership $membership): int => $membership->workspace_id,
+            array_filter($memberships, static fn (WorkspaceMembership $membership): bool => $membership->role === WorkspaceRole::Owner),
+        )));
+
+        if ($owned === []) {
+            return [];
+        }
+
+        $counts = [];
+        foreach (WorkspaceMembership::query()
+            ->whereIn('workspace_id', array_intersect($owned, array_keys($managed)))
+            ->where('role', WorkspaceRole::Owner->value)
+            ->pluck('workspace_id') as $workspaceId) {
+            $counts[(int) $workspaceId] = ($counts[(int) $workspaceId] ?? 0) + 1;
+        }
+
+        return $counts;
     }
 
     /**

@@ -221,6 +221,18 @@ final class DelegatedAccessTest extends TestCase
         $this->assertTrue($byId[$this->owned->public_id]['editable']);
     }
 
+    /** The members page never removes or demotes a workspace's only owner, so neither may this. */
+    public function test_a_workspaces_only_owner_is_not_editable_until_another_owner_exists(): void
+    {
+        $read = fn (): array => array_column($this->validated($this->send(['operation' => 'read', 'subject' => 'actor-subject']), 'read', 'actor-subject')['access']['workspaces'], 'editable', 'id');
+
+        $this->assertSame([$this->owned->public_id => false, $this->administered->public_id => true], $read());
+
+        $this->member($this->owned, $this->bound('co-owner-subject', 'Example Co-owner'), WorkspaceRole::Owner);
+
+        $this->assertSame([$this->owned->public_id => true, $this->administered->public_id => true], $read());
+    }
+
     public function test_an_unknown_subject_is_unprovisioned_and_may_be_provisioned(): void
     {
         $response = $this->validated($this->send(['operation' => 'read', 'subject' => 'new-subject']), 'read', 'new-subject');
