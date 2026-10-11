@@ -94,6 +94,15 @@ final class DelegatedAccessConformanceTest extends TestCase
         $this->assertDelegatedRemoveStripsOnlyTheManagedProjection('manager-subject', 'removable-subject');
     }
 
+    public function test_a_confirmation_does_not_outlive_the_managers_workspace_reach(): void
+    {
+        $this->assertDelegatedRevisionCoversTheActorsReach('manager-subject', 'removable-subject', function (): void {
+            $workspace = Workspace::query()->where('name', 'Unseen Workspace')->sole();
+            $manager = IdentityBinding::query()->where('issuer', self::PROVIDER)->where('subject', 'manager-subject')->sole()->user;
+            $this->member($workspace, $manager, WorkspaceRole::Admin);
+        });
+    }
+
     public function test_metadata_is_well_formed(): void
     {
         $this->assertDelegatedMetadataIsWellFormed('manager-subject', 'removable-subject');

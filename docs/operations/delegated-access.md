@@ -2,7 +2,7 @@
 
 Lets the identity provider's application-access page manage who has which role in this
 application's workspaces (issue #111). It uses delegated access contract version 3 from
-`bherila/auth-laravel` (0.21 or later), whose endpoint does the transport work and serves version 3
+`bherila/auth-laravel` (0.24 or later), whose endpoint does the transport work and serves version 3
 only, and the provider side is auth-manager's application-access
 page ([auth-manager#56](https://github.com/bherila/auth-manager/issues/56)).
 
@@ -45,7 +45,10 @@ enabled, and whether or not the provider can be reached.
 - **Editable:** exactly what the members page would allow. Only an owner changes an owner's
   membership, and the last owner of a workspace is never removed, so that membership is reported
   not editable.
-- **Revisions:** a read returns a digest of what it showed. An update must name it, and it is
+- **Revisions:** a read returns a digest of what it showed, including the actor's visible
+  membership projection. Gaining a workspace containing one of the target's memberships changes
+  that digest, so a prior removal or unchanged update is refused as `revision_conflict`. An update
+  must name the digest, and it is
   compared under the same row locks the changes take, so a concurrent change is a `409`, never an
   overwrite.
 - **Provisioning:** an update with a `null` revision creates an account for a subject nobody has
@@ -135,3 +138,8 @@ drives auth-manager's own `DelegatedAccessTransport` through a sequence of steps
 A change on either side that breaks the other fails this job. The move to contract version 3 is
 coordinated across both repositories: while auth-manager's `main` cannot speak version 3, the
 job warns that it was skipped instead of failing, and runs in full once it can.
+
+The conformance suite runs `assertDelegatedRevisionCoversTheActorsReach()` by granting the manager
+an existing workspace in which the removable target already holds a membership. Both stale writes
+must leave every target membership unchanged. Removing access here takes no dependent records,
+so the removal-effects assertions and a dependent-record race scenario do not apply.
