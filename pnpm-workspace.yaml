@@ -15,3 +15,6 @@ allowBuilds:
 # file, for a code path nothing here reaches.
 ignoredOptionalDependencies:
   - "@napi-rs/canvas"
+
+minimumReleaseAgeExclude:
+  - react-hook-form@7.90.0
