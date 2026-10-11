@@ -29,10 +29,10 @@ use Throwable;
 final class DocumentIsolation
 {
     /**
-     * Every extension the tecnickcom packages declare in `composer.lock`, sorted. A test keeps the two
+     * Every extension the application and tecnickcom packages require, sorted. A test keeps the two
      * equal, so a dependency update that needs a new extension cannot silently trust a child without it.
      */
-    public const REQUIRED_EXTENSIONS = ['ctype', 'curl', 'filter', 'gd', 'hash', 'json', 'mbstring', 'openssl', 'pcre', 'xml', 'zlib'];
+    public const REQUIRED_EXTENSIONS = ['ctype', 'curl', 'filter', 'gd', 'hash', 'json', 'mbstring', 'openssl', 'pcre', 'xml', 'zip', 'zlib'];
 
     private bool $resolved = false;
 
