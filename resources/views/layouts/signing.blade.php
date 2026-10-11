@@ -32,6 +32,7 @@
     {{-- Belt to the header's braces: a page saved to disk keeps the instruction. --}}
     <meta name="referrer" content="no-referrer">
     <meta name="color-scheme" content="dark light">
+    <meta name="darkreader-lock">
     <title>{{ $title ?? 'Review and sign' }} — {{ config('app.name') }}</title>
     @vite(['resources/css/app.css'])
     @stack('head')
