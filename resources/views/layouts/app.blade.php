@@ -7,6 +7,7 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>{{ config('app.name') }}</title>
     <meta name="color-scheme" content="dark light">
+    <meta name="darkreader-lock">
     <script>
       (function() {
         try {
