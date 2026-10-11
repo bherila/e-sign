@@ -490,7 +490,15 @@ final class ProcessIsolationTest extends TestCase
     public function test_the_trial_child_checks_every_extension_the_pdf_stack_declares(): void
     {
         $lock = json_decode((string) file_get_contents(base_path('composer.lock')), true, flags: JSON_THROW_ON_ERROR);
+        $application = json_decode((string) file_get_contents(base_path('composer.json')), true, flags: JSON_THROW_ON_ERROR);
         $declared = [];
+
+        // An extension made optional upstream can still be required by this application.
+        foreach (array_keys($application['require']) as $requirement) {
+            if (str_starts_with($requirement, 'ext-')) {
+                $declared[] = substr($requirement, 4);
+            }
+        }
 
         foreach ($lock['packages'] as $package) {
             if (! str_starts_with($package['name'], 'tecnickcom/')) {

@@ -82,23 +82,21 @@ final class BoundedPdfParser extends Parser
 
     /**
      * @param  array<int, mixed>|null  $indexObj
-     * @return array<int, array{0:int, 1:int}>|null
+     * @return array<int, array{0:int, 1:int}>
      *
      * @throws PreflightBudgetException
      * @throws ParserException
      */
-    protected function parseXrefIndexSections(?array $indexObj): ?array
+    protected function parseXrefIndexSections(?array $indexObj): array
     {
         $sections = parent::parseXrefIndexSections($indexObj);
 
-        if ($sections !== null) {
-            $declared = 0;
-            foreach ($sections as $section) {
-                $declared += $section[1];
-            }
-
-            $this->budget->assertDeclaredObjects($declared);
+        $declared = 0;
+        foreach ($sections as $section) {
+            $declared += $section[1];
         }
+
+        $this->budget->assertDeclaredObjects($declared);
 
         return $sections;
     }

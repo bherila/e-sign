@@ -12,6 +12,7 @@ import '@testing-library/jest-dom';
  */
 if (typeof window !== 'undefined' && typeof window.PointerEvent === 'undefined') {
   class PointerEventShim extends MouseEvent implements PointerEvent {
+    public readonly persistentDeviceId = 0;
     public readonly pointerId: number;
     public readonly width: number;
     public readonly height: number;
