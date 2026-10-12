@@ -1,7 +1,6 @@
 <?php
 
-use Spatie\Csp\Directive;
-use Spatie\Csp\Keyword;
+use App\Http\Csp\ApplicationPolicy;
 
 /*
 |--------------------------------------------------------------------------
@@ -14,7 +13,7 @@ use Spatie\Csp\Keyword;
 | middleware, and `AddCspHeaders` returns early when a response already
 | carries a `Content-Security-Policy`.
 |
-| ## Why this file is written against `presets`/`directives`
+| ## Why this file is written against `presets`
 |
 | It used to declare `'policy' => App\Csp\CloudflareCspPolicy::class`, which is
 | `spatie/laravel-csp` v2's API. v3 — the version this repository pins and
@@ -49,21 +48,11 @@ use Spatie\Csp\Keyword;
 
 return [
 
-    'presets' => [],
+    // The directives live in App\Http\Csp\ApplicationPolicy: they are enum cases, and a
+    // cached configuration must hold plain data only (see that class).
+    'presets' => [ApplicationPolicy::class],
 
-    'directives' => [
-        [Directive::DEFAULT, [Keyword::SELF]],
-        [Directive::SCRIPT, [Keyword::SELF]],
-        [Directive::STYLE, [Keyword::SELF, Keyword::UNSAFE_INLINE]],
-        [Directive::IMG, [Keyword::SELF, 'data:', 'blob:']],
-        [Directive::FONT, [Keyword::SELF, 'data:']],
-        [Directive::CONNECT, [Keyword::SELF]],
-        [Directive::WORKER, [Keyword::SELF, 'blob:']],
-        [Directive::OBJECT, [Keyword::NONE]],
-        [Directive::BASE, [Keyword::NONE]],
-        [Directive::FRAME_ANCESTORS, [Keyword::NONE]],
-        [Directive::FORM_ACTION, [Keyword::SELF]],
-    ],
+    'directives' => [],
 
     'report_only_presets' => [],
 

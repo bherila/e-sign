@@ -10,6 +10,7 @@ use App\Domain\Identity\Models\WorkspaceMembership;
 use App\Http\Middleware\SecurityHeaders;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
@@ -81,6 +82,32 @@ class SecurityHeadersTest extends TestCase
             "frame-ancestors 'none'",
             (string) $response->headers->get('Content-Security-Policy'),
         );
+    }
+
+    public function test_the_emitted_policy_is_exactly_this_header(): void
+    {
+        $this->assertSame(
+            "default-src 'self';script-src 'self';style-src 'self' 'unsafe-inline';img-src 'self' data: blob:;"
+            ."font-src 'self' data:;connect-src 'self';worker-src 'self' blob:;object-src 'none';base-uri 'none';"
+            ."frame-ancestors 'none';form-action 'self'",
+            (string) $this->get('/login')->headers->get('Content-Security-Policy'),
+        );
+    }
+
+    public function test_the_policy_configuration_is_plain_data_so_the_config_cache_holds_no_code(): void
+    {
+        // A cached configuration is checked before deploys and must hold only scalars and
+        // arrays. Enum cases (or any object) serialize as executable code in that cache, so
+        // the policy itself lives in a preset class and the configuration names it.
+        $objects = [];
+        $config = Config::get('csp');
+        array_walk_recursive($config, function (mixed $value, int|string $key) use (&$objects): void {
+            if (is_object($value)) {
+                $objects[] = $key;
+            }
+        });
+
+        $this->assertSame([], $objects);
     }
 
     public function test_the_emitted_policy_is_the_configured_one_and_admits_no_third_party_origin(): void
