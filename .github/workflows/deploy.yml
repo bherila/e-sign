@@ -91,7 +91,7 @@ jobs:
           failure-policy: maintenance
           # Needed for the first atomic conversion only (the exact commit the in-place deploy last
           # installed); the action ignores it once the application is already versioned.
-          initial-live-commit: cf003902f1d01c99b0394747f2e88a903fd720e5
+          initial-live-commit: db4874aadb6ed9f698e1b1bb43556910f52f44eb
           # Normally empty. Set only to the exact owner reported by a failed atomic run; recovery
           # finalizes it and proves the selected application serves before retrying.
           recovery-release-id: ${{ vars.ATOMIC_RECOVERY_RELEASE_ID }}
