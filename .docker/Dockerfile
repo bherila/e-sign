@@ -86,6 +86,13 @@ RUN pnpm run build
 # ---------- production: immutable, self-contained, non-root ----------
 FROM base AS production
 ENV APP_ENV=production
+# Document reads run in a child PHP CLI with hard memory/time limits. Pin that CLI instead of
+# relying on discovery (under php-fpm, PHP_BINARY is the FPM executable, which cannot be a child),
+# and require the child: a container that loses it refuses reads visibly instead of silently
+# dropping to cooperative in-process bounds. CI proves this under FPM (`image` job); override in
+# the env file only with a reason. See docs/operations/deploy-docker.md.
+ENV ESIGN_DOCUMENTS_ISOLATION=process \
+    ESIGN_DOCUMENTS_ISOLATION_PHP_BINARY=/usr/local/bin/php
 # Static fallback for local `docker build` without --build-arg; publish-image.yml overrides
 # revision/version with the real commit SHA and release tag when it builds and pushes this
 # target, via docker/build-push-action's `labels:` input (which passes --label at build time,
