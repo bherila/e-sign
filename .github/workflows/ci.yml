@@ -472,6 +472,38 @@ jobs:
           grep -q "GET /sign/$envelope/session" <<<"$logs" || { echo "The signing session route is no longer logged"; exit 1; }
           docker rm -f esign-smoke >/dev/null
 
+      - name: Smoke test document isolation under FPM
+        run: |
+          set -eu
+          # Issue #118: the web role runs under php-fpm, where PHP_BINARY is not a CLI. Prove the
+          # pinned child binary is trusted by a real FPM request, via /health/ready's detailed body.
+          # Other probes may warn or fail on this throwaway sqlite setup, so only
+          # document_isolation is asserted; the HTTP status is deliberately not.
+          docker run -d --name esign-isolation -p 8081:8080 \
+            -e APP_KEY="base64:$(openssl rand -base64 32)" -e APP_ENV=production -e APP_DEBUG=false \
+            -e APP_URL=http://localhost:8081 -e DB_CONNECTION=sqlite -e DB_DATABASE=/tmp/esign.sqlite \
+            -e SESSION_DRIVER=file -e CACHE_STORE=file -e QUEUE_CONNECTION=sync -e LOG_CHANNEL=stderr \
+            -e ESIGN_HEALTH_TOKEN=ci-isolation-smoke \
+            bwh-esign:ci
+          up=""
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8081/up >/dev/null; then up="1"; break; fi
+            sleep 1
+          done
+          if [ -z "$up" ]; then docker logs esign-isolation; exit 1; fi
+          # The image pins both variables (issue #118).
+          test "$(docker exec esign-isolation printenv ESIGN_DOCUMENTS_ISOLATION)" = process
+          test "$(docker exec esign-isolation printenv ESIGN_DOCUMENTS_ISOLATION_PHP_BINARY)" = /usr/local/bin/php
+          body=$(curl -sS -H 'Authorization: Bearer ci-isolation-smoke' http://localhost:8081/health/ready)
+          echo "$body" | jq -c '.probes.document_isolation'
+          status=$(echo "$body" | jq -r '.probes.document_isolation.status')
+          if [ "$status" != "ok" ]; then
+            echo "document_isolation is '$status' under FPM, expected ok"
+            docker logs esign-isolation
+            exit 1
+          fi
+          docker rm -f esign-isolation >/dev/null
+
       - name: Smoke test role dispatch (artisan, worker)
         run: |
           set -eu

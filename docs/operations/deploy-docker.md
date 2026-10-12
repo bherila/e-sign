@@ -161,6 +161,19 @@ the state machine but is a second line of defense.
 | `ESIGN_HEALTH_TOKEN` | **Secret.** Bearer token an operator/monitor presents for the detailed `/health/ready` body. Blank disables the token path (CIDR allowlist still applies). |
 | `ESIGN_HEALTH_ALLOW_CIDRS` | Defaults to loopback only. Widen deliberately for a monitoring agent that is not on the same host. |
 
+### Document isolation
+
+The production image sets `ESIGN_DOCUMENTS_ISOLATION=process` and
+`ESIGN_DOCUMENTS_ISOLATION_PHP_BINARY=/usr/local/bin/php`, so no container depends on binary
+discovery. Under php-fpm the running executable is the FPM binary, which cannot serve as the child;
+the pin names the CLI explicitly. With `process`, a container that cannot start a trusted child
+refuses to read documents (and `/health/ready` reports `document_isolation` as `fail`) rather than
+silently falling back to in-process reads without the hard memory and time bound. The `image` CI
+job starts the production image and asserts `document_isolation` is `ok` through a real FPM request.
+Override these in `/etc/esign/esign.env` only deliberately: `auto` accepts the in-process fallback, and
+a different binary must be a CLI of the same PHP version with the required extensions. See
+`docs/operations/health.md` for the probe.
+
 ## Key directory contract (`/etc/esign/keys`, mounted `:ro` into `esign-worker` only)
 
 | File | Env var it satisfies | Permissions |
