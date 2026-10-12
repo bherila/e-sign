@@ -127,9 +127,9 @@ cron lines are installed; either failing fails the deploy.
 ### Atomic releases (shared action v2)
 
 The workflow uses the shared action's atomic mode (`stable-directory` layout). Each deploy builds a
-versioned candidate under `~/.deployments/e-sign-laravel/releases/`, runs migrations against it, and only
-then swaps it into `~/e-sign-laravel`; the document root `~/e-sign.bherila.net` remains a symlink to
-`e-sign-laravel/public`. The previous three releases are kept.
+versioned candidate under `~/.deployments/<deploy-dir>/releases/`, runs migrations against it, and only
+then swaps it into `~/<deploy-dir>`; the document root remains a symlink to that directory's `public/`.
+The previous three releases are kept.
 
 What persists across releases:
 
