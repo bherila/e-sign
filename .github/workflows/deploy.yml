@@ -60,20 +60,44 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm run build
 
-      # The shared action owns the cPanel mechanics: guarded rsync, persistent runtime storage,
-      # PHP handler, migrations, config cache, this application's crontab lines and generic
-      # health checks. eSign keeps only its application-specific checks below.
+      # Shared deploy for Laravel on a cPanel account: https://github.com/bherila/shared-cpanel-deployment
+      # (its README lists every input and what each guard refuses). Pinned to a commit because this
+      # job holds a key that reaches every application on the account.
+      #
+      # v2 builds and validates a versioned candidate (migrations included) before selecting it
+      # beneath the real cPanel application directory, keeps the previous releases, and records the
+      # exact selected commit. A migration or live-verification failure leaves the selected release in
+      # maintenance for an explicit operator decision (failure-policy: maintenance).
+      #
+      # Only `storage` is shared across releases: it holds the uploaded documents (the local disk),
+      # logs and framework caches. The seal key pair, delegated-access key and backups live under
+      # ~/.config outside the application directory, and .env is copied forward from the selected
+      # release. eSign has a scheduler and a bounded queue worker; quiesce.sh drains this app's
+      # in-flight Artisan processes. The scheduler cron line is the action's default.
       - name: Deploy to cPanel
         id: cpanel
-        uses: bherila/shared-cpanel-deployment@9c7630cea606db507c67fd672523a1e61f026f67 # v1.0.2
+        uses: bherila/shared-cpanel-deployment@76e914604ae1e7d07d045f5412371b6634178e47 # v2.3.2
         with:
           ssh-host: ${{ secrets.SSH_HOST }}
           ssh-username: ${{ secrets.SSH_USERNAME }}
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
           ssh-known-hosts: ${{ secrets.SSH_KNOWN_HOSTS }}
-          deploy-dir: ${{ vars.DEPLOY_DIR }}
+          deploy-dir: e-sign-laravel
           site-url: ${{ vars.SITE_URL }}
+          deployment-mode: atomic
+          atomic-layout: stable-directory
+          persistent-paths: storage
+          retain-releases: '3'
+          failure-policy: maintenance
+          # Needed for the first atomic conversion only (the exact commit the in-place deploy last
+          # installed); the action ignores it once the application is already versioned.
+          initial-live-commit: cf003902f1d01c99b0394747f2e88a903fd720e5
+          # Normally empty. Set only to the exact owner reported by a failed atomic run; recovery
+          # finalizes it and proves the selected application serves before retrying.
+          recovery-release-id: ${{ vars.ATOMIC_RECOVERY_RELEASE_ID }}
           run-migrations: true
+          operational-audit: 'true'
+          artisan-memory-limit: 1G
           paths: |
             app
             bootstrap
@@ -89,64 +113,7 @@ jobs:
             composer.lock
             LICENSE
             THIRD_PARTY_NOTICES.md
+          quiesce-script: scripts/deploy/quiesce.sh
+          verification-script: scripts/deploy/verify-live.sh
           extra-cron-lines: |
-            * * * * * cd "$HOME/${{ vars.DEPLOY_DIR }}" && /opt/cpanel/ea-php85/root/usr/bin/php -d memory_limit=1G artisan esign:queue:work-bounded > /dev/null 2>&1 # JOB:${{ vars.DEPLOY_DIR }}-queue-worker
-
-      # esign:doctor is the install check (docs/operations/cpanel.md). Its scheduler check reads a
-      # heartbeat the scheduler writes every minute, which a brand-new account has not written yet,
-      # so a failure is retried for two minutes after the cron lines above are installed. Output is
-      # shown only on failure: this log is public, and a passing run has nothing to act on.
-      - name: Run esign:doctor on the server
-        env:
-          DEPLOY_DIR: ${{ vars.DEPLOY_DIR }}
-          PHP_BIN: ${{ steps.cpanel.outputs.php-binary }}
-          SSH_TARGET: ${{ steps.cpanel.outputs.ssh-target }}
-        run: |
-          for attempt in 1 2 3; do
-            # shellcheck disable=SC2029 # Validated action outputs expand on the runner by design.
-            if ssh "$SSH_TARGET" \
-                "cd \"\$HOME/$DEPLOY_DIR\" && $PHP_BIN -d memory_limit=1G artisan esign:doctor" \
-                > doctor.out 2>&1; then
-              echo "esign:doctor: all checks passed."
-              exit 0
-            fi
-            if [ "$attempt" -lt 3 ]; then sleep 60; fi
-          done
-          cat doctor.out
-          exit 1
-
-      # Uploads are read in web requests, so process isolation has to be confirmed where they run:
-      # /health/ready is served by the web handler (docs/adr/0006). It is asked from the server, with
-      # the token read from the cached configuration, so the token never leaves the host. Only the
-      # document_isolation probe decides here; an unrelated backlog warning must not fail a deploy.
-      - name: Verify document isolation in web requests
-        env:
-          DEPLOY_DIR: ${{ vars.DEPLOY_DIR }}
-          PHP_BIN: ${{ steps.cpanel.outputs.php-binary }}
-          SITE_URL: ${{ vars.SITE_URL }}
-          SSH_TARGET: ${{ steps.cpanel.outputs.ssh-target }}
-        run: |
-          # shellcheck disable=SC2029 # printf quotes validated action inputs for the remote shell.
-          ssh "$SSH_TARGET" \
-            "bash -s -- $(printf '%q ' "$DEPLOY_DIR" "$SITE_URL" "$PHP_BIN")" <<'REMOTE'
-          set -euo pipefail
-          php=$3
-          cd "$HOME/$1"
-          # The cached configuration refers to application classes, so it needs the autoloader.
-          token=$("$php" -d display_errors=stderr -r 'require "vendor/autoload.php"; $config = require "bootstrap/cache/config.php"; echo $config["esign"]["health_token"] ?? "";')
-          if [ -z "$token" ]; then
-            echo "::error::ESIGN_HEALTH_TOKEN is not set, so /health/ready cannot report its probes." >&2
-            exit 1
-          fi
-          printf 'header = "Authorization: Bearer %s"\n' "$token" \
-            | curl --silent --show-error --max-time 60 --config - "$2/health/ready" \
-            | "$php" -r '
-                $probe = json_decode((string) stream_get_contents(STDIN), true)["probes"]["document_isolation"] ?? null;
-                if (! is_array($probe)) {
-                    fwrite(STDERR, "::error::/health/ready did not report a document_isolation probe.\n");
-                    exit(1);
-                }
-                echo "document_isolation: ", $probe["status"], ": ", $probe["message"], "\n";
-                exit($probe["status"] === "ok" ? 0 : 1);
-              '
-          REMOTE
+            * * * * * cd "$HOME/e-sign-laravel" && /opt/cpanel/ea-php85/root/usr/bin/php -d memory_limit=1G artisan esign:queue:work-bounded > /dev/null 2>&1 # JOB:e-sign-laravel-queue-worker

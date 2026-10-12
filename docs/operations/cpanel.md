@@ -119,9 +119,36 @@ version under `~/.crontab-backups`, installs from a file and reads it back. A fr
 both lines on its first deploy, and a hand edit lasts only until the next deploy. Change the
 eSign-specific worker line in the workflow; the shared scheduler behavior belongs to the action.
 
-The same deploy then runs `esign:doctor` on the host. It also confirms through `/health/ready`
-that web requests read documents in a child process (`document_isolation` is `ok`), and
-fails otherwise.
+The deploy then runs `esign:doctor` on the host, and confirms through `/health/ready` that web
+requests read documents in a child process (`document_isolation` is `ok`). Both run from
+`scripts/deploy/verify-live.sh`, the action's verification hook, after the release is serving and the
+cron lines are installed; either failing fails the deploy.
+
+### Atomic releases (shared action v2)
+
+The workflow uses the shared action's atomic mode (`stable-directory` layout). Each deploy builds a
+versioned candidate under `~/.deployments/e-sign-laravel/releases/`, runs migrations against it, and only
+then swaps it into `~/e-sign-laravel`; the document root `~/e-sign.bherila.net` remains a symlink to
+`e-sign-laravel/public`. The previous three releases are kept.
+
+What persists across releases:
+
+- `storage/`, shared by every release (`persistent-paths: storage`): uploaded documents
+  (`storage/app/documents`), logs and framework caches.
+- `.env`, copied forward from the selected release into each candidate (it is never uploaded).
+- Outside the application directory and so untouched: the seal certificate and key
+  (`~/.config/esign/keys`), the delegated-access public key and `.env` backups (`~/.config/e-sign`),
+  and the account crontab.
+
+Nothing else in the application directory persists. Anything an operator leaves there by hand (for
+example `.env.bak-*` copies) stays with the old release and is deleted when that release ages out;
+keep such files under `~/.config/e-sign` instead.
+
+`scripts/deploy/quiesce.sh` waits for running Artisan processes (the bounded worker, ad-hoc commands)
+before `storage` is moved. If a deploy fails after migrations began, the selected release stays in
+maintenance (`failure-policy: maintenance`); finish or recover it deliberately, then set the
+`ATOMIC_RECOVERY_RELEASE_ID` variable to the owner the failed run reported. `initial-live-commit` in the
+workflow matters only for the first conversion.
 
 **Edit crontabs via a file, never a pipeline through `crontab`.** `crontab -l | ... | crontab -`
 silently replaces the *entire* crontab — every other job already on the account, not just this
