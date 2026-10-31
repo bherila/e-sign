@@ -13,7 +13,7 @@
     "license": "MIT",
     "homepage": "https://github.com/bherila/e-sign",
     "require": {
-        "php": "^8.4",
+        "php": "^8.5",
         "ext-curl": "*",
         "ext-gd": "*",
         "ext-openssl": "*",
@@ -92,7 +92,7 @@
     },
     "config": {
         "platform": {
-            "php": "8.4.0"
+            "php": "8.5.0"
         },
         "optimize-autoloader": true,
         "preferred-install": "dist",
