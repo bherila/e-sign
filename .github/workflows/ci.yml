@@ -102,8 +102,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 8.4 is the supported floor; 8.5 is the Docker and cPanel deploy target.
-        php: ['8.4', '8.5']
+        # 8.5 is the supported floor and the Docker and cPanel deploy target.
+        php: ['8.5']
 
     steps:
       - uses: actions/checkout@v7
@@ -289,7 +289,7 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           # The gate reads lock metadata only; the runtime matrix lives in the `test` job.
-          php-version: '8.4'
+          php-version: '8.5'
           extensions: dom, curl, libxml, mbstring, zip
           coverage: none
 
@@ -538,7 +538,7 @@ jobs:
         with:
           # The sealing path is pure PHP + OpenSSL; the supported floor is the
           # version the artifact has to be reproducible on.
-          php-version: '8.4'
+          php-version: '8.5'
           extensions: dom, curl, libxml, mbstring, zip, bcmath, intl, gd, exif, iconv, openssl
           coverage: none
 

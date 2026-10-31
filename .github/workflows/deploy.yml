@@ -78,6 +78,8 @@ jobs:
         id: cpanel
         uses: bherila/shared-cpanel-deployment@76e914604ae1e7d07d045f5412371b6634178e47 # v2.3.2
         with:
+          # Must match composer.json's config.platform.php pin.
+          php-version: '8.5'
           ssh-host: ${{ secrets.SSH_HOST }}
           ssh-username: ${{ secrets.SSH_USERNAME }}
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
