@@ -76,7 +76,7 @@ jobs:
       # in-flight Artisan processes. The scheduler cron line is the action's default.
       - name: Deploy to cPanel
         id: cpanel
-        uses: bherila/shared-cpanel-deployment@76e914604ae1e7d07d045f5412371b6634178e47 # v2.3.2
+        uses: bherila/shared-cpanel-deployment@5f635730a4ddbac1d10c2a031ac0b4a102066fe2 # v2.5.0
         with:
           # Must match composer.json's config.platform.php pin.
           php-version: '8.5'
