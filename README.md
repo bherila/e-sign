@@ -39,7 +39,7 @@ needing counsel's review rather than a feature. Read it before relying on an exe
 
 ## Tech stack
 
-- **Backend**: Laravel 13 on PHP 8.4+ (8.5 is the Docker target). MySQL 8 or MariaDB in production;
+- **Backend**: Laravel 13 on PHP 8.5+. MySQL 8 or MariaDB in production;
   database-backed queue, cache, and locks. No Redis, Node, Python, Java, or Chromium at runtime.
 - **Identity**: [`bherila/auth-laravel`](https://github.com/bherila/auth-laravel) OAuth 2.0
   authorization-code client with PKCE against an [auth-manager](https://github.com/bherila/auth-manager)

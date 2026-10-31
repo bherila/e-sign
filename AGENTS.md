@@ -49,7 +49,7 @@ changes, broad formatting churn, and production builds unless the task requires 
 
 ## Project shape
 
-- **Stack**: Laravel 13 on PHP ^8.4 (8.5 Docker target), React 19 + TypeScript, Vite, Tailwind CSS v4.
+- **Stack**: Laravel 13 on PHP ^8.5, React 19 + TypeScript, Vite, Tailwind CSS v4.
 - **Package manager**: pnpm. Never npm or npx directly.
 - **Database**: SQLite in development and tests (in-memory for tests). MySQL 8 or MariaDB in
   production; both are in the CI matrix (see `docs/adr/0002-supported-databases.md`).
