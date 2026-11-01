@@ -137,7 +137,7 @@ describe("opening a draft", () => {
 
     await waitFor(() => expect(renderPage).toHaveBeenCalled());
 
-    expect(renderPage.mock.calls.map((call) => call[0]).sort()).toEqual([1, 2]);
+    expect(renderPage.mock.calls.map((call) => call[0]).sort((a, b) => Number(a) - Number(b))).toEqual([1, 2]);
   });
 });
 

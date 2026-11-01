@@ -64,7 +64,7 @@ function Select({
         defaultValue={defaultValue ?? undefined}
         modal={modal ?? false}
         onValueChange={(nextValue) =>
-          onValueChange?.(nextValue == null ? "" : String(nextValue))
+          onValueChange?.(typeof nextValue === "string" ? nextValue : "")
         }
         value={value ?? undefined}
         {...props}

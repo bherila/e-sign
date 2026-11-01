@@ -93,7 +93,7 @@ describe('MembersPanel', () => {
     const [url, init] = fetchMock().mock.calls[0] as [string, RequestInit];
     expect(url).toBe('/workspaces/ws/members/01J000000000000000000000A3');
     expect(init.method).toBe('PATCH');
-    expect(JSON.parse(String(init.body))).toEqual({ role: 'auditor' });
+    expect(JSON.parse(init.body as string)).toEqual({ role: 'auditor' });
     expect((init.headers as Record<string, string>).Accept).toBe('application/json');
   });
 
@@ -120,7 +120,7 @@ describe('MembersPanel', () => {
     expect(screen.getByRole('button', { name: 'Revoke the Auditor invitation' })).toBeTruthy();
 
     const [, init] = fetchMock().mock.calls[0] as [string, RequestInit];
-    expect(JSON.parse(String(init.body))).toEqual({ role: 'auditor' });
+    expect(JSON.parse(init.body as string)).toEqual({ role: 'auditor' });
   });
 
   it('forgets a generated link as soon as the role selector changes', async () => {

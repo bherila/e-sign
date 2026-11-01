@@ -26,7 +26,7 @@ gating the rest by touched path:
 
 | Job | Runs when | What it does |
 |---|---|---|
-| `test` | frontend or backend changed | PHP 8.4 **and** 8.5. Frontend: `tsc --noEmit`, `eslint`, `jest`. Backend: `pint --parallel --test`, then `composer test` (`artisan test --parallel`, the `Unit`, `Feature` and `EndToEnd` suites on in-memory SQLite). |
+| `test` | frontend or backend changed | PHP 8.4 **and** 8.5. Frontend: `tsc --noEmit`, `oxlint --type-aware`, `jest`. Backend: `pint --parallel --test`, then `composer test` (`artisan test --parallel`, the `Unit`, `Feature` and `EndToEnd` suites on in-memory SQLite). |
 | `database` | backend changed | `php artisan migrate --force` and the feature suite against disposable **MySQL 8.4**, **MariaDB 11.4**, and **MariaDB 10.6** service containers, PHP 8.5. |
 | `licenses` | dependency manifests changed | Production-only installs, `composer licenses` + `pnpm licenses`, checked against an allowlist; builds and uploads an SBOM. Not a vulnerability check. |
 | `audit` | dependency manifests changed, **and weekly on a schedule** | `composer audit` + `pnpm audit`, checked against `.audit-allowlist.json` by `scripts/check-audit.php`. Scheduled as well as diff-gated, because an advisory database gains entries after a merge rather than when a lock file changes. |
