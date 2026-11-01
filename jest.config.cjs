@@ -1,6 +1,5 @@
 /** @type {import('@jest/types').Config.InitialOptions} */
 const config = {
-  preset: 'ts-jest',
   testEnvironment: 'jsdom',
   testMatch: ['<rootDir>/resources/js/**/*.test.ts?(x)', '<rootDir>/tests-ts/**/*.test.ts?(x)'],
   setupFilesAfterEnv: ['<rootDir>/tests-ts/jest.setup.ts'],
@@ -12,7 +11,13 @@ const config = {
   ],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
   transform: {
-    '^.+\\.(ts|tsx)$': ['ts-jest', { tsconfig: 'tsconfig.json' }],
+    '^.+\\.(ts|tsx)$': ['@swc/jest', {
+      jsc: {
+        parser: { syntax: 'typescript', tsx: true },
+        transform: { react: { runtime: 'automatic' } },
+        target: 'es2022',
+      },
+    }],
   },
 };
 

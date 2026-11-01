@@ -2037,7 +2037,7 @@ function describeDeclared(value: unknown): string {
  * is two of them, and an email the contract admits was refused here (issue #106).
  */
 function codePointLength(value: string): number {
-  return [...value].length;
+  return Array.from(value).length;
 }
 
 function checkEmail(path: string, value: unknown, issues: ValidationIssue[]): void {
