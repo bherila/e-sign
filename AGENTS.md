@@ -1,5 +1,7 @@
 # AGENTS.md
 
+Validation contract: @TESTING.AGENTS.md
+
 For AI coding agents working on BWH eSign, a Laravel 13 + React/TypeScript/Vite application for
 preparing, signing, cryptographically sealing, and retaining PDF agreements.
 
@@ -157,3 +159,10 @@ Squash merge always.
 Keep the active context focused on the files relevant to the change. Load specific controllers,
 services, tests, and config for the touched paths only. Read the relevant section of
 `docs/HANDOFF.md`, not the whole file, once you know which module you are in.
+
+## Session rules
+
+- Keep workstation preferences and personal overrides out of committed files; use a local gitignored file if needed.
+- Run the changed-area gate from `TESTING.AGENTS.md` before opening a PR or pushing for review.
+- Prefer the `gh` CLI for all GitHub interactions.
+- This repository is public. Never paste infrastructure detail (hosts, IPs, buckets, credentials, other tenants) into commits, issues, or PRs.
