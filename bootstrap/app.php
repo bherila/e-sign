@@ -8,6 +8,7 @@ use App\Domain\Identity\Credentials\Console\RevokeServiceCredentialCommand;
 use App\Domain\Identity\Credentials\Console\RotateServiceCredentialCommand;
 use App\Domain\Integration\Native\ErrorCode;
 use App\Http\Middleware\AuthenticateServiceCredential;
+use App\Http\Middleware\Compat\FirmaRequestSizeLimit;
 use App\Http\Middleware\RequireScope;
 use App\Http\Middleware\SecurityHeaders;
 use Illuminate\Foundation\Application;
@@ -64,8 +65,17 @@ return Application::configure(basePath: dirname(__DIR__))
         // Global, because "every response" is the requirement and a route group is a place
         // to forget. It writes a header only when one is not already set, so
         // SigningSecurityHeaders stays authoritative on the guest surface
-        // (docs/security/review-2026-09.md findings X-1, X-2, X-3).
-        $middleware->append(SecurityHeaders::class);
+        // (docs/security/review-2026-09.md findings X-1, X-2, X-3). Outermost, so it also
+        // covers a response a global middleware answers on its own, such as the size
+        // refusal below; setting only absent headers on the way out, its position changes
+        // nothing for any other response.
+        //
+        // FirmaRequestSizeLimit is the compatibility facade's 6 MiB body ceiling, scoped to
+        // that surface's path inside the middleware. It has to run ahead of the framework's
+        // default global stack: TrimStrings and ConvertEmptyStringsToNull decode and walk a
+        // JSON body before any route middleware runs, which is the work the ceiling exists
+        // to refuse.
+        $middleware->prepend([SecurityHeaders::class, FirmaRequestSizeLimit::class]);
 
         // Empty by default, which is exactly today's behaviour: with no proxy trusted,
         // `$request->ip()` is REMOTE_ADDR and an `X-Forwarded-For` header cannot move a rate

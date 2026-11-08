@@ -166,11 +166,11 @@ final class FirmaErrorMap
      * A state conflict, in this surface's tokens.
      *
      * One case is named separately: a send attempted on a request that already went out.
-     * Upstream's current reference answers that `409 ALREADY_SENT` — the correction it
-     * published to the pinned document's `400` example — because a client retrying a send
-     * branches on exactly this refusal. A send attempted on a request that was cancelled,
-     * declined, or expired keeps the generic token; the status is `409` either way, for the
-     * reason the `translate()` arm gives. Recipient transitions cannot be a `send`, so the
+     * Upstream's current reference answers that `409` with a dedicated already-sent code —
+     * the correction it published to the pinned document's `400` example — because a client
+     * retrying a send branches on exactly this refusal. A send attempted on a request that
+     * was cancelled, declined, or expired keeps the generic token; the status is `409` either
+     * way, for the reason the `translate()` arm gives. Recipient transitions cannot be a `send`, so the
      * state lookup failing to resolve an envelope state settles the question the other way.
      */
     private static function illegalTransition(IllegalTransition $exception): FirmaException
