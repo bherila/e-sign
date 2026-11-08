@@ -46,10 +46,33 @@ class FirmaRequestSizeLimit
             return $next($request);
         }
 
-        // A large upload's raw bytes (issue #182) are not a JSON body: they have their own limit,
-        // the size declared when the upload was requested (at most 50 MB), enforced while they are
-        // read. Measuring them here would read the whole body into memory before the route ran.
-        if ($request->isMethod('PUT') && $request->is(FirmaProfile::BASE_PATH.'/documents/uploads/*')) {
+        // A large upload's raw bytes (issue #182) may exceed the JSON ceiling, up to 50 MB — but
+        // only a raw PDF body, whose declared length is checked here, before anything reads it.
+        // Any other type on that path is held to the ordinary ceiling: a JSON or form body is
+        // decoded by the framework's global middleware before routing or the signature check, so
+        // exempting it would reopen the memory-exhaustion path this middleware exists to close.
+        if ($request->isMethod('PUT') && $request->is(FirmaProfile::BASE_PATH.'/documents/uploads/*')
+            && self::mediaType($request) === 'application/pdf') {
+            $declared = $request->headers->get('Content-Length');
+
+            if ($declared === null || ! ctype_digit($declared)) {
+                $refusal = FirmaException::of(
+                    FirmaErrorCode::InvalidRequest,
+                    'An upload must declare its Content-Length.',
+                );
+
+                return response()->json($refusal->toArray(), 411);
+            }
+
+            if ((int) $declared > FirmaProfile::MAX_UPLOAD_BYTES) {
+                $refusal = FirmaException::of(
+                    FirmaErrorCode::RequestTooLarge,
+                    'An uploaded document is at most '.FirmaProfile::MAX_UPLOAD_BYTES.' bytes (50 MB).',
+                );
+
+                return response()->json($refusal->toArray(), $refusal->status());
+            }
+
             return $next($request);
         }
 
@@ -66,5 +89,10 @@ class FirmaRequestSizeLimit
         }
 
         return $next($request);
+    }
+
+    private static function mediaType(Request $request): string
+    {
+        return strtolower(trim(explode(';', (string) $request->headers->get('Content-Type'))[0]));
     }
 }

@@ -117,6 +117,30 @@ class FirmaDocumentSetWriteTest extends TestCase
             ->assertJsonMissing(['error' => 'request_too_large']);
     }
 
+    /**
+     * Only a raw PDF body is exempt from the JSON ceiling. A JSON body on the same path would be
+     * decoded by the framework's global middleware before the signature is even checked, so it is
+     * held to 6 MiB like any other body here, and refused before anything reads it.
+     */
+    public function test_a_json_body_on_the_upload_path_is_still_held_to_the_ceiling(): void
+    {
+        $body = '{"a":"'.str_repeat('x', 7 * 1024 * 1024).'"}';
+
+        $this->putRaw(self::API.'/documents/uploads/01JSYNTHETICUPLOAD00000000', $body, 'application/json')
+            ->assertStatus(413)->assertJsonPath('error', 'request_too_large');
+    }
+
+    public function test_an_upload_declares_its_length_and_stays_within_50_mb(): void
+    {
+        $url = (string) $this->requestUpload(1000)->json('upload_url');
+
+        $this->call('PUT', $url, [], [], [], ['CONTENT_TYPE' => 'application/pdf', 'CONTENT_LENGTH' => (string) (FirmaProfile::MAX_UPLOAD_BYTES + 1)], 'x')
+            ->assertStatus(413)->assertJsonPath('error', 'request_too_large');
+
+        $this->call('PUT', $url, [], [], [], ['CONTENT_TYPE' => 'application/pdf'], 'x')
+            ->assertStatus(411);
+    }
+
     public function test_a_refused_pdf_is_reported_at_upload_and_cannot_be_used(): void
     {
         $id = $this->postJson(self::API.'/documents/inline', [
@@ -506,7 +530,7 @@ class FirmaDocumentSetWriteTest extends TestCase
 
     private function putRaw(string $url, string $bytes, string $type = 'application/pdf'): TestResponse
     {
-        return $this->call('PUT', $url, [], [], [], ['CONTENT_TYPE' => $type, 'HTTP_ACCEPT' => 'application/json'], $bytes);
+        return $this->call('PUT', $url, [], [], [], ['CONTENT_TYPE' => $type, 'CONTENT_LENGTH' => (string) strlen($bytes), 'HTTP_ACCEPT' => 'application/json'], $bytes);
     }
 
     protected function tearDown(): void

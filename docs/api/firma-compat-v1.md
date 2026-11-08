@@ -340,7 +340,7 @@ Here there is one unit — the profile's own, percentages of the page.
 | You have | Use | Calls |
 |---|---|---|
 | A PDF up to 4.5 MB | **Upload a small document**: `POST /documents/inline` with `{ "file_name", "document": "<base64>" }` | one |
-| A PDF up to 50 MB | **Upload a large document**: `POST /documents` with `{ "file_name", "file_size", "content_type": "application/pdf" }`, then `PUT` the raw bytes to the `upload_url` it returns, with `Content-Type: application/pdf` and no API key | two |
+| A PDF up to 50 MB | **Upload a large document**: `POST /documents` with `{ "file_name", "file_size", "content_type": "application/pdf" }`, then `PUT` the raw bytes to the `upload_url` it returns, with `Content-Type: application/pdf`, a `Content-Length`, and no API key | two |
 | One PDF up to 4.5 MB and nothing else to do with it | Skip the upload: send it as `document` on `POST /signing-requests` | none |
 
 Either upload answers a `document_id`: pass it as `document_id`, or several in order as
