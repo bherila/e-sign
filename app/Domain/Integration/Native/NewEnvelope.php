@@ -34,6 +34,14 @@ final readonly class NewEnvelope
      *                                       template's value; when it was, the value sent — `null`
      *                                       included, meaning "the workspace decides" — replaces it.
      * @param  bool  $showSaveForLaterSpecified  The same rule for `show_save_for_later`.
+     * @param  list<array{name: string|null, email: string|null}>  $copies  Cc recipients to add to a
+     *                                                                      template's (issue #169):
+     *                                                                      outside the signing order,
+     *                                                                      owning no fields. One whose
+     *                                                                      address matches a cc
+     *                                                                      recipient the template
+     *                                                                      already declares takes
+     *                                                                      that recipient's place.
      */
     public function __construct(
         public ?string $templateVersionId = null,
@@ -52,6 +60,7 @@ final readonly class NewEnvelope
         public bool $allowDeclineSpecified = false,
         public ?bool $showSaveForLater = null,
         public bool $showSaveForLaterSpecified = false,
+        public array $copies = [],
     ) {}
 
     /**

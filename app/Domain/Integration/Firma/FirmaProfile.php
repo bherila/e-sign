@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Domain\Integration\Firma;
 
 use App\Domain\Preparation\Geometry\DeclaredCoordinateConvention;
+use App\Domain\Preparation\Schema\RecipientDesignation;
+use App\Domain\Signing\Models\EnvelopeRecipient;
 
 /**
  * The constants that define the `firma-compat-v1` acceptance profile.
@@ -20,9 +22,13 @@ use App\Domain\Preparation\Geometry\DeclaredCoordinateConvention;
  *   schema they illustrate; disagreement D4 rules that the schema wins. Nothing in this
  *   module infers the unit from a number's magnitude (AGENTS.md, "Coordinates are never
  *   guessed"; `docs/preparation/coordinate-space.md`).
- * - **{@see DESIGNATION} is a constant.** Upstream's enum is `Signer|Approver|CC`; every
- *   party this product models signs, and emitting `Approver` for somebody nothing treats as
- *   an approver would put an authority in a payload that nothing enforces.
+ * - **`designation` is the party's own** (issue #169). Upstream's `Signer|Approver|CC` maps
+ *   one-to-one onto the field schema's `signer|approver|cc` ({@see designationOf()}), so
+ *   what a payload says a party is, is what the state machine treats them as.
+ * - **A cc recipient's `order` is their place among the cc recipients.** Upstream gives cc
+ *   recipients "a separate sequence" that "never consume[s] a participant position"; here
+ *   they are outside the signing order altogether, and {@see orderOf()} reports that
+ *   separate sequence.
  * - **{@see DOWNLOAD_URL_TTL_MINUTES}** is the life of the app-issued download URL the
  *   facade returns where upstream returns a storage pre-sign. Fifteen minutes rather than
  *   upstream's hour: the URL is a capability, and the consumer follows it immediately.
@@ -41,8 +47,19 @@ final class FirmaProfile
     /** The declared coordinate convention of this profile. See the class docblock. */
     public const COORDINATES = DeclaredCoordinateConvention::PercentOfPageTopLeft;
 
-    /** Upstream's `designation` for every party we model. */
+    /** Upstream's `designation` for a party that does not say: a signer. */
     public const DESIGNATION = 'Signer';
+
+    /**
+     * Upstream's spelling of each designation.
+     *
+     * @var array<string, string>
+     */
+    public const DESIGNATIONS = [
+        'signer' => 'Signer',
+        'approver' => 'Approver',
+        'cc' => 'CC',
+    ];
 
     /** How long an issued `download_url` stays valid. */
     public const DOWNLOAD_URL_TTL_MINUTES = 15;
@@ -70,4 +87,45 @@ final class FirmaProfile
      * that is what is enforced; this constant only bounds the base64 decode itself.
      */
     public const MAX_INLINE_DOCUMENT_BYTES = 4_718_592;
+
+    /** Upstream's `designation` for a native one. */
+    public static function designationOf(?RecipientDesignation $designation): string
+    {
+        return self::DESIGNATIONS[($designation ?? RecipientDesignation::Signer)->value];
+    }
+
+    /** The native designation for upstream's spelling, or null for one it does not have. */
+    public static function designationFrom(string $designation): ?RecipientDesignation
+    {
+        $native = array_search($designation, self::DESIGNATIONS, true);
+
+        return $native === false ? null : RecipientDesignation::from($native);
+    }
+
+    /**
+     * The `order` the facade reports for a party.
+     *
+     * A signer's or an approver's stage, as stored. A cc recipient has no stage (they are
+     * outside the signing order, stage 0), so theirs is their 1-based place among the
+     * envelope's cc recipients, in the order they were created — which is the order of
+     * upstream's separate cc sequence, because the facade creates them in that order.
+     *
+     * @param  iterable<EnvelopeRecipient>  $all  Every recipient of the same envelope.
+     */
+    public static function orderOf(EnvelopeRecipient $recipient, iterable $all): int
+    {
+        if ($recipient->designation !== RecipientDesignation::Cc) {
+            return $recipient->order_index;
+        }
+
+        $position = 0;
+
+        foreach ($all as $other) {
+            if ($other->designation === RecipientDesignation::Cc && $other->getKey() <= $recipient->getKey()) {
+                $position++;
+            }
+        }
+
+        return max(1, $position);
+    }
 }

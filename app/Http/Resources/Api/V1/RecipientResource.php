@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Resources\Api\V1;
 
+use App\Domain\Preparation\Schema\RecipientDesignation;
 use App\Domain\Signing\Models\EnvelopeRecipient;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -19,6 +20,10 @@ use Illuminate\Http\Resources\Json\JsonResource;
  *
  * `order_index` is the signing stage, counting from 1. In sequential mode a recipient stays
  * `pending` until the stage before theirs finishes.
+ *
+ * `designation` is what the party does (field schema 1.2, issue #169): a `signer` signs, an
+ * `approver` approves in their stage, and a `cc` recipient is outside the signing order —
+ * `order_index` 0, state `copied` — and is sent the completed copy only.
  *
  * @mixin EnvelopeRecipient
  */
@@ -39,6 +44,7 @@ class RecipientResource extends JsonResource
             'schema_recipient_id' => $recipient->schema_recipient_id,
             'name' => $recipient->name,
             'email' => $recipient->email,
+            'designation' => ($recipient->designation ?? RecipientDesignation::Signer)->value,
             'order_index' => $recipient->order_index,
             'state' => $recipient->state->value,
             'signed_at' => $recipient->signed_at?->toIso8601String(),

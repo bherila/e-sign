@@ -59,6 +59,11 @@ final class FirmaFieldType
         'date_signed' => FieldType::SigningDate,
         'signing_date' => FieldType::SigningDate,
         'checkbox' => FieldType::Checkbox,
+        // An approver's own types (issue #169): only an Approver may own one, which the field
+        // schema enforces (`field_owner_not_allowed`).
+        'approval_signature' => FieldType::ApprovalSignature,
+        'approval_checkmark' => FieldType::ApprovalCheckmark,
+        'approval_date' => FieldType::ApprovalDate,
     ];
 
     /**
@@ -84,8 +89,7 @@ final class FirmaFieldType
             FieldType::AgreementDate, FieldType::SigningDate => 'date',
             FieldType::Checkbox => 'checkbox',
             FieldType::Text, FieldType::Name, FieldType::Company, FieldType::Title => 'text',
-            // Upstream's own names (v01.14.00). Outbound only: the facade still refuses an
-            // Approver, so no field of these types arrives through it until #169 lands there.
+            // Upstream's own names (v01.14.00), in both directions.
             FieldType::ApprovalSignature => 'approval_signature',
             FieldType::ApprovalCheckmark => 'approval_checkmark',
             FieldType::ApprovalDate => 'approval_date',

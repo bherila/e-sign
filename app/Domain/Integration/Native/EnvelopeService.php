@@ -9,6 +9,8 @@ use App\Domain\Identity\Audit\AuditRecorder;
 use App\Domain\Identity\Credentials\ServiceCredential;
 use App\Domain\Identity\Models\Workspace;
 use App\Domain\Preparation\Documents\Models\Document;
+use App\Domain\Preparation\Schema\RecipientDesignation;
+use App\Domain\Preparation\Schema\SchemaVersion;
 use App\Domain\Preparation\Templates\Models\Template;
 use App\Domain\Preparation\Templates\Models\TemplateVersion;
 use App\Domain\Signing\Envelopes\EnvelopeFactory;
@@ -244,9 +246,9 @@ final readonly class EnvelopeService
         }
 
         $templateSnapshot = $version->snapshotForEnvelope();
-        $templateSnapshot['field_schema'] = $this->withRecipientContacts(
-            $templateSnapshot['field_schema'],
-            $input->recipients,
+        $templateSnapshot['field_schema'] = $this->withCopies(
+            $this->withRecipientContacts($templateSnapshot['field_schema'], $input->recipients),
+            $input->copies,
         );
 
         return EnvelopeSourceSnapshot::fromTemplateVersion($templateSnapshot, $this->overrides($input));
@@ -341,6 +343,75 @@ final readonly class EnvelopeService
      *
      * @throws ApiException
      */
+    /**
+     * Add cc recipients to a template's parties (issue #169).
+     *
+     * A cc recipient owns no fields and sits outside `signing_order`, so adding one changes who
+     * is sent the completed copy and nothing about what anybody signs. One whose address matches
+     * (case-insensitively) a cc recipient the template already declares takes that recipient's
+     * place rather than duplicating them, which is upstream's rule for the same request.
+     *
+     * Only schema 1.2 can say `designation`. A template written against 1.0 or 1.1 is lifted to
+     * 1.2 for this envelope's copy when — and only when — a cc recipient is added: every later
+     * version keeps every earlier one's meaning, the template's own document is untouched, and
+     * an envelope with no added cc keeps the template's version, bytes and digest exactly.
+     *
+     * @param  array<string, mixed>  $schema
+     * @param  list<array{name: string|null, email: string|null}>  $copies
+     * @return array<string, mixed>
+     */
+    private function withCopies(array $schema, array $copies): array
+    {
+        if ($copies === []) {
+            return $schema;
+        }
+
+        $recipients = is_array($schema['recipients'] ?? null) ? array_values($schema['recipients']) : [];
+        $ids = [];
+        $copiedByEmail = [];
+
+        foreach ($recipients as $index => $recipient) {
+            $ids[(string) ($recipient['id'] ?? '')] = true;
+
+            if (($recipient['designation'] ?? null) === RecipientDesignation::Cc->value && is_string($recipient['email'] ?? null)) {
+                $copiedByEmail[mb_strtolower(trim($recipient['email']))] = $index;
+            }
+        }
+
+        $next = 1;
+
+        foreach ($copies as $copy) {
+            $email = trim((string) ($copy['email'] ?? ''));
+            $name = trim((string) ($copy['name'] ?? ''));
+            $existing = $copiedByEmail[mb_strtolower($email)] ?? null;
+
+            if ($existing !== null) {
+                if ($name !== '') {
+                    $recipients[$existing]['name'] = $name;
+                }
+
+                continue;
+            }
+
+            while (isset($ids['cc_'.$next])) {
+                $next++;
+            }
+
+            $id = 'cc_'.$next;
+            $ids[$id] = true;
+            $copiedByEmail[mb_strtolower($email)] = count($recipients);
+            $recipients[] = ['id' => $id, 'name' => $name, 'email' => $email, 'designation' => RecipientDesignation::Cc->value];
+        }
+
+        $schema['recipients'] = $recipients;
+
+        if (version_compare((string) ($schema['schema_version'] ?? '1.0'), SchemaVersion::CURRENT, '<')) {
+            $schema['schema_version'] = SchemaVersion::CURRENT;
+        }
+
+        return $schema;
+    }
+
     private function withRecipientContacts(array $schema, array $recipients): array
     {
         if ($recipients === []) {

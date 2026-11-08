@@ -18,6 +18,7 @@ use App\Domain\Preparation\Documents\Models\DocumentRevision;
 use App\Domain\Preparation\Preflight\PreflightCode;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\Recipient;
+use App\Domain\Preparation\Schema\RecipientDesignation;
 use App\Domain\Preparation\Templates\Models\TemplateVersion;
 use App\Domain\Signing\Models\Envelope;
 
@@ -137,6 +138,7 @@ final readonly class SigningRequestCreation
                 templateVersionId: $version->public_id,
                 title: self::string($body, 'name'),
                 recipients: $this->templateContacts($schema->recipients, $version, $body),
+                copies: self::templateCopies($body),
                 values: $this->prefills($schema, is_array($body['fields'] ?? null) ? $body['fields'] : []),
                 expiresInHours: self::expirationHours($body),
                 expirySpecified: array_key_exists('expiration_hours', $body),
@@ -224,6 +226,12 @@ final readonly class SigningRequestCreation
         $contacts = [];
 
         foreach ($requested as $index => $recipient) {
+            // Upstream: "A recipient with designation CC is never matched to a template user; it
+            // is added as a CC recipient". See templateCopies().
+            if (self::string($recipient, 'designation') === FirmaProfile::designationOf(RecipientDesignation::Cc)) {
+                continue;
+            }
+
             $named = self::string($recipient, 'template_user_id') ?? self::string($recipient, 'id');
             $resolved = $named !== null ? ($byId[mb_strtolower($named)] ?? null) : null;
 
@@ -258,6 +266,51 @@ final readonly class SigningRequestCreation
         }
 
         return $contacts;
+    }
+
+    /**
+     * The request's CC recipients on a template-based request (issue #169).
+     *
+     * Never matched to a template party; added to the agreement as cc recipients, outside the
+     * signing order. The template's own cc recipients are copied with it, and one whose address
+     * a request CC already uses (case-insensitively) is that request CC rather than a second copy
+     * — upstream's rule. See {@see EnvelopeService} `withCopies()`.
+     *
+     * @param  array<string, mixed>  $body
+     * @return list<array{name: string|null, email: string|null}>
+     *
+     * @throws FirmaException
+     */
+    private static function templateCopies(array $body): array
+    {
+        $requested = is_array($body['recipients'] ?? null) ? array_values($body['recipients']) : [];
+        $copies = [];
+        $cc = FirmaProfile::designationOf(RecipientDesignation::Cc);
+
+        foreach ($requested as $index => $recipient) {
+            if (! is_array($recipient) || self::string($recipient, 'designation') !== $cc) {
+                continue;
+            }
+
+            $email = self::string($recipient, 'email');
+
+            if ($email === null || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+                throw FirmaException::of(
+                    FirmaErrorCode::InvalidRequest,
+                    'Recipient '.($index + 1).' is a CC recipient with no usable `email`. A CC recipient is '
+                    .'sent the completed copy, and an address is the one thing they need.',
+                    ['recipient_index' => $index + 1],
+                );
+            }
+
+            $copies[] = ['order' => (int) ($recipient['order'] ?? PHP_INT_MAX), 'name' => self::displayName($recipient), 'email' => $email];
+        }
+
+        // Created in upstream's separate cc sequence, so the place each one is reported at
+        // (FirmaProfile::orderOf()) is the place it was given.
+        usort($copies, static fn (array $a, array $b): int => $a['order'] <=> $b['order']);
+
+        return array_map(static fn (array $copy): array => ['name' => $copy['name'], 'email' => $copy['email']], $copies);
     }
 
     /* ------------------------------------------------------------------ document */

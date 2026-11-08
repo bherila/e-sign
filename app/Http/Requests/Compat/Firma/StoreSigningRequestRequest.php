@@ -46,8 +46,8 @@ class StoreSigningRequestRequest extends FirmaRequest
             'recipients.*.last_name' => ['nullable', 'string', 'max:191'],
             'recipients.*.name' => ['nullable', 'string', 'max:255'],
             'recipients.*.email' => ['required', 'string', 'email', 'max:320'],
-            // Accepted so that the refusal is a 501 naming the designation rather than a 422
-            // about an enum: an approver is a real thing to ask for and this build has none.
+            // Upstream's three designations (issue #169): a Signer signs, an Approver approves with
+            // approval fields, a CC is sent the completed copy.
             'recipients.*.designation' => ['nullable', 'string', 'in:Signer,Approver,CC'],
             'recipients.*.order' => ['nullable', 'integer', 'min:1'],
 

@@ -2506,6 +2506,15 @@
             "type": "string",
             "format": "email"
           },
+          "designation": {
+            "type": "string",
+            "enum": [
+              "signer",
+              "approver",
+              "cc"
+            ],
+            "description": "What this party does, from the field schema (1.2). A `signer` signs and an `approver` approves, each in their stage; a `cc` recipient is outside the signing order and is sent the completed copy only. `signer` for every envelope built from a schema before 1.2."
+          },
           "order_index": {
             "type": "integer",
             "description": "Signing stage, from 1. In sequential mode a recipient stays `pending` until the stage before theirs finishes. A cc recipient (field schema 1.2) is outside the order and reports 0."
