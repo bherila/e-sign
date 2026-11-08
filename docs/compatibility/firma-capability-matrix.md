@@ -195,9 +195,23 @@ those rows are one of four recurring decisions:
 
 ## Webhook events
 
-The pinned OpenAPI document contains **no** `webhooks` object, no event payload schema, and
-types `Webhook.events` as an unconstrained `array<string>` with no enum. Everything in this
-section is `(prose)` from `https://docs.firma.dev/guides/webhooks`.
+The event **names** are now read off the pinned document: since the reference's v1.40.2
+correction, `POST /webhooks` and `PUT /webhooks/{id}` enumerate the 26 events upstream sends
+in `events.items.enum`. The document still has no `webhooks` object and no event payload
+schema, so payload shapes, the envelope and the signature scheme remain `(prose)` from
+`https://docs.firma.dev/guides/webhooks`.
+
+**Catalog audit (issue #170).** Every name this outbox accepts is one of the 26, and
+`WebhookEventNameTest::test_every_profile_name_is_one_upstream_sends` keeps it that way. The
+same correction lists five names upstream refuses on subscription and never sends —
+`signing_request.declined`, `signing_request.voided`, `signing_request.field.completed`,
+`signing_request.resent`, `signing_request.credits.purchased` — and every one is refused here
+too (`::test_every_name_upstream_refuses_is_refused_here`). In particular this surface has never
+emitted a request-level `signing_request.declined` (D12): a decline publishes
+`signing_request.recipient.declined`, which is what the correction tells a consumer to
+subscribe to. The native `esign.envelope.declined` is a separate surface and unaffected. Of the
+26, the rows below account for 19; the other seven are the organization-seal family, out of
+profile until seals exist (issue #164).
 
 The outbox accepts exactly the names below plus our own, which are prefixed `esign.`;
 anything else is refused rather than recorded (`App\Domain\Delivery\Webhooks\WebhookEventName`,
@@ -228,6 +242,8 @@ told two different stories. The mapping from transition to event to message is
 | `template.updated`, `template.used` | Template events | unsupported | | Out of `firma-compat-v1`. Templates are a later family (`docs/HANDOFF.md` §10). |
 | `workspace.created`, `workspace.updated` | Workspace events | unsupported | | Out of profile. |
 | `domain.verified`, `domain.verification.failed` | Domain events | unsupported | | Out of profile; we do not manage sender domains through this API. |
+| `organization_seal.created`, `organization_seal.updated`, `organization_seal.deleted`, `organization_seal.erased` | Seal lifecycle events (reference v1.37.0) | unsupported | `WebhookEventNameTest::test_every_profile_name_is_one_upstream_sends` | Out of profile: this product has no organization seals (issue #164). The outbox refuses the names, so no subscription can wait on an event nothing here produces. |
+| `signing_request.seal.applied`, `signing_request.seal.paused`, `signing_request.seal.swapped` | Seal participant events on a request (reference v1.37.0) | unsupported | idem | idem. The service's own PAdES seal is a different thing and is not announced by these. |
 
 ### Envelope and delivery
 
@@ -356,7 +372,7 @@ original document before signing"). Partial-download support is therefore unspec
 the event list only has `signing_request.recipient.declined`. Do not manufacture a
 `signing_request.declined` event to fill the gap (`docs/HANDOFF.md` §11).
 
-**Resolved:** unchanged from Stage 0. We emit `signing_request.recipient.declined` and our own `esign.envelope.declined` beside it, and never manufacture the upstream name.
+**Resolved:** unchanged from Stage 0. We emit `signing_request.recipient.declined` and our own `esign.envelope.declined` beside it, and never manufacture the upstream name. Upstream's v1.40.2 correction confirms the reading: `signing_request.declined` is refused on subscription and never sent, and a consumer is told to subscribe to `signing_request.recipient.declined` (issue #170).
 
 **D13 — Webhook event identity: `id` versus `event_id`.** The webhook guide's envelope and
 its idempotency example both use `id`. The consumer's webhook controller resolves `event_id`

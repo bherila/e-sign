@@ -10,6 +10,46 @@ use PHPUnit\Framework\TestCase;
 
 final class WebhookEventNameTest extends TestCase
 {
+    /**
+     * The 26 events upstream sends, as its reference v1.40.4 enumerates them on
+     * `POST /webhooks` and `PUT /webhooks/{id}` (the list corrected in v1.40.2). Recorded
+     * here as interface facts so the catalog audit (issue #170) is a test, not a memory.
+     */
+    private const UPSTREAM_SENT = [
+        'signing_request.created', 'signing_request.sent', 'signing_request.viewed',
+        'signing_request.completed', 'signing_request.expired', 'signing_request.cancelled',
+        'signing_request.deleted', 'signing_request.updated', 'signing_request.certificate.generated',
+        'signing_request.reminder.sent', 'signing_request.recipient.signed',
+        'signing_request.recipient.declined', 'signing_request.recipient.identity_changed',
+        'template.updated', 'template.used', 'workspace.created', 'workspace.updated',
+        'domain.verified', 'domain.verification.failed',
+        'organization_seal.created', 'organization_seal.updated', 'organization_seal.deleted',
+        'organization_seal.erased', 'signing_request.seal.applied', 'signing_request.seal.paused',
+        'signing_request.seal.swapped',
+    ];
+
+    /** Names upstream's v1.40.2 correction says it refuses on subscription and never sends. */
+    private const UPSTREAM_REFUSED = [
+        'signing_request.declined', 'signing_request.voided', 'signing_request.field.completed',
+        'signing_request.resent', 'signing_request.credits.purchased',
+    ];
+
+    public function test_every_profile_name_is_one_upstream_sends(): void
+    {
+        $this->assertCount(26, self::UPSTREAM_SENT);
+
+        foreach (WebhookEventName::PROFILE as $eventName) {
+            $this->assertContains($eventName, self::UPSTREAM_SENT, $eventName.' is not in the upstream list');
+        }
+    }
+
+    public function test_every_name_upstream_refuses_is_refused_here(): void
+    {
+        foreach (self::UPSTREAM_REFUSED as $eventName) {
+            $this->assertFalse(WebhookEventName::isKnown($eventName), $eventName.' should be refused');
+        }
+    }
+
     public function test_the_profile_names_are_accepted_verbatim(): void
     {
         foreach (WebhookEventName::PROFILE as $eventName) {
