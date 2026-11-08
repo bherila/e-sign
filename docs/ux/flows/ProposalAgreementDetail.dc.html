@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agreement detail (proposal)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1a1a1a}a:hover{color:#000}
+</style>
+</helmet>
+<div style="min-height: 1120px; box-sizing: border-box; background: #fcfcfc; font-family: 'Instrument Sans', system-ui, sans-serif; color: #1a1a1a; display: flex; flex-direction: column">
+  <nav aria-label="Main" style="border-bottom: 1px solid rgba(0,0,0,0.1)">
+    <div style="max-width: 1120px; margin: 0 auto; padding: 12px 24px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px">
+      <a href="#" style="text-decoration: none; font-size: 18px; font-weight: 600; letter-spacing: -0.01em">BWH eSign</a>
+      <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 20px; font-size: 14px">
+        <li><a href="ProposalAgreements.dc.html" style="text-decoration: underline; text-underline-offset: 4px; font-weight: 500">Agreements</a></li>
+        <li><a href="AdminEditor.dc.html" style="text-decoration: none">Templates</a></li>
+        <li><a href="AdminMembers.dc.html" style="text-decoration: none">Members</a></li>
+        <li><a href="AdminDashboard.dc.html" style="text-decoration: none">Workspaces</a></li>
+      </ul>
+    </div>
+  </nav>
+  <main style="flex-grow: 1; padding: 32px 24px">
+    <div style="max-width: 1072px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px">
+      <p style="margin: 0; align-self: flex-start; padding: 4px 10px; border-radius: 999px; background: #f3e8ff; color: #6b21a8; font-size: 12px; font-weight: 600">Proposal — not built</p>
+      <p style="margin: 0; font-size: 14px"><a href="ProposalAgreements.dc.html" style="text-decoration: underline; text-underline-offset: 4px">Agreements</a></p>
+      <div style="display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 16px">
+        <div style="display: flex; flex-direction: column; gap: 6px">
+          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px">
+            <h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.01em">Synthetic Mutual NDA</h1>
+            <span style="display: inline-block; padding: 2px 10px; border-radius: 999px; background: #dbeafe; color: #1e40af; font-size: 12px; font-weight: 500">In progress</span>
+          </div>
+          <p style="margin: 0; font-size: 14px; color: #71717a">From template “Mutual NDA” v3 · sequential signing · closes 15 Nov 2026, 17:00 UTC</p>
+        </div>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px">
+          <button type="button" style="min-height: 44px; padding: 0 16px; border-radius: 6px; border: 1px solid rgba(220,38,38,0.5); background: #ffffff; color: #dc2626; font-family: inherit; font-size: 15px; font-weight: 500">Cancel agreement</button>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-wrap: wrap; gap: 24px">
+        <div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 24px">
+          <section aria-labelledby="signers-heading" style="border: 1px solid rgba(0,0,0,0.1); border-radius: 8px; background: #ffffff; padding: 20px; display: flex; flex-direction: column; gap: 16px">
+            <h2 id="signers-heading" style="margin: 0; font-size: 16px; font-weight: 600">Signers</h2>
+            <ol style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 12px">
+              <li style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid rgba(0,0,0,0.06)">
+                <div style="display: flex; flex-direction: column; gap: 2px">
+                  <span style="font-weight: 500">1. Dana Buyer <span style="font-weight: 400; color: #71717a">· Buyer</span></span>
+                  <span style="font-size: 13px; color: #71717a">dana@buyer.example.test · verified by email code</span>
+                </div>
+                <span style="font-size: 13px; color: #15803d; font-weight: 500">Signed 8 Nov 2026, 14:12 UTC</span>
+              </li>
+              <li style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px">
+                <div style="display: flex; flex-direction: column; gap: 2px">
+                  <span style="font-weight: 500">2. Sam Seller <span style="font-weight: 400; color: #71717a">· Seller</span></span>
+                  <span style="font-size: 13px; color: #71717a">sam@seller.example.test</span>
+                </div>
+                <span style="font-size: 13px; color: #1e40af; font-weight: 500">Invited 8 Nov 2026, 14:12 UTC · waiting</span>
+              </li>
+            </ol>
+          </section>
+
+          <section aria-labelledby="timeline-heading" style="border: 1px solid rgba(0,0,0,0.1); border-radius: 8px; background: #ffffff; padding: 20px; display: flex; flex-direction: column; gap: 12px">
+            <h2 id="timeline-heading" style="margin: 0; font-size: 16px; font-weight: 600">Timeline</h2>
+            <ol style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; font-size: 14px">
+              <li style="display: flex; gap: 16px"><span style="width: 150px; flex-shrink: 0; color: #71717a; font-variant-numeric: tabular-nums">8 Nov, 14:12:09</span><span>Dana Buyer signed. Sam Seller invited (stage 2).</span></li>
+              <li style="display: flex; gap: 16px"><span style="width: 150px; flex-shrink: 0; color: #71717a; font-variant-numeric: tabular-nums">8 Nov, 14:03:51</span><span>Dana Buyer entered the one-time code sent by email.</span></li>
+              <li style="display: flex; gap: 16px"><span style="width: 150px; flex-shrink: 0; color: #71717a; font-variant-numeric: tabular-nums">8 Nov, 09:30:00</span><span>Sent by Riley Owner. Dana Buyer invited (stage 1).</span></li>
+              <li style="display: flex; gap: 16px"><span style="width: 150px; flex-shrink: 0; color: #71717a; font-variant-numeric: tabular-nums">8 Nov, 09:28:12</span><span>Created from template “Mutual NDA” v3.</span></li>
+            </ol>
+            <p style="margin: 0; font-size: 12px; color: #71717a">Server time, UTC. Read from the envelope's event log; visible to roles with audit access.</p>
+          </section>
+        </div>
+
+        <aside style="flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 24px">
+          <section aria-labelledby="documents-heading" style="border: 1px solid rgba(0,0,0,0.1); border-radius: 8px; background: #ffffff; padding: 20px; display: flex; flex-direction: column; gap: 12px">
+            <h2 id="documents-heading" style="margin: 0; font-size: 16px; font-weight: 600">Documents</h2>
+            <a href="#" style="display: flex; align-items: center; min-height: 44px; padding: 0 12px; border-radius: 6px; border: 1px solid rgba(0,0,0,0.2); font-size: 14px; text-decoration: none">Reviewed document (what signers see)</a>
+            <p style="margin: 0; padding: 12px; border-radius: 6px; background: #f4f4f5; font-size: 13px; line-height: 1.5; color: #52525b">The sealed PDF, the completion report and the evidence bundle appear here once everyone has signed and the sealed copy has been checked.</p>
+          </section>
+          <section aria-labelledby="settings-heading" style="border: 1px solid rgba(0,0,0,0.1); border-radius: 8px; background: #ffffff; padding: 20px; display: flex; flex-direction: column; gap: 8px; font-size: 14px">
+            <h2 id="settings-heading" style="margin: 0 0 4px; font-size: 16px; font-weight: 600">Settings</h2>
+            <p style="margin: 0; display: flex; justify-content: space-between; gap: 8px"><span style="color: #71717a">Email code</span><span>Required</span></p>
+            <p style="margin: 0; display: flex; justify-content: space-between; gap: 8px"><span style="color: #71717a">Signers may decline</span><span>Yes (workspace default)</span></p>
+            <p style="margin: 0; display: flex; justify-content: space-between; gap: 8px"><span style="color: #71717a">Finish later</span><span>Shown</span></p>
+            <p style="margin: 0; display: flex; justify-content: space-between; gap: 8px"><span style="color: #71717a">Assurance</span><span>PAdES B-T</span></p>
+          </section>
+        </aside>
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":1120}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>
