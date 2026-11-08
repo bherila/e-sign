@@ -168,6 +168,7 @@ appears only when there is something structured to say. This is **not** the nati
 | `forbidden` | 403 | Valid key, missing scope (`details.required_scope`), or an expired/edited download link |
 | `not_found` | 404 | No such signing request **in your workspace** — identical to one that does not exist |
 | `invalid_state` | 409 | The move is illegal from this state (`details.transition`, `details.from`) |
+| `already_sent` | 409 | A send attempted on a request that has already been sent (`details.transition`, `details.from`) |
 | `no_document_available` | 409 | Asked for a document before the request was sent |
 | `unprocessable_entity` | 422 | Not sendable, or a template with no published version (`details.problems`) |
 | `validation_failed` | 422 | `create-and-send` two-phase validation; see below |

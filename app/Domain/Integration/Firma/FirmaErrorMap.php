@@ -13,6 +13,7 @@ use App\Domain\Preparation\Geometry\UndeclaredCoordinateConventionException;
 use App\Domain\Preparation\Schema\InvalidFieldSchemaException;
 use App\Domain\Preparation\Schema\ValidationError;
 use App\Domain\Preparation\Templates\TemplateStateException;
+use App\Domain\Signing\Envelopes\EnvelopeState;
 use App\Domain\Signing\Exceptions\FieldSubmissionRejected;
 use App\Domain\Signing\Exceptions\IllegalTransition;
 use App\Domain\Signing\Exceptions\InvalidEnvelopeSnapshot;
@@ -64,11 +65,7 @@ final class FirmaErrorMap
             // Send twice, cancel a finished request, patch one that is already out. Upstream
             // answers 409 for the cancel case and 400 for the patch case; 409 is the more
             // useful of the two everywhere, because it is the one a client must not retry.
-            $exception instanceof IllegalTransition => FirmaException::of(
-                FirmaErrorCode::InvalidState,
-                $exception->getMessage(),
-                ['transition' => $exception->transition, 'from' => $exception->from],
-            ),
+            $exception instanceof IllegalTransition => self::illegalTransition($exception),
 
             $exception instanceof StaleEnvelope => FirmaException::of(
                 FirmaErrorCode::InvalidState,
@@ -163,6 +160,36 @@ final class FirmaErrorMap
 
             default => self::unexpected($exception),
         };
+    }
+
+    /**
+     * A state conflict, in this surface's tokens.
+     *
+     * One case is named separately: a send attempted on a request that already went out.
+     * Upstream's current reference answers that `409` with a dedicated already-sent code —
+     * the correction it published to the pinned document's `400` example — because a client
+     * retrying a send branches on exactly this refusal. A send attempted on a request that
+     * was cancelled, declined, or expired keeps the generic token; the status is `409` either
+     * way, for the reason the `translate()` arm gives. Recipient transitions cannot be a `send`, so the
+     * state lookup failing to resolve an envelope state settles the question the other way.
+     */
+    private static function illegalTransition(IllegalTransition $exception): FirmaException
+    {
+        $from = EnvelopeState::tryFrom($exception->from);
+
+        $alreadySent = $exception->transition === 'send' && $from !== null && in_array($from, [
+            EnvelopeState::Sent,
+            EnvelopeState::InProgress,
+            EnvelopeState::Finalizing,
+            EnvelopeState::Completed,
+            EnvelopeState::FinalizationFailed,
+        ], true);
+
+        return FirmaException::of(
+            $alreadySent ? FirmaErrorCode::AlreadySent : FirmaErrorCode::InvalidState,
+            $exception->getMessage(),
+            ['transition' => $exception->transition, 'from' => $exception->from],
+        );
     }
 
     /** Whether this is a refusal the facade states plainly, rather than a deployment fault. */

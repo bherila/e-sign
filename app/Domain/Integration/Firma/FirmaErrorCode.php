@@ -47,8 +47,19 @@ enum FirmaErrorCode: string
     /** Upstream's `/download` 409 when nothing has been generated: verbatim token. */
     case NoDocumentAvailable = 'no_document_available';
 
-    /** Cancel or send on a request whose state does not allow it. */
+    /** Cancel on a request whose state does not allow it, or a move of that kind. */
     case InvalidState = 'invalid_state';
+
+    /**
+     * A send attempted on a request that has already been sent.
+     *
+     * The pinned document's examples put a `400` here; upstream's current reference corrects
+     * that to `409` with a dedicated code (`ALREADY_SENT`, in its structured error format),
+     * which is the answer a retrying client branches on. The token follows this enum's
+     * lowercase vocabulary, as every other member does. See the
+     * `POST /signing-requests/{id}/send` table in the capability matrix.
+     */
+    case AlreadySent = 'already_sent';
 
     /* ------------------------------------------------------------------ 422 */
 
@@ -80,7 +91,7 @@ enum FirmaErrorCode: string
             self::Unauthorized => Response::HTTP_UNAUTHORIZED,
             self::Forbidden => Response::HTTP_FORBIDDEN,
             self::NotFound => Response::HTTP_NOT_FOUND,
-            self::NoDocumentAvailable, self::InvalidState => Response::HTTP_CONFLICT,
+            self::NoDocumentAvailable, self::InvalidState, self::AlreadySent => Response::HTTP_CONFLICT,
             self::UnprocessableEntity, self::ValidationFailed => Response::HTTP_UNPROCESSABLE_ENTITY,
             self::Unsupported => Response::HTTP_NOT_IMPLEMENTED,
             self::InternalError => Response::HTTP_INTERNAL_SERVER_ERROR,
