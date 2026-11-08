@@ -141,6 +141,31 @@ describe("opening a draft", () => {
   });
 });
 
+describe("adding a field", () => {
+  /**
+   * The new-field type is derived from its owner, not only corrected when the owner changes:
+   * an editor that opens with an approver as its first owner must not offer an allowed type
+   * while adding a `signature` the approver may not hold (schema 1.2).
+   */
+  it("gives a field for an approver who is the first owner an approver's type", () => {
+    const schema = JSON.parse(JSON.stringify(fixtureJson)) as Record<string, any>;
+    schema.recipients.unshift({
+      id: "manager",
+      name: "Synthetic Manager",
+      email: "manager@example.test",
+      designation: "approver",
+    });
+    schema.signing_order = [["manager"], ...schema.signing_order];
+
+    render(<FieldEditor payload={payload({ field_schema: schema })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Add field/ }));
+
+    expect(screen.getByRole("button", { name: /^Synthetic Manager: approval_signature/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Synthetic Manager: signature/ })).toBeNull();
+  });
+});
+
 describe("keyboard placement", () => {
   it("nudges a field by one point, and by ten with shift", () => {
     render(<FieldEditor payload={payload()} />);

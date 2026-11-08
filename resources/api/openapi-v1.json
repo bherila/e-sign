@@ -2214,7 +2214,7 @@
               "null"
             ],
             "additionalProperties": true,
-            "description": "A native field schema document. The current contract version is 1.1 (`resources/schema/field-schema-1.1.json`); 1.0 is unchanged, still published, and still accepted, and a document keeps the version it declares. Validate against the contract for the version in `schema_version`, not against the newest. Refused with `template_version_id`, which already carries one."
+            "description": "A native field schema document. The current contract version is 1.2 (`resources/schema/field-schema-1.2.json`), which adds recipient designations and the approver-only field types; 1.0 and 1.1 are unchanged, still published, and still accepted, and a document keeps the version it declares. Validate against the contract for the version in `schema_version`, not against the newest. Refused with `template_version_id`, which already carries one."
           },
           "title": {
             "type": [

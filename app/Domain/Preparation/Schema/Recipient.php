@@ -19,10 +19,11 @@ final readonly class Recipient
         public string $name,
         public string $email,
         public ?string $role = null,
+        public RecipientDesignation $designation = RecipientDesignation::Signer,
     ) {}
 
     /**
-     * @param  array{id: string, name: string, email: string, role?: string}  $recipient
+     * @param  array{id: string, name: string, email: string, role?: string, designation?: string}  $recipient
      */
     public static function fromArray(array $recipient): self
     {
@@ -31,11 +32,15 @@ final readonly class Recipient
             $recipient['name'],
             $recipient['email'],
             $recipient['role'] ?? null,
+            RecipientDesignation::tryFrom($recipient['designation'] ?? '') ?? RecipientDesignation::DEFAULT,
         );
     }
 
     /**
-     * @return array{id: string, name: string, email: string, role?: string}
+     * The canonical form omits `designation` when it is the default, signer, so a document that
+     * does not use designations keeps its bytes and its digest (the `anchor.placement` rule).
+     *
+     * @return array{id: string, name: string, email: string, role?: string, designation?: string}
      */
     public function toArray(): array
     {
@@ -47,6 +52,10 @@ final readonly class Recipient
 
         if ($this->role !== null) {
             $recipient['role'] = $this->role;
+        }
+
+        if ($this->designation !== RecipientDesignation::DEFAULT) {
+            $recipient['designation'] = $this->designation->value;
         }
 
         return $recipient;

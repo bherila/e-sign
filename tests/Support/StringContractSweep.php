@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Support;
 
+use App\Domain\Preparation\Schema\FieldType;
 use App\Domain\Preparation\Schema\SchemaVersion;
 use LogicException;
 
@@ -314,6 +315,25 @@ final class StringContractSweep
             return $document;
         }
 
+        // Schema 1.2 (#169). A designation is probed on a recipient who owns no fields and, for
+        // cc, has no stage; an approval type is probed on a field owned by an approver. Otherwise
+        // the ownership rules would answer before the member's own value could be judged.
+        if ($path === 'recipients[].designation') {
+            $document = self::withProbeRecipient($document, is_string($value) && $value === 'cc');
+            $document['recipients'][0]['designation'] = $value;
+
+            return $document;
+        }
+
+        if ($path === 'fields[].type' && is_string($value) && FieldType::tryFrom($value)?->isApproval() === true) {
+            $document = self::withProbeRecipient($document, false);
+            $document['recipients'][0]['designation'] = 'approver';
+            $document['fields'][self::PLAIN_FIELD]['recipient_id'] = $document['recipients'][0]['id'];
+            $document['fields'][self::PLAIN_FIELD]['type'] = $value;
+
+            return $document;
+        }
+
         if (str_starts_with($path, 'fields[].anchor.resolved')) {
             $field = &$document['fields'][self::ANCHORED_FIELD];
             $field['anchor']['resolved'] = [
@@ -336,6 +356,28 @@ final class StringContractSweep
             }
 
             $target = &$target[$segment];
+        }
+
+        return $document;
+    }
+
+    /**
+     * The fixture with a fieldless recipient inserted at index 0, so `recipients[0]` can carry a
+     * designation without the ownership rules answering first. A cc probe has no stage.
+     *
+     * @param  array<string, mixed>  $document
+     * @return array<string, mixed>
+     */
+    private static function withProbeRecipient(array $document, bool $cc): array
+    {
+        array_unshift($document['recipients'], [
+            'id' => 'probe',
+            'name' => 'Synthetic Probe',
+            'email' => 'probe@example.test',
+        ]);
+
+        if (! $cc) {
+            $document['signing_order'][] = ['probe'];
         }
 
         return $document;

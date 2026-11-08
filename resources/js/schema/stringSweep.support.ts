@@ -1,5 +1,5 @@
 import fixtureJson from "../../../tests/Fixtures/schema/nda-two-signers.json";
-import schemaJson from "../../schema/field-schema-1.1.json";
+import schemaJson from "../../schema/field-schema-1.2.json";
 import type { Json } from "./numericSweep.support";
 
 /**
@@ -8,7 +8,7 @@ import type { Json } from "./numericSweep.support";
  *
  * The twin of `tests/Support/StringContractSweep.php`: the same walk, the same document builder
  * and the same probes, so both projections are asked identical questions. Members come from
- * `field-schema-1.1.json`; pattern probes come from `PATTERNS`, keyed by the pattern text, and a
+ * `field-schema-1.2.json`; pattern probes come from `PATTERNS`, keyed by the pattern text, and a
  * pattern the contract gains without an entry throws rather than being swept with nothing.
  *
  * Lengths are probed with astral characters wherever the pattern admits them: JSON Schema counts
@@ -270,9 +270,19 @@ export function stringPointer(path: string): string {
  * A document carrying `value` at `path`, relaxed so that nothing but the member under test can
  * answer at its pointer. A recipient id is renamed everywhere it is referenced.
  */
+const APPROVAL_TYPES: readonly string[] = ["approval_signature", "approval_checkmark", "approval_date"];
+
+function withProbeRecipient(document: Json, cc: boolean): void {
+  (document["recipients"] as Json[]).unshift({ id: "probe", name: "Synthetic Probe", email: "probe@example.test" });
+
+  if (!cc) {
+    (document["signing_order"] as unknown[][]).push(["probe"]);
+  }
+}
+
 export function stringDocumentWith(path: string, value: unknown): Json {
   const document = JSON.parse(JSON.stringify(fixtureJson)) as Json;
-  document["schema_version"] = "1.1";
+  document["schema_version"] = "1.2";
 
   if (["recipients[].id", "fields[].recipient_id", "signing_order[][]"].includes(path)) {
     document["recipients"][0]["id"] = value;
@@ -291,6 +301,24 @@ export function stringDocumentWith(path: string, value: unknown): Json {
 
   if (path === "schema_version") {
     document["schema_version"] = value;
+
+    return document;
+  }
+
+  // Schema 1.2 (#169), as StringContractSweep::documentWith() does: a designation is probed on
+  // a fieldless recipient (with no stage for cc), and an approval type on a field an approver owns.
+  if (path === "recipients[].designation") {
+    withProbeRecipient(document, value === "cc");
+    document["recipients"][0]["designation"] = value;
+
+    return document;
+  }
+
+  if (path === "fields[].type" && typeof value === "string" && APPROVAL_TYPES.includes(value)) {
+    withProbeRecipient(document, false);
+    document["recipients"][0]["designation"] = "approver";
+    document["fields"][PLAIN_FIELD]["recipient_id"] = document["recipients"][0]["id"];
+    document["fields"][PLAIN_FIELD]["type"] = value;
 
     return document;
   }

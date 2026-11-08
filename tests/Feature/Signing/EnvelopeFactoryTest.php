@@ -89,6 +89,8 @@ class EnvelopeFactoryTest extends TestCase
             'name' => 'Example Buyer',
             'email' => 'buyer@example.test',
             'role' => 'Buyer',
+            // Schema 1.2 (#169): what this party was on the agreement is part of who they were.
+            'designation' => 'signer',
         ], $buyer->identity_snapshot);
     }
 

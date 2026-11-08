@@ -84,6 +84,11 @@ final class FirmaFieldType
             FieldType::AgreementDate, FieldType::SigningDate => 'date',
             FieldType::Checkbox => 'checkbox',
             FieldType::Text, FieldType::Name, FieldType::Company, FieldType::Title => 'text',
+            // Upstream's own names (v01.14.00). Outbound only: the facade still refuses an
+            // Approver, so no field of these types arrives through it until #169 lands there.
+            FieldType::ApprovalSignature => 'approval_signature',
+            FieldType::ApprovalCheckmark => 'approval_checkmark',
+            FieldType::ApprovalDate => 'approval_date',
         };
     }
 

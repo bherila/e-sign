@@ -1,12 +1,15 @@
 import fixtureJson from "../../../tests/Fixtures/schema/nda-two-signers.json";
 import {
   ANCHOR_TOLERANCE_MAX,
+  APPROVAL_FIELD_TYPES,
   CANONICAL_DECIMALS,
   carriesUnroundedCoordinate,
   FIELD_SCHEMA_VERSION,
   FIELD_TYPES,
+  fieldOwners,
   type FieldSchemaDocument,
   FieldSchemaError,
+  fieldTypesFor,
   parseFieldSchema,
   roundCoordinate,
   serializeFieldSchema,
@@ -14,6 +17,10 @@ import {
   type ValidationCode,
 } from "./fieldSchema";
 
+
+const SIGNER_TYPES = FIELD_TYPES.filter(
+  (type) => !(APPROVAL_FIELD_TYPES as readonly string[]).includes(type),
+);
 const LETTER: { width: number; height: number }[] = [
   { width: 612, height: 792 },
   { width: 612, height: 792 },
@@ -311,6 +318,7 @@ describe("serializeFieldSchema", () => {
 
   it("does not require legacy read-back for a valid large 1.1 anchor offset", () => {
     const document = fixture();
+    document.schema_version = "1.1";
     const anchored = document.fields.find((field) => field.anchor !== undefined)!;
     anchored.anchor!.offset = { dx: 14401, dy: 0 };
 
@@ -367,7 +375,8 @@ describe("serializeFieldSchema", () => {
           return {
             id: `f${index}-${i}`,
             recipient_id: ids[Math.floor(random() * recipientCount)]!,
-            type: FIELD_TYPES[Math.floor(random() * FIELD_TYPES.length)]!,
+            // Every generated recipient is a signer, so the approver-only types (1.2) are not theirs.
+            type: SIGNER_TYPES[Math.floor(random() * SIGNER_TYPES.length)]!,
             page: 1 + Math.floor(random() * 6),
             rect: {
               x: between(0, Math.floor(612 - width), Math.floor(random() * 4)),
@@ -946,3 +955,26 @@ function legacyDocument(rect: { x: number; y: number; width: number; height: num
     ],
   };
 }
+
+describe("designations in the editor (schema 1.2)", () => {
+  it("offers each designation only the field types it may own", () => {
+    expect(fieldTypesFor(undefined)).not.toContain("approval_signature");
+    expect(fieldTypesFor("signer")).toContain("signature");
+    expect(fieldTypesFor("approver")).toEqual(expect.arrayContaining(["approval_signature", "approval_checkmark", "approval_date", "text"]));
+    expect(fieldTypesFor("approver")).not.toContain("signature");
+    expect(fieldTypesFor("approver")).not.toContain("initials");
+    expect(fieldTypesFor("cc")).toEqual([]);
+  });
+
+  it("never offers a cc recipient as a field owner", () => {
+    const owners = fieldOwners({
+      recipients: [
+        { id: "a", name: "A", email: "a@example.test" },
+        { id: "b", name: "B", email: "b@example.test", designation: "approver" },
+        { id: "c", name: "C", email: "c@example.test", designation: "cc" },
+      ],
+    });
+
+    expect(owners.map((recipient) => recipient.id)).toEqual(["a", "b"]);
+  });
+});

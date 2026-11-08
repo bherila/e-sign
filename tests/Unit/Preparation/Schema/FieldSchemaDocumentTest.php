@@ -25,9 +25,9 @@ class FieldSchemaDocumentTest extends TestCase
     {
         $document = FieldSchemaDocument::fromJson(FieldSchemaFixture::json());
 
-        // The fixture uses `anchor.required`, a 1.1 member, so it declares 1.1 — and the
-        // importer keeps whatever version the document arrived with.
-        $this->assertSame('1.1', $document->schemaVersion->toString());
+        // The fixture declares the current version (1.2) — and the importer keeps whatever
+        // version the document arrived with.
+        $this->assertSame('1.2', $document->schemaVersion->toString());
         $this->assertSame('doc_synthetic_nda', $document->documentId);
         $this->assertTrue($document->coordinateSpace->isNative());
         $this->assertSame(['buyer', 'counterparty'], $document->recipientIds());

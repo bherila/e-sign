@@ -37,14 +37,14 @@ final readonly class SchemaVersion
      * service *rewrites* — which in practice means one whose anchors it resolved — is stamped
      * with the version it was written as.
      */
-    public const CURRENT = '1.1';
+    public const CURRENT = '1.2';
 
     public const MAJOR = 1;
 
-    public const MINOR = 1;
+    public const MINOR = 2;
 
     /** Every minor this build can read, oldest first. Each has its own published contract file. */
-    public const SUPPORTED = ['1.0', '1.1'];
+    public const SUPPORTED = ['1.0', '1.1', '1.2'];
 
     public function __construct(public int $major, public int $minor)
     {

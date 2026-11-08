@@ -88,7 +88,7 @@ class FieldSchemaContractTest extends TestCase
     public function test_the_field_types_match_the_php_enum(): void
     {
         $this->assertSame(FieldType::values(), self::definition('field_type')['enum']);
-        $this->assertCount(9, FieldType::values());
+        $this->assertCount(12, FieldType::values());
     }
 
     public function test_the_field_properties_match_the_php_importer(): void

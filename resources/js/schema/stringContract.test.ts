@@ -30,6 +30,7 @@ const EXPECTED_MEMBERS = [
   "fields[].prefill.variable",
   "fields[].recipient_id",
   "fields[].type",
+  "recipients[].designation",
   "recipients[].email",
   "recipients[].id",
   "recipients[].name",
@@ -42,6 +43,7 @@ const EXPECTED_MEMBERS = [
 const DEFAULTS: Record<string, unknown[]> = {
   "fields[].anchor.origin": ["top_left"],
   "fields[].anchor.placement": ["replace"],
+  "recipients[].designation": ["signer"],
 };
 
 const ABSENT = Symbol("absent");

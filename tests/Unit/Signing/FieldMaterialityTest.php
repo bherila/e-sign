@@ -31,6 +31,9 @@ class FieldMaterialityTest extends TestCase
             [FieldType::Title, true],
             [FieldType::Company, true],
             [FieldType::SigningDate, true],
+            [FieldType::ApprovalSignature, true],
+            [FieldType::ApprovalCheckmark, true],
+            [FieldType::ApprovalDate, true],
             [FieldType::Text, false],
             [FieldType::Checkbox, false],
             [FieldType::AgreementDate, false],
@@ -54,11 +57,11 @@ class FieldMaterialityTest extends TestCase
         $this->assertEqualsCanonicalizing(FieldType::values(), $covered);
     }
 
-    public function test_only_the_signing_date_is_supplied_by_the_service(): void
+    public function test_only_the_signing_and_approval_dates_are_supplied_by_the_service(): void
     {
         foreach (FieldType::cases() as $type) {
             $this->assertSame(
-                $type === FieldType::SigningDate,
+                $type === FieldType::SigningDate || $type === FieldType::ApprovalDate,
                 FieldMateriality::isServiceSupplied($type),
                 $type->value.' is misclassified as service-supplied.',
             );

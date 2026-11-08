@@ -121,6 +121,7 @@ final class StringContractSweepTest extends TestCase
     private const DEFAULTS = [
         'fields[].anchor.origin' => ['top_left'],
         'fields[].anchor.placement' => ['replace'],
+        'recipients[].designation' => ['signer'],
     ];
 
     /**
@@ -169,6 +170,7 @@ final class StringContractSweepTest extends TestCase
         'fields[].prefill.variable',
         'fields[].recipient_id',
         'fields[].type',
+        'recipients[].designation',
         'recipients[].email',
         'recipients[].id',
         'recipients[].name',

@@ -47,8 +47,8 @@ facade converts its own convention into it. It is the only field vocabulary in t
 
 ## Sections
 
-**`schema_version`** — `"1.1"`, the version this build writes, or `"1.0"`, which is still read and
-still published. A document keeps the version it arrived with, and each version has its own
+**`schema_version`** — `"1.2"`, the version this build writes, or `"1.1"` or `"1.0"`, which are
+still read and still published. A document keeps the version it arrived with, and each version has its own
 contract file: validate against the one the document declares, not against the newest. See
 [versioning](#versioning) below.
 
@@ -185,10 +185,34 @@ each rule and asserts both refuse it; `FieldSchemaContractTest` pins the conditi
 they cannot be dropped from the file. 1.0 stays exactly as published — these are not backported,
 because the file is frozen and its consumers are entitled to the bytes they have.
 
+## Recipient designations (1.2)
+
+From 1.2 a recipient may carry `designation`: what that party does on the agreement (issue #169).
+
+| `designation` | Acts in `signing_order` | May own | Receives |
+|---|---|---|---|
+| `signer` (the default when omitted) | yes, exactly once | every type except the approval types | invitation, then the completed copy |
+| `approver` | yes, exactly once | the approval types and every non-mark type, but not `signature` or `initials` | invitation, then the completed copy |
+| `cc` | **no** — a cc recipient never appears in `signing_order` | no fields | the completed copy only |
+
+At least one recipient must be a signer. A document declaring 1.0 or 1.1 that carries `designation`
+is refused with `unknown_property`, the same rule 1.1's anchor members follow. The canonical form
+omits `designation` when it is `signer`, so a document that uses no designation keeps its bytes and
+its digest.
+
+This build **validates, stores and edits** designations. It does not yet **send** an envelope that
+has an approver or a cc recipient: the send gate refuses it with `designation_not_yet_supported`
+until the signing side of #169 lands (approval evidence, staging, the copy a cc receives). An
+approver is never treated as a signer in the meantime.
+
 ## Field types
 
 `signature`, `initials`, `text`, `name`, `company`, `title`, `agreement_date`, `signing_date`,
-`checkbox`.
+`checkbox`, and from 1.2 `approval_signature`, `approval_checkmark` and `approval_date`.
+
+The approval types belong to an approver and only an approver. `approval_date`, like
+`signing_date`, is filled from the service's own clock when the approver approves, never typed. A
+document declaring 1.0 or 1.1 that uses an approval type is refused with `unsupported_field_type`.
 
 **Additional field types are declared capabilities, never silently ignored.** A type outside this
 list is rejected with `unsupported_field_type` and the document does not import. Dropping an
@@ -436,8 +460,11 @@ breaking change.
 | `duplicate_id` | two recipients or two fields sharing an id |
 | `duplicate_alias` | two fields sharing a template alias |
 | `unknown_recipient` | a `recipient_id`, or an id in `signing_order`, that resolves to nothing |
-| `recipient_not_in_signing_order` | a declared recipient who would never be asked to sign |
+| `recipient_not_in_signing_order` | a declared signer or approver who would never be asked to act (a cc recipient is never in `signing_order`) |
 | `recipient_duplicated_in_signing_order` | a recipient in two stages, or twice in one |
+| `cc_recipient_in_signing_order` | a cc recipient placed in `signing_order` (1.2) |
+| `no_signer` | a recipient list with no signer (1.2) |
+| `field_owner_not_allowed` | a field owned by a cc recipient, an approval field owned by a non-approver, or a `signature`/`initials` owned by an approver (1.2) |
 | `page_out_of_range` | `page` below 1, or beyond the page count when it is known |
 | `coordinate_not_finite` | NaN or infinity in a rectangle or an anchor offset |
 | `coordinate_negative` | a negative `x` or `y`, which is off the page by construction |
@@ -487,7 +514,7 @@ document is not treated as fully validated until it is.
 
 Both directions fail closed, on purpose: a dropped field is a field nobody was asked to sign, and
 a reinterpreted rectangle is a signature in the wrong place. A new version means a new schema file
-(`field-schema-1.1.json`) alongside this one, so an archived document can always be read under the
+(`field-schema-1.1.json`, `field-schema-1.2.json`) alongside this one, so an archived document can always be read under the
 version it was written in.
 
 ## Why no JSON Schema library on the server

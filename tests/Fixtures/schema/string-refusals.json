@@ -1,119 +1,119 @@
 {
     "coordinate_space.origin / enum / case": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.origin: schema 1.1 implements only \"top-left\", got \"TOP-LEFT\". A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.origin: schema 1.2 implements only \"top-left\", got \"TOP-LEFT\". A document declaring another convention is rejected, never reinterpreted."
     },
     "coordinate_space.origin / enum / trailing newline": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.origin: schema 1.1 implements only \"top-left\", got \"top-left\\n\". A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.origin: schema 1.2 implements only \"top-left\", got \"top-left\\n\". A document declaring another convention is rejected, never reinterpreted."
     },
     "coordinate_space.origin / type": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.origin: schema 1.1 implements only \"top-left\", got true. A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.origin: schema 1.2 implements only \"top-left\", got true. A document declaring another convention is rejected, never reinterpreted."
     },
     "coordinate_space.origin / type / fraction": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.origin: schema 1.1 implements only \"top-left\", got a number. A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.origin: schema 1.2 implements only \"top-left\", got a number. A document declaring another convention is rejected, never reinterpreted."
     },
     "coordinate_space.origin / type / large number": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.origin: schema 1.1 implements only \"top-left\", got a number. A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.origin: schema 1.2 implements only \"top-left\", got a number. A document declaring another convention is rejected, never reinterpreted."
     },
     "coordinate_space.origin / type / object": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.origin: schema 1.1 implements only \"top-left\", got an object or array. A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.origin: schema 1.2 implements only \"top-left\", got an object or array. A document declaring another convention is rejected, never reinterpreted."
     },
     "coordinate_space.page_box / enum / case": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.page_box: schema 1.1 implements only \"crop\", got \"CROP\". A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.page_box: schema 1.2 implements only \"crop\", got \"CROP\". A document declaring another convention is rejected, never reinterpreted."
     },
     "coordinate_space.page_box / enum / trailing newline": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.page_box: schema 1.1 implements only \"crop\", got \"crop\\n\". A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.page_box: schema 1.2 implements only \"crop\", got \"crop\\n\". A document declaring another convention is rejected, never reinterpreted."
     },
     "coordinate_space.page_box / type": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.page_box: schema 1.1 implements only \"crop\", got true. A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.page_box: schema 1.2 implements only \"crop\", got true. A document declaring another convention is rejected, never reinterpreted."
     },
     "coordinate_space.page_box / type / fraction": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.page_box: schema 1.1 implements only \"crop\", got a number. A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.page_box: schema 1.2 implements only \"crop\", got a number. A document declaring another convention is rejected, never reinterpreted."
     },
     "coordinate_space.page_box / type / large number": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.page_box: schema 1.1 implements only \"crop\", got a number. A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.page_box: schema 1.2 implements only \"crop\", got a number. A document declaring another convention is rejected, never reinterpreted."
     },
     "coordinate_space.page_box / type / object": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.page_box: schema 1.1 implements only \"crop\", got an object or array. A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.page_box: schema 1.2 implements only \"crop\", got an object or array. A document declaring another convention is rejected, never reinterpreted."
     },
     "coordinate_space.page_index_base / enum / other": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.page_index_base: schema 1.1 implements only 1, got 2. A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.page_index_base: schema 1.2 implements only 1, got 2. A document declaring another convention is rejected, never reinterpreted."
     },
     "coordinate_space.page_index_base / type": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.page_index_base: schema 1.1 implements only 1, got true. A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.page_index_base: schema 1.2 implements only 1, got true. A document declaring another convention is rejected, never reinterpreted."
     },
     "coordinate_space.page_index_base / type / fraction": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.page_index_base: schema 1.1 implements only 1, got a number. A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.page_index_base: schema 1.2 implements only 1, got a number. A document declaring another convention is rejected, never reinterpreted."
     },
     "coordinate_space.page_index_base / type / large number": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.page_index_base: schema 1.1 implements only 1, got a number. A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.page_index_base: schema 1.2 implements only 1, got a number. A document declaring another convention is rejected, never reinterpreted."
     },
     "coordinate_space.page_index_base / type / object": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.page_index_base: schema 1.1 implements only 1, got an object or array. A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.page_index_base: schema 1.2 implements only 1, got an object or array. A document declaring another convention is rejected, never reinterpreted."
     },
     "coordinate_space.rotation / enum / case": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.rotation: schema 1.1 implements only \"displayed\", got \"DISPLAYED\". A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.rotation: schema 1.2 implements only \"displayed\", got \"DISPLAYED\". A document declaring another convention is rejected, never reinterpreted."
     },
     "coordinate_space.rotation / enum / trailing newline": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.rotation: schema 1.1 implements only \"displayed\", got \"displayed\\n\". A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.rotation: schema 1.2 implements only \"displayed\", got \"displayed\\n\". A document declaring another convention is rejected, never reinterpreted."
     },
     "coordinate_space.rotation / type": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.rotation: schema 1.1 implements only \"displayed\", got true. A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.rotation: schema 1.2 implements only \"displayed\", got true. A document declaring another convention is rejected, never reinterpreted."
     },
     "coordinate_space.rotation / type / fraction": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.rotation: schema 1.1 implements only \"displayed\", got a number. A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.rotation: schema 1.2 implements only \"displayed\", got a number. A document declaring another convention is rejected, never reinterpreted."
     },
     "coordinate_space.rotation / type / large number": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.rotation: schema 1.1 implements only \"displayed\", got a number. A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.rotation: schema 1.2 implements only \"displayed\", got a number. A document declaring another convention is rejected, never reinterpreted."
     },
     "coordinate_space.rotation / type / object": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.rotation: schema 1.1 implements only \"displayed\", got an object or array. A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.rotation: schema 1.2 implements only \"displayed\", got an object or array. A document declaring another convention is rejected, never reinterpreted."
     },
     "coordinate_space.unit / enum / case": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.unit: schema 1.1 implements only \"pt\", got \"PT\". A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.unit: schema 1.2 implements only \"pt\", got \"PT\". A document declaring another convention is rejected, never reinterpreted."
     },
     "coordinate_space.unit / enum / trailing newline": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.unit: schema 1.1 implements only \"pt\", got \"pt\\n\". A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.unit: schema 1.2 implements only \"pt\", got \"pt\\n\". A document declaring another convention is rejected, never reinterpreted."
     },
     "coordinate_space.unit / type": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.unit: schema 1.1 implements only \"pt\", got true. A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.unit: schema 1.2 implements only \"pt\", got true. A document declaring another convention is rejected, never reinterpreted."
     },
     "coordinate_space.unit / type / fraction": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.unit: schema 1.1 implements only \"pt\", got a number. A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.unit: schema 1.2 implements only \"pt\", got a number. A document declaring another convention is rejected, never reinterpreted."
     },
     "coordinate_space.unit / type / large number": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.unit: schema 1.1 implements only \"pt\", got a number. A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.unit: schema 1.2 implements only \"pt\", got a number. A document declaring another convention is rejected, never reinterpreted."
     },
     "coordinate_space.unit / type / object": {
         "code": "unsupported_coordinate_space",
-        "message": "Unsupported coordinate_space.unit: schema 1.1 implements only \"pt\", got an object or array. A document declaring another convention is rejected, never reinterpreted."
+        "message": "Unsupported coordinate_space.unit: schema 1.2 implements only \"pt\", got an object or array. A document declaring another convention is rejected, never reinterpreted."
     },
     "document_id / maxLength": {
         "code": "invalid_format",
@@ -325,11 +325,11 @@
     },
     "fields[].type / enum / case": {
         "code": "unsupported_field_type",
-        "message": "Unsupported field type \"SIGNATURE\". Schema 1.1 implements signature, initials, text, name, company, title, agreement_date, signing_date, checkbox. An unsupported type is rejected, never ignored: a silently dropped field is a field nobody was asked to complete."
+        "message": "Unsupported field type \"SIGNATURE\". Schema 1.2 implements signature, initials, text, name, company, title, agreement_date, signing_date, checkbox, approval_signature, approval_checkmark, approval_date. An unsupported type is rejected, never ignored: a silently dropped field is a field nobody was asked to complete."
     },
     "fields[].type / enum / trailing newline": {
         "code": "unsupported_field_type",
-        "message": "Unsupported field type \"signature\n\". Schema 1.1 implements signature, initials, text, name, company, title, agreement_date, signing_date, checkbox. An unsupported type is rejected, never ignored: a silently dropped field is a field nobody was asked to complete."
+        "message": "Unsupported field type \"signature\n\". Schema 1.2 implements signature, initials, text, name, company, title, agreement_date, signing_date, checkbox, approval_signature, approval_checkmark, approval_date. An unsupported type is rejected, never ignored: a silently dropped field is a field nobody was asked to complete."
     },
     "fields[].type / type": {
         "code": "invalid_type",
@@ -346,6 +346,30 @@
     "fields[].type / type / object": {
         "code": "invalid_type",
         "message": "type must be a string."
+    },
+    "recipients[].designation / enum / case": {
+        "code": "invalid_format",
+        "message": "designation must be one of signer, approver, cc."
+    },
+    "recipients[].designation / enum / trailing newline": {
+        "code": "invalid_format",
+        "message": "designation must be one of signer, approver, cc."
+    },
+    "recipients[].designation / type": {
+        "code": "invalid_type",
+        "message": "designation must be a string."
+    },
+    "recipients[].designation / type / fraction": {
+        "code": "invalid_type",
+        "message": "designation must be a string."
+    },
+    "recipients[].designation / type / large number": {
+        "code": "invalid_type",
+        "message": "designation must be a string."
+    },
+    "recipients[].designation / type / object": {
+        "code": "invalid_type",
+        "message": "designation must be a string."
     },
     "recipients[].email / U+0009": {
         "code": "invalid_email",
@@ -501,23 +525,23 @@
     },
     "schema_version / enum / trailing newline": {
         "code": "schema_version_unsupported",
-        "message": "schema_version must be exactly MAJOR.MINOR, for example \"1.1\"; got \"1.1\n\"."
+        "message": "schema_version must be exactly MAJOR.MINOR, for example \"1.2\"; got \"1.2\n\"."
     },
     "schema_version / type": {
         "code": "invalid_type",
-        "message": "schema_version must be a string such as \"1.1\"."
+        "message": "schema_version must be a string such as \"1.2\"."
     },
     "schema_version / type / fraction": {
         "code": "invalid_type",
-        "message": "schema_version must be a string such as \"1.1\"."
+        "message": "schema_version must be a string such as \"1.2\"."
     },
     "schema_version / type / large number": {
         "code": "invalid_type",
-        "message": "schema_version must be a string such as \"1.1\"."
+        "message": "schema_version must be a string such as \"1.2\"."
     },
     "schema_version / type / object": {
         "code": "invalid_type",
-        "message": "schema_version must be a string such as \"1.1\"."
+        "message": "schema_version must be a string such as \"1.2\"."
     },
     "signing_order[][] / maxLength": {
         "code": "unknown_recipient",

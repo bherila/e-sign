@@ -8,9 +8,11 @@ import {
   carriesUnroundedCoordinate,
   describeIssue,
   type FieldDefinition,
+  fieldOwners,
   type FieldSchemaDocument,
   FieldSchemaError,
   type FieldType,
+  fieldTypesFor,
   type PageSize,
   parseFieldSchema,
   serializeFieldSchema,
@@ -127,10 +129,24 @@ function LoadedFieldEditor({ payload, initial, pages }: LoadedFieldEditorProps) 
   const [serverMessage, setServerMessage] = useState<string | null>(null);
   const [serverIssues, setServerIssues] = useState<ServerIssue[]>([]);
   const [conflict, setConflict] = useState<string | null>(null);
-  const [newFieldType, setNewFieldType] = useState<FieldType>("signature");
+  const [preferredNewFieldType, setNewFieldType] = useState<FieldType>("signature");
   const [newFieldRecipient, setNewFieldRecipient] = useState(
-    () => initial.recipients[0]?.id ?? "",
+    () => fieldOwners(initial)[0]?.id ?? "",
   );
+
+  // A new field's type must be one its owner may hold (schema 1.2). Derived on every render
+  // rather than corrected when the owner changes, so it holds for the owner the editor opens
+  // with, for an owner whose designation is edited, and for one that is removed: an approver
+  // selected while "signature" is preferred gets `approval_signature`, the approver's own mark.
+  const newFieldOwnerTypes = fieldTypesFor(
+    state.document.recipients.find((recipient) => recipient.id === newFieldRecipient)?.designation,
+  );
+  const newFieldType =
+    newFieldOwnerTypes.length === 0 || newFieldOwnerTypes.includes(preferredNewFieldType)
+      ? preferredNewFieldType
+      : newFieldOwnerTypes.includes("approval_signature")
+        ? "approval_signature"
+        : newFieldOwnerTypes[0]!;
 
   const devicePixelRatio = useDevicePixelRatio();
   const surface = useRef<HTMLDivElement | null>(null);

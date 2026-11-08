@@ -24,11 +24,14 @@
  * version policy says bumps the minor: a 1.0 reader validating with `additionalProperties: false`
  * must not be handed a document that still calls itself 1.0 and carries members its contract does
  * not declare.
+ *
+ * 1.2 adds `recipients[].designation` (signer, approver, cc) and the approver-only field types
+ * `approval_signature`, `approval_checkmark` and `approval_date` (issue #169).
  */
-export const FIELD_SCHEMA_VERSION = "1.1";
+export const FIELD_SCHEMA_VERSION = "1.2";
 
 /** Every minor this build can read, oldest first. Each has its own published contract file. */
-export const SUPPORTED_FIELD_SCHEMA_VERSIONS = ["1.0", "1.1"] as const;
+export const SUPPORTED_FIELD_SCHEMA_VERSIONS = ["1.0", "1.1", "1.2"] as const;
 
 export type FieldSchemaVersion = (typeof SUPPORTED_FIELD_SCHEMA_VERSIONS)[number];
 
@@ -49,9 +52,51 @@ export const FIELD_TYPES = [
   "agreement_date",
   "signing_date",
   "checkbox",
+  "approval_signature",
+  "approval_checkmark",
+  "approval_date",
 ] as const;
 
 export type FieldType = (typeof FIELD_TYPES)[number];
+
+/** Field types an approver owns, and only an approver (schema 1.2). */
+export const APPROVAL_FIELD_TYPES = ["approval_signature", "approval_checkmark", "approval_date"] as const;
+
+/** The marks a signer makes, which an approver may not own (schema 1.2). */
+export const SIGNATURE_MARK_TYPES = ["signature", "initials"] as const;
+
+/** What a party does on an agreement (schema 1.2). Omitted means signer. */
+export const RECIPIENT_DESIGNATIONS = ["signer", "approver", "cc"] as const;
+
+export type RecipientDesignation = (typeof RECIPIENT_DESIGNATIONS)[number];
+
+/** The first schema minor that declares designations and the approval types. */
+const DESIGNATION_SINCE_MINOR = 2;
+
+/**
+ * The field types a recipient with this designation may own (schema 1.2): an approver owns the
+ * approval types and every non-mark type, a signer everything but the approval types, and a cc
+ * recipient nothing. The importers enforce the same rule (`field_owner_not_allowed`); this is the
+ * editor's way of not offering what they would refuse.
+ */
+export function fieldTypesFor(designation: RecipientDesignation | undefined): FieldType[] {
+  const effective = designation ?? "signer";
+
+  if (effective === "cc") {
+    return [];
+  }
+
+  return FIELD_TYPES.filter((type) =>
+    effective === "approver"
+      ? !(SIGNATURE_MARK_TYPES as readonly string[]).includes(type)
+      : !(APPROVAL_FIELD_TYPES as readonly string[]).includes(type),
+  );
+}
+
+/** Recipients who may own fields: every one but a cc recipient. */
+export function fieldOwners(document: { recipients: Recipient[] }): Recipient[] {
+  return document.recipients.filter((recipient) => recipient.designation !== "cc");
+}
 
 /** The one coordinate space version 1.0 implements. Every value is fixed. */
 export const NATIVE_COORDINATE_SPACE = {
@@ -202,6 +247,8 @@ export interface Recipient {
   name: string;
   email: string;
   role?: string;
+  /** Schema 1.2. Omitted means "signer". */
+  designation?: RecipientDesignation;
 }
 
 export interface FieldDefinition {
@@ -252,6 +299,9 @@ export const VALIDATION_CODES = [
   "unknown_recipient",
   "recipient_not_in_signing_order",
   "recipient_duplicated_in_signing_order",
+  "cc_recipient_in_signing_order",
+  "no_signer",
+  "field_owner_not_allowed",
   "page_out_of_range",
   "coordinate_not_finite",
   "coordinate_negative",
@@ -330,7 +380,7 @@ export const DOCUMENT_REQUIRED = [
   "fields",
 ] as const;
 export const RECIPIENT_REQUIRED = ["id", "name", "email"] as const;
-export const RECIPIENT_OPTIONAL = ["role"] as const;
+export const RECIPIENT_OPTIONAL = ["role", "designation"] as const;
 export const FIELD_REQUIRED = ["id", "recipient_id", "type", "page", "rect"] as const;
 export const FIELD_OPTIONAL = ["required", "read_only", "label", "alias", "prefill", "anchor"] as const;
 export const RECT_REQUIRED = ["x", "y", "width", "height"] as const;
@@ -486,8 +536,9 @@ export function validateFieldSchema(input: unknown, options: ValidationOptions =
   checkCoordinateSpace(input, issues);
 
   const recipientIds = checkRecipients(input, issues);
-  checkSigningOrder(input, recipientIds, issues);
-  checkFields(input, recipientIds, options, issues);
+  const designations = checkDesignations(input, issues);
+  checkSigningOrder(input, recipientIds, designations, issues);
+  checkFields(input, recipientIds, options, issues, designations);
 
   return issues;
 }
@@ -580,6 +631,12 @@ function canonicaliseRecipient(recipient: Recipient): Recipient {
 
   if (recipient.role !== undefined) {
     canonical.role = recipient.role;
+  }
+
+  // Omitted when it is the default, as PHP's Recipient::toArray() does, so a document that does
+  // not use designations keeps its bytes and its digest.
+  if (recipient.designation !== undefined && recipient.designation !== "signer") {
+    canonical.designation = recipient.designation;
   }
 
   return canonical;
@@ -845,6 +902,7 @@ function checkRecipients(document: Record<string, unknown>, issues: ValidationIs
 function checkSigningOrder(
   document: Record<string, unknown>,
   recipientIds: string[] | null,
+  designations: Map<string, RecipientDesignation>,
   issues: ValidationIssue[],
 ): void {
   if (!("signing_order" in document)) {
@@ -921,6 +979,19 @@ function checkSigningOrder(
 
       placed.push(id);
 
+      if (designations.get(id) === "cc") {
+        issues.push(
+          issue(
+            path,
+            "cc_recipient_in_signing_order",
+            `Recipient "${id}" is a cc recipient and appears in signing_order. A cc recipient is ` +
+              "copied on the completed agreement and never acts, so they have no stage.",
+          ),
+        );
+
+        return;
+      }
+
       if (recipientIds !== null && !recipientIds.includes(id)) {
         issues.push(
           issue(
@@ -938,6 +1009,10 @@ function checkSigningOrder(
   }
 
   recipientIds.forEach((id: string, index: number) => {
+    if (designations.get(id) === "cc") {
+      return;
+    }
+
     if (!placed.includes(id)) {
       issues.push(
         issue(
@@ -955,6 +1030,7 @@ function checkFields(
   recipientIds: string[] | null,
   options: ValidationOptions,
   issues: ValidationIssue[],
+  designations: Map<string, RecipientDesignation> = new Map(),
 ): void {
   if (!("fields" in document)) {
     return;
@@ -1033,7 +1109,8 @@ function checkFields(
     }
 
     if ("type" in field) {
-      checkFieldType(`${path}/type`, field["type"], issues);
+      checkFieldType(`${path}/type`, field["type"], declaredVersion(document), issues);
+      checkFieldOwner(path, field, designations, issues);
     }
 
     const page =
@@ -1066,9 +1143,21 @@ function checkFields(
   });
 }
 
-function checkFieldType(path: string, type: unknown, issues: ValidationIssue[]): void {
+function checkFieldType(path: string, type: unknown, declared: string | null, issues: ValidationIssue[]): void {
   if (typeof type !== "string") {
     issues.push(issue(path, "invalid_type", "type must be a string."));
+
+    return;
+  }
+
+  if ((APPROVAL_FIELD_TYPES as readonly string[]).includes(type) && declared !== null && minorOf(declared) < DESIGNATION_SINCE_MINOR) {
+    issues.push(
+      issue(
+        path,
+        "unsupported_field_type",
+        `Field type "${type}" arrived in schema 1.2, and this document declares ${declared}. Declare 1.2 to use it.`,
+      ),
+    );
 
     return;
   }
@@ -1338,6 +1427,137 @@ function checkPrefill(
  * Only used to decide which members a document may contain; every other check is
  * version-independent, and a document with no readable version has already been reported.
  */
+/** The declared `MAJOR.MINOR`, normalised as PHP's `SchemaVersion::toString()` writes it, or null. */
+function declaredVersion(document: Record<string, unknown>): string | null {
+  const declared = document["schema_version"];
+
+  if (typeof declared !== "string") {
+    return null;
+  }
+
+  const match = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.exec(declared);
+
+  return match ? `${Number(match[1])}.${Number(match[2])}` : null;
+}
+
+function minorOf(version: string): number {
+  return Number(version.split(".")[1]);
+}
+
+/**
+ * `recipients[].designation`: its values, the version that declares it, and the one-signer rule.
+ * Mirrors `FieldSchemaValidator::checkDesignations()` message for message, in the same order.
+ */
+function checkDesignations(document: Record<string, unknown>, issues: ValidationIssue[]): Map<string, RecipientDesignation> {
+  const designations = new Map<string, RecipientDesignation>();
+  const recipients = document["recipients"];
+
+  if (!Array.isArray(recipients) || recipients.length === 0) {
+    return designations;
+  }
+
+  const declared = declaredVersion(document);
+  let complete = true;
+
+  recipients.forEach((recipient: unknown, index: number) => {
+    if (!isObject(recipient) || typeof recipient["id"] !== "string") {
+      complete = false;
+
+      return;
+    }
+
+    const id = recipient["id"];
+    const path = `/recipients/${index}/designation`;
+
+    if (!("designation" in recipient)) {
+      designations.set(id, "signer");
+
+      return;
+    }
+
+    if (declared !== null && minorOf(declared) < DESIGNATION_SINCE_MINOR) {
+      issues.push(
+        issue(
+          path,
+          "unknown_property",
+          `recipients[].designation arrived in schema 1.2, and this document declares ${declared}. Declare 1.2 to use it: ` +
+            `a document that says ${declared} is read against a contract that does not have it.`,
+        ),
+      );
+      complete = false;
+
+      return;
+    }
+
+    const value = recipient["designation"];
+
+    if (typeof value !== "string") {
+      issues.push(issue(path, "invalid_type", "designation must be a string."));
+      complete = false;
+
+      return;
+    }
+
+    if (!(RECIPIENT_DESIGNATIONS as readonly string[]).includes(value)) {
+      issues.push(issue(path, "invalid_format", `designation must be one of ${RECIPIENT_DESIGNATIONS.join(", ")}.`));
+      complete = false;
+
+      return;
+    }
+
+    designations.set(id, value as RecipientDesignation);
+  });
+
+  if (complete && ![...designations.values()].includes("signer")) {
+    issues.push(
+      issue(
+        "/recipients",
+        "no_signer",
+        "At least one recipient must be a signer. Approvers approve and cc recipients are copied; " +
+          "an agreement nobody signs is not an agreement.",
+      ),
+    );
+  }
+
+  return designations;
+}
+
+/** Which designation may own which field type. Mirrors `FieldSchemaValidator::checkFieldOwner()`. */
+function checkFieldOwner(
+  path: string,
+  field: Record<string, unknown>,
+  designations: Map<string, RecipientDesignation>,
+  issues: ValidationIssue[],
+): void {
+  const recipientId = field["recipient_id"];
+  const type = field["type"];
+  const owner = typeof recipientId === "string" ? designations.get(recipientId) : undefined;
+
+  if (owner === undefined || typeof type !== "string" || !(FIELD_TYPES as readonly string[]).includes(type)) {
+    return;
+  }
+
+  let problem: string | null = null;
+
+  if (owner === "cc") {
+    problem = "is a cc recipient, who is copied on the agreement and owns no fields";
+  } else if ((APPROVAL_FIELD_TYPES as readonly string[]).includes(type) && owner !== "approver") {
+    problem = "is not an approver, and only an approver owns an approval field";
+  } else if ((SIGNATURE_MARK_TYPES as readonly string[]).includes(type) && owner === "approver") {
+    problem = "is an approver, who approves and does not sign; use approval_signature";
+  }
+
+  if (problem !== null) {
+    issues.push(
+      issue(
+        `${path}/recipient_id`,
+        "field_owner_not_allowed",
+        `A ${type} field is bound to recipient "${String(recipientId)}", who ${problem}.`,
+      ),
+    );
+  }
+}
+
 function declaredMinor(document: Record<string, unknown>): number | null {
   const declared = document["schema_version"];
 

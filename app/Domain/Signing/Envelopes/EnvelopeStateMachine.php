@@ -12,6 +12,7 @@ use App\Domain\Preparation\Anchoring\AnchorResolutionOutcome;
 use App\Domain\Preparation\Schema\FieldDefinition;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\FieldType;
+use App\Domain\Preparation\Schema\RecipientDesignation;
 use App\Domain\Signing\Contracts\AnchorResolution;
 use App\Domain\Signing\Contracts\AssurancePolicyCheck;
 use App\Domain\Signing\Contracts\EnvelopeEventSink;
@@ -1153,6 +1154,22 @@ final readonly class EnvelopeStateMachine
         }
 
         foreach ($recipients as $recipient) {
+            // Fail closed (#169): approvers and cc recipients can be prepared from schema 1.2,
+            // but what they do on a live envelope — approval evidence, staging, the copy they
+            // receive — arrives with the signing side of #169. Until then an envelope carrying
+            // one is refused here, rather than sent with that party treated as a signer.
+            if ($recipient->designation !== RecipientDesignation::Signer) {
+                $problems[] = [
+                    'code' => 'designation_not_yet_supported',
+                    'recipient' => $recipient->schema_recipient_id,
+                    'message' => 'Recipient "'.$recipient->schema_recipient_id.'" is designated '
+                        .$recipient->designation->value.'. Envelopes with approvers or cc recipients can be '
+                        .'prepared but not yet sent.',
+                ];
+
+                continue;
+            }
+
             if (filter_var($recipient->email, FILTER_VALIDATE_EMAIL) === false) {
                 $problems[] = [
                     'code' => 'recipient_missing_email',

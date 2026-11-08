@@ -2,7 +2,8 @@ import Ajv2020, { type ValidateFunction } from "ajv/dist/2020";
 
 import fixtureJson from "../../../tests/Fixtures/schema/nda-two-signers.json";
 import legacySchemaJson from "../../schema/field-schema-1.0.json";
-import schemaJson from "../../schema/field-schema-1.1.json";
+import previousSchemaJson from "../../schema/field-schema-1.1.json";
+import schemaJson from "../../schema/field-schema-1.2.json";
 import {
   ANCHOR_OPTIONAL,
   ANCHOR_ORIGINS,
@@ -25,7 +26,7 @@ import {
 } from "./fieldSchema";
 
 /**
- * `resources/schema/field-schema-1.1.json` is the published contract; these types are one
+ * `resources/schema/field-schema-1.2.json` is the published contract; these types are one
  * implementation of it and `app/Domain/Preparation/Schema` is the other. This file enforces the
  * contract directly with ajv and pins the TypeScript mirror against it. The PHP suite
  * (`tests/Unit/Preparation/Schema/FieldSchemaContractTest.php`) pins the same file from the
@@ -94,6 +95,25 @@ describe("the published JSON Schema", () => {
     expect(round.schema_version).toBe("1.0");
     expect(round).toEqual(legacy);
     expect(validateLegacy(round)).toBe(true);
+  });
+
+  /**
+   * The same promise for 1.1, now that 1.2 is current (issue #169): a document that uses no
+   * designation and no approval type still says 1.1, still satisfies the unchanged 1.1 contract,
+   * and comes back byte for byte.
+   */
+  it("keeps a 1.1 document valid against the unchanged 1.1 contract, and round trips it", () => {
+    const previous = JSON.parse(JSON.stringify(fixtureJson)) as Record<string, any>;
+    previous.schema_version = "1.1";
+
+    const validatePrevious = new Ajv2020({ strict: false, allErrors: true }).compile(previousSchemaJson);
+
+    expect(validatePrevious(previous)).toBe(true);
+
+    const round = JSON.parse(serializeFieldSchema(parseFieldSchema(previous))) as Record<string, any>;
+
+    expect(round.schema_version).toBe("1.1");
+    expect(round).toEqual(previous);
   });
 
   it.each([
@@ -309,6 +329,6 @@ describe("the TypeScript mirror", () => {
 
   it("keeps the validation code list unique and stable", () => {
     expect(new Set(VALIDATION_CODES).size).toBe(VALIDATION_CODES.length);
-    expect(VALIDATION_CODES).toHaveLength(28);
+    expect(VALIDATION_CODES).toHaveLength(31);
   });
 });
