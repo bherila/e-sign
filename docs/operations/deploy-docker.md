@@ -176,6 +176,12 @@ a different binary must be a CLI of the same PHP version with the required exten
 
 ## Key directory contract (`/etc/esign/keys`, mounted `:ro` into `esign-worker` only)
 
+CI holds `docker-compose.prod.example.yml` to this (issue #37): the `image` job resolves it with
+`docker compose config` and fails unless `/etc/esign/keys` is mounted into `esign-worker` alone,
+read-only, no other service mounts anything from the host, every service is read-only with every
+capability dropped, and only `esign` publishes a port, on loopback. A copy you adapt is yours to
+keep to the same contract.
+
 | File | Env var it satisfies | Permissions |
 |---|---|---|
 | `seal.crt` | `ESIGN_SEAL_CERTIFICATE_PATH=/keys/seal.crt` | `0440`, owned by `root:<container-gid>` |
