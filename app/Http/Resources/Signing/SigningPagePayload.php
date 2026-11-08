@@ -6,6 +6,7 @@ namespace App\Http\Resources\Signing;
 
 use App\Domain\Preparation\Documents\Models\Document;
 use App\Domain\Preparation\Schema\FieldDefinition;
+use App\Domain\Preparation\Schema\RecipientDesignation;
 use App\Domain\Signing\Capture\ConsentPolicy;
 use App\Domain\Signing\Capture\SignatureImage;
 use App\Domain\Signing\Envelopes\SignerButtons;
@@ -62,7 +63,10 @@ final class SigningPagePayload
         $schema = $envelope->fieldSchema();
 
         $values = $envelope->fieldValues()->get();
-        $consent = $this->consent->forRecordedVersion($envelope->consent_policy_version);
+        $consent = $this->consent->forRecordedVersion(
+            $envelope->consent_policy_version,
+            $recipient->designation === RecipientDesignation::Approver,
+        );
 
         return [
             'envelope' => [
@@ -77,6 +81,8 @@ final class SigningPagePayload
                 'name' => $recipient->name,
                 'schema_recipient_id' => $recipient->schema_recipient_id,
                 'state' => $recipient->state->value,
+                // Signer or approver: decides the page's wording, never what is allowed.
+                'designation' => $recipient->designation->value,
             ],
             'parties' => $this->parties($envelope, $recipient),
             'document' => [
@@ -184,6 +190,7 @@ final class SigningPagePayload
                 'schema_recipient_id' => $party->schema_recipient_id,
                 'name' => $party->name,
                 'role' => $schema->recipient($party->schema_recipient_id)?->role,
+                'designation' => $party->designation->value,
                 'state' => $party->state->value,
                 'is_you' => $party->getKey() === $self->getKey(),
             ])
@@ -229,7 +236,7 @@ final class SigningPagePayload
                 $fields,
                 static fn (FieldDefinition $field): bool => $field->required
                     && ! $field->readOnly
-                    && in_array($field->type->value, ['signature', 'initials'], true),
+                    && $field->type->capturesMark(),
             ),
         ));
     }

@@ -8,7 +8,8 @@ namespace App\Domain\Signing\Envelopes;
  * Where one recipient stands, modelled independently of the envelope's own state
  * (docs/HANDOFF.md section 6).
  *
- * Only an `active` recipient may submit values or accept. Being `pending` is the ordering
+ * Only an `active` recipient may submit values, accept, or decline; a `copied` one never is.
+ * Being `pending` is the ordering
  * guard in sequential mode: a later signer's link resolves, and does nothing, until the
  * stage before theirs finishes (docs/ARCHITECTURE.md invariant 1).
  */
@@ -25,6 +26,15 @@ enum RecipientState: string
 
     /** Refused. Declining one recipient declines the envelope. */
     case Declined = 'declined';
+
+    /**
+     * A cc recipient (schema 1.2 `designation: cc`), from creation to the end.
+     *
+     * Never pending and never active, so never invited, reminded, or counted as outstanding:
+     * a cc party owns no fields and gives no answer. They are sent the completed copy, and
+     * nothing before it (issue #169).
+     */
+    case Copied = 'copied';
 
     /**
      * True once this recipient has given a final answer, either way.

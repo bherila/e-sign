@@ -200,10 +200,17 @@ is refused with `unknown_property`, the same rule 1.1's anchor members follow. T
 omits `designation` when it is `signer`, so a document that uses no designation keeps its bytes and
 its digest.
 
-This build **validates, stores and edits** designations. It does not yet **send** an envelope that
-has an approver or a cc recipient: the send gate refuses it with `designation_not_yet_supported`
-until the signing side of #169 lands (approval evidence, staging, the copy a cc receives). An
-approver is never treated as a signer in the meantime.
+On a live envelope (docs/signing/state-machine.md, "Recipients"):
+
+- An **approver** is released in their stage, invited and reminded like a signer (the mail asks
+  them to *approve*), and may decline, which declines the envelope. Their acceptance is an
+  attestation in the approver role — the same evidence a signature leaves, bound to the role by the
+  field schema digest it records — and the completion report lists it under **Approved by**, apart
+  from the parties who signed.
+- A **cc** recipient is `copied` from creation: never released, invited, reminded or told about a
+  cancellation or expiry of an agreement they were never shown, never waited for, and unable to
+  accept or decline. The completed copy is the one message they get, so a usable address is the
+  one thing the send gate checks for them.
 
 ## Field types
 

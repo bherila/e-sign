@@ -126,6 +126,47 @@ class GuestSigningAcceptanceTest extends TestCase
         $this->assertNull(RecipientAttestation::query()->firstOrFail()->otp_challenge_ref);
     }
 
+    public function test_an_approver_is_asked_to_approve_and_told_they_have(): void
+    {
+        $scenario = GuestSigningScenario::sent(['field_schema' => EnvelopeDesignationTest::schemaWithApproverAndCc()]);
+        $scenario->signing->signAs($scenario->envelope, $scenario->recipient('signer'), 'session-signer');
+
+        $manager = $scenario->recipient('manager');
+        $cookie = $this->startSigningSession($scenario, $scenario->invite($manager));
+
+        $page = $this->asSigner($cookie)->get(GuestSigningScenario::sessionUrl($scenario->envelope));
+        $page->assertOk();
+        $payload = $this->payloadFrom($page->getContent());
+
+        $this->assertSame('approver', $payload['recipient']['designation']);
+        // The approval notice, not the signer's: an approver is not placing a signature.
+        $this->assertStringContainsString('Approving this agreement electronically', $payload['consent']['html']);
+        $this->assertStringNotContainsString('placing your electronic signature', $payload['consent']['html']);
+        $this->assertSame(['manager_signature'], $payload['required_signature_field_ids']);
+        $this->assertSame(['manager_approved_on'], $payload['service_supplied_field_ids']);
+        // The cc recipient is listed as a party, and as copied rather than as somebody pending.
+        $parties = array_column($payload['parties'], null, 'schema_recipient_id');
+        $this->assertSame('cc', $parties['records']['designation']);
+        $this->assertSame('copied', $parties['records']['state']);
+
+        $reviewed = $this->saveValues($scenario, $cookie, [
+            'manager_approval' => true,
+            'manager_signature' => SyntheticImages::pngDataUrl(),
+        ]);
+        $reviewed['signature_field_ids'] = ['manager_signature'];
+
+        $this->accept($scenario, $cookie, $reviewed)->assertRedirect();
+
+        $this->assertSame(RecipientState::Signed, $manager->refresh()->state);
+        $this->assertSame(EnvelopeState::Finalizing, $scenario->envelope->refresh()->state);
+
+        $this->asSigner($cookie)->get(GuestSigningScenario::sessionUrl($scenario->envelope))
+            ->assertOk()
+            ->assertSee('You have approved this agreement')
+            ->assertSee('Approved as')
+            ->assertSee('Everyone has now signed or approved.');
+    }
+
     public function test_the_confirmation_page_shows_the_server_acceptance_time(): void
     {
         $scenario = GuestSigningScenario::sent();
@@ -343,6 +384,21 @@ class GuestSigningAcceptanceTest extends TestCase
     /**
      * @param  array<string, mixed>  $payload
      */
+    /**
+     * @return array<string, mixed>
+     */
+    private function payloadFrom(string|false $html): array
+    {
+        $matched = preg_match('/data-signing="(.*?)"/s', (string) $html, $matches);
+
+        $this->assertSame(1, $matched, 'The signing page carried no payload attribute.');
+
+        /** @var array<string, mixed> $decoded */
+        $decoded = json_decode(html_entity_decode($matches[1], ENT_QUOTES), true, 512, JSON_THROW_ON_ERROR);
+
+        return $decoded;
+    }
+
     private function accept(GuestSigningScenario $scenario, string $cookie, array $payload): TestResponse
     {
         return $this->asSigner($cookie)->post(

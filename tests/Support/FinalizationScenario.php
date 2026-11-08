@@ -44,7 +44,12 @@ final class FinalizationScenario
 
     public readonly Envelope $envelope;
 
-    private function __construct(AssuranceLevel $level, bool $reset)
+    /**
+     * @param  array<string, mixed>|null  $fieldSchema  Another schema, and the recipients who
+     *                                                  sign it in order; null for the buyer and seller.
+     * @param  list<string>  $signers
+     */
+    private function __construct(AssuranceLevel $level, bool $reset, ?array $fieldSchema = null, array $signers = ['buyer', 'seller'])
     {
         // `Storage::fake()` *clears* the disk, and `configureSeal()` puts the active key back
         // to fixture key A. Both are what a single-scenario test wants and both are wrong for
@@ -60,11 +65,14 @@ final class FinalizationScenario
             revisionBytes: PdfFixtures::bytes(self::DOCUMENT_FIXTURE),
         )->bind();
 
-        $envelope = $this->signing->sent(['assurance_level' => $level->value]);
+        $envelope = $this->signing->sent(array_filter([
+            'assurance_level' => $level->value,
+            'field_schema' => $fieldSchema,
+        ], static fn (mixed $value): bool => $value !== null));
 
-        $this->signing->signAs($envelope, $this->signing->recipient($envelope, 'buyer'), 'session-buyer');
-        $envelope->refresh();
-        $this->signing->signAs($envelope, $this->signing->recipient($envelope, 'seller'), 'session-seller');
+        foreach ($signers as $signer) {
+            $this->signing->signAs($envelope->refresh(), $this->signing->recipient($envelope, $signer), 'session-'.$signer);
+        }
 
         $this->envelope = $envelope->refresh();
 
@@ -83,6 +91,17 @@ final class FinalizationScenario
     public static function signed(AssuranceLevel $level = AssuranceLevel::PadesBB, bool $reset = true): self
     {
         return new self($level, $reset);
+    }
+
+    /**
+     * The same, for another field schema, accepted by `$actors` in that order.
+     *
+     * @param  array<string, mixed>  $fieldSchema
+     * @param  list<string>  $actors
+     */
+    public static function signedWith(array $fieldSchema, array $actors): self
+    {
+        return new self(AssuranceLevel::PadesBB, true, $fieldSchema, $actors);
     }
 
     /**

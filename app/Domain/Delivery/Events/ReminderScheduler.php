@@ -8,6 +8,7 @@ use App\Domain\Delivery\Mail\MailContext;
 use App\Domain\Delivery\Mail\MailKind;
 use App\Domain\Delivery\Mail\MailOutbox;
 use App\Domain\Delivery\Mail\MailRecipient;
+use App\Domain\Preparation\Schema\RecipientDesignation;
 use App\Domain\Signing\Envelopes\EnvelopeState;
 use App\Domain\Signing\Envelopes\RecipientState;
 use App\Domain\Signing\Models\EnvelopeRecipient;
@@ -94,6 +95,9 @@ final readonly class ReminderScheduler
                         agreementTitle: $envelope->title,
                         actionUrl: $signingUrl,
                         expiresAt: $envelope->expires_at,
+                        requestedAction: $recipient->designation === RecipientDesignation::Approver
+                            ? MailContext::ACTION_APPROVE
+                            : null,
                     ),
                     workspace: $envelope->workspace,
                     related: $recipient,

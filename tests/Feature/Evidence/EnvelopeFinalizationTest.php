@@ -27,6 +27,7 @@ use App\Domain\Signing\Exceptions\IllegalTransition;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
+use Tests\Feature\Signing\EnvelopeDesignationTest;
 use Tests\Support\CmsVerification;
 use Tests\Support\FinalizationScenario;
 use Tests\Support\LoggingEnvelopeEventSink;
@@ -146,6 +147,40 @@ class EnvelopeFinalizationTest extends TestCase
 
         // The report is the last page of the agreement, so a phrase unique to it is in both.
         $this->assertStringContainsString('Completion report', $this->uncompressedText($bytes));
+    }
+
+    public function test_an_approval_is_listed_apart_and_a_cc_recipient_is_not_a_party_who_accepted(): void
+    {
+        $scenario = FinalizationScenario::signedWith(EnvelopeDesignationTest::schemaWithApproverAndCc(), ['signer', 'manager']);
+        $scenario->finalizer()->finalize($scenario->envelope);
+
+        $this->assertSame(EnvelopeState::Completed, $scenario->envelope->refresh()->state);
+
+        $report = Storage::disk('documents')->get($this->artifact($scenario, ArtifactKind::CompletionReport)->path);
+        $text = $this->uncompressedText($report);
+
+        $this->assertStringContainsString('Approved by', $text);
+        $this->assertStringContainsString('Synthetic Manager', $text);
+        $this->assertStringContainsString('approved at \\(server time\\)', $text);
+        $this->assertStringContainsString('signatures, approvals, and assent', $text);
+        // Copied, not a party who accepted: the cc recipient's name is nowhere on the report.
+        $this->assertStringNotContainsString('Synthetic Records', $text);
+
+        // `approval_date` is drawn from the approver's own acceptance, like `signing_date`.
+        $approval = $scenario->envelope->attestations()->orderByDesc('id')->firstOrFail();
+        $executed = $this->uncompressedText(
+            (string) Storage::disk('documents')->get($this->artifact($scenario, ArtifactKind::ExecutedPdf)->path),
+        );
+        $this->assertStringContainsString('('.$approval->accepted_at->utc()->format('Y-m-d').')', $executed);
+
+        $evidence = json_decode(
+            (string) Storage::disk('documents')->get($this->artifact($scenario, ArtifactKind::EvidenceJson)->path),
+            true,
+        );
+        $this->assertSame(
+            ['signer', 'approver'],
+            array_column($evidence['attestation_chain'], 'designation'),
+        );
     }
 
     public function test_the_evidence_document_digests_match_the_published_bytes(): void

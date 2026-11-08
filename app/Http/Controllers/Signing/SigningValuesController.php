@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Signing;
 
-use App\Domain\Preparation\Schema\FieldType;
 use App\Domain\Signing\Capture\SignatureImage;
 use App\Domain\Signing\Capture\SignatureImageRejected;
 use App\Domain\Signing\Envelopes\EnvelopeStateMachine;
@@ -122,7 +121,7 @@ class SigningValuesController extends Controller
                 continue;
             }
 
-            if (! in_array($field->type, [FieldType::Signature, FieldType::Initials], true)) {
+            if (! $field->type->capturesMark()) {
                 continue;
             }
 

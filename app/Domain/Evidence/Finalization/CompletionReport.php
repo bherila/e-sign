@@ -80,38 +80,34 @@ final readonly class CompletionReport
             ['style' => self::STYLE_HEADING, 'text' => 'Parties and acceptances'],
         ];
 
+        $signers = array_values(array_filter(
+            $input->attestations,
+            static fn (array $attestation): bool => ($attestation['designation'] ?? 'signer') !== 'approver',
+        ));
+        $approvers = array_values(array_filter(
+            $input->attestations,
+            static fn (array $attestation): bool => ($attestation['designation'] ?? 'signer') === 'approver',
+        ));
+
         if ($input->attestations === []) {
             $lines[] = ['style' => self::STYLE_BODY, 'text' => 'No acceptance was recorded.'];
         }
 
-        foreach ($input->attestations as $index => $attestation) {
-            $lines[] = [
-                'style' => self::STYLE_BODY,
-                'text' => sprintf(
-                    '%d. %s <%s>',
-                    $index + 1,
-                    self::clip((string) $attestation['name'], 40),
-                    self::clip((string) $attestation['email'], 40),
-                ),
-            ];
-            $lines[] = [
-                'style' => self::STYLE_BODY,
-                'text' => '   accepted at (server time) '.$attestation['accepted_at'],
-            ];
-            $lines[] = [
-                'style' => self::STYLE_BODY,
-                'text' => '   verification              '.$attestation['verification_method'],
-            ];
-            if (($attestation['otp_challenge'] ?? null) !== null) {
-                $lines[] = [
-                    'style' => self::STYLE_BODY,
-                    'text' => '   one-time code (email)     '.$attestation['otp_challenge'],
-                ];
+        $number = 0;
+
+        foreach ($signers as $attestation) {
+            $lines = [...$lines, ...self::acceptanceLines(++$number, $attestation, 'accepted at')];
+        }
+
+        // An approval is an attestation in the approver role (issue #169): the same evidence
+        // as a signature, listed apart so that nobody reads an approver as a party who signed.
+        if ($approvers !== []) {
+            $lines[] = ['style' => self::STYLE_SPACER, 'text' => ''];
+            $lines[] = ['style' => self::STYLE_HEADING, 'text' => 'Approved by'];
+
+            foreach ($approvers as $attestation) {
+                $lines = [...$lines, ...self::acceptanceLines(++$number, $attestation, 'approved at')];
             }
-            $lines[] = [
-                'style' => self::STYLE_BODY,
-                'text' => '   attestation SHA-256       '.$attestation['attestation_sha256'],
-            ];
         }
 
         $lines = [
@@ -122,11 +118,19 @@ final readonly class CompletionReport
             ['style' => self::STYLE_BODY, 'text' => 'Seal key id       '.($sealKeyId === '' ? '(not recorded)' : $sealKeyId)],
             ['style' => self::STYLE_BODY, 'text' => 'Seal certificate  '.($sealCertificateSha256 === '' ? '(not recorded)' : $sealCertificateSha256)],
             ['style' => self::STYLE_SPACER, 'text' => ''],
-            ['style' => self::STYLE_NOTE, 'text' => 'The people named above provided electronic signatures and assent. The service'],
-            ['style' => self::STYLE_NOTE, 'text' => 'then sealed the completed document under its own organizational certificate,'],
-            ['style' => self::STYLE_NOTE, 'text' => 'identified by the key id above. That seal is not a personal certificate held by'],
-            ['style' => self::STYLE_NOTE, 'text' => 'any signer, and no claim is made that it is an eIDAS advanced or qualified'],
-            ['style' => self::STYLE_NOTE, 'text' => 'electronic signature.'],
+            ...($approvers === [] ? [
+                ['style' => self::STYLE_NOTE, 'text' => 'The people named above provided electronic signatures and assent. The service'],
+                ['style' => self::STYLE_NOTE, 'text' => 'then sealed the completed document under its own organizational certificate,'],
+                ['style' => self::STYLE_NOTE, 'text' => 'identified by the key id above. That seal is not a personal certificate held by'],
+                ['style' => self::STYLE_NOTE, 'text' => 'any signer, and no claim is made that it is an eIDAS advanced or qualified'],
+                ['style' => self::STYLE_NOTE, 'text' => 'electronic signature.'],
+            ] : [
+                ['style' => self::STYLE_NOTE, 'text' => 'The people named above provided electronic signatures, approvals, and assent.'],
+                ['style' => self::STYLE_NOTE, 'text' => 'The service then sealed the completed document under its own organizational'],
+                ['style' => self::STYLE_NOTE, 'text' => 'certificate, identified by the key id above. That seal is not a personal'],
+                ['style' => self::STYLE_NOTE, 'text' => 'certificate held by any signer or approver, and no claim is made that it is an'],
+                ['style' => self::STYLE_NOTE, 'text' => 'eIDAS advanced or qualified electronic signature.'],
+            ]),
             ['style' => self::STYLE_SPACER, 'text' => ''],
             ['style' => self::STYLE_NOTE, 'text' => 'Publication is refused unless the sealed bytes are read back at the assurance'],
             ['style' => self::STYLE_NOTE, 'text' => 'level named above. Acceptance, sealing, and publication happen at different'],
@@ -135,6 +139,37 @@ final readonly class CompletionReport
         ];
 
         return new self(self::TITLE, $lines);
+    }
+
+    /**
+     * One party's acceptance, as the lines that describe it.
+     *
+     * @param  array<string, mixed>  $attestation
+     * @return list<array{style: string, text: string}>
+     */
+    private static function acceptanceLines(int $number, array $attestation, string $verb): array
+    {
+        $lines = [
+            [
+                'style' => self::STYLE_BODY,
+                'text' => sprintf(
+                    '%d. %s <%s>',
+                    $number,
+                    self::clip((string) $attestation['name'], 40),
+                    self::clip((string) $attestation['email'], 40),
+                ),
+            ],
+            ['style' => self::STYLE_BODY, 'text' => '   '.str_pad($verb.' (server time)', 25).' '.$attestation['accepted_at']],
+            ['style' => self::STYLE_BODY, 'text' => '   verification              '.$attestation['verification_method']],
+        ];
+
+        if (($attestation['otp_challenge'] ?? null) !== null) {
+            $lines[] = ['style' => self::STYLE_BODY, 'text' => '   one-time code (email)     '.$attestation['otp_challenge']];
+        }
+
+        $lines[] = ['style' => self::STYLE_BODY, 'text' => '   attestation SHA-256       '.$attestation['attestation_sha256']];
+
+        return $lines;
     }
 
     private static function clip(string $value, int $length): string

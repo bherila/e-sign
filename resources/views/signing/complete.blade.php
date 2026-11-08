@@ -11,13 +11,13 @@
 @extends('layouts.signing')
 
 @section('content')
-  <h1 class="text-2xl font-semibold tracking-tight">You have signed this agreement</h1>
+  <h1 class="text-2xl font-semibold tracking-tight">{{ $approver ? 'You have approved this agreement' : 'You have signed this agreement' }}</h1>
 
   <p class="mt-2 text-sm text-muted-foreground">{{ $title }}</p>
 
   <dl class="mt-6 space-y-3 text-sm">
     <div class="flex flex-col gap-0.5">
-      <dt class="text-muted-foreground">Signed as</dt>
+      <dt class="text-muted-foreground">{{ $approver ? 'Approved as' : 'Signed as' }}</dt>
       <dd class="font-medium">{{ $recipientName }}</dd>
     </div>
     @if ($acceptedAt)
@@ -37,12 +37,12 @@
   <div class="mt-8 space-y-3 text-sm">
     @if ($everyoneSigned)
       <p>
-        Everyone has now signed. The finished PDF is being produced and sealed with this
+        Everyone has now signed or approved. The finished PDF is being produced and sealed with this
         service's certificate; you will be emailed a copy once it exists and has been checked.
       </p>
     @else
       <p>
-        Other parties still have to sign. Once they have, the finished PDF is produced and
+        Other parties still have to sign or approve. Once they have, the finished PDF is produced and
         sealed with this service's certificate, and you will be emailed a copy.
       </p>
     @endif

@@ -143,19 +143,24 @@ export function SigningPage({ payload }: SigningPageProps) {
   const finishedForNow =
     finishingLater && !state.saving && state.dirty.length === 0 && state.error === null;
   const ready = readyToSign(state, requiredFieldIds);
+  // An approver approves rather than signs (issue #169). Wording only: what this person may
+  // do is decided by the server.
+  const approving = payload.recipient.designation === "approver";
 
   return (
     <div>
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">{payload.envelope.title}</h1>
         <p className="text-muted-foreground mt-1 text-sm">
-          Sent by {payload.envelope.sender}. You are signing as {payload.recipient.name}.
+          Sent by {payload.envelope.sender}. You are {approving ? "approving" : "signing"} as{" "}
+          {payload.recipient.name}.
         </p>
         <ul className="text-muted-foreground mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs">
           {payload.parties.map((party) => (
             <li key={party.schema_recipient_id}>
               {party.name}
               {party.role === null ? "" : ` (${party.role})`}
+              {party.designation === "signer" ? "" : `, ${party.designation}`}
               {party.is_you ? " — you" : ""} · {party.state}
             </li>
           ))}
@@ -177,8 +182,8 @@ export function SigningPage({ payload }: SigningPageProps) {
 
         {ownFields.length === 0 ? (
           <p className="mt-4 text-sm">
-            There is nothing for you to fill in on this agreement — only your signature is
-            being asked for below.
+            There is nothing for you to fill in on this agreement — only your{" "}
+            {approving ? "approval" : "signature"} is being asked for below.
           </p>
         ) : (
           <div className="mt-4 space-y-6">
@@ -214,8 +219,8 @@ export function SigningPage({ payload }: SigningPageProps) {
 
         {payload.service_supplied_field_ids.length === 0 ? null : (
           <p className="text-muted-foreground mt-4 text-xs">
-            The date you signed is recorded by the service from its own clock when you agree,
-            and is not something you or the sender can type.
+            The date you {approving ? "approved" : "signed"} is recorded by the service from its
+            own clock when you agree, and is not something you or the sender can type.
           </p>
         )}
 
@@ -269,19 +274,23 @@ export function SigningPage({ payload }: SigningPageProps) {
         payload={payload}
         reviewed={state.reviewed}
         ready={ready}
-        blockedReason={blockedReason(state.dirty.length, missing.length)}
+        blockedReason={blockedReason(state.dirty.length, missing.length, approving)}
       />
     </div>
   );
 }
 
-function blockedReason(unsaved: number, missing: number): string | null {
+function blockedReason(unsaved: number, missing: number, approving: boolean): string | null {
+  const acting = approving ? "approving" : "signing";
+
   if (missing > 0) {
-    return `Complete the ${missing} remaining required ${missing === 1 ? "field" : "fields"} above before signing.`;
+    return `Complete the ${missing} remaining required ${missing === 1 ? "field" : "fields"} above before ${acting}.`;
   }
 
   if (unsaved > 0) {
-    return "Save your changes before signing, so what you sign is what you filled in.";
+    return approving
+      ? "Save your changes before approving, so what you approve is what you filled in."
+      : "Save your changes before signing, so what you sign is what you filled in.";
   }
 
   return null;

@@ -2508,15 +2508,17 @@
           },
           "order_index": {
             "type": "integer",
-            "description": "Signing stage, from 1. In sequential mode a recipient stays `pending` until the stage before theirs finishes."
+            "description": "Signing stage, from 1. In sequential mode a recipient stays `pending` until the stage before theirs finishes. A cc recipient (field schema 1.2) is outside the order and reports 0."
           },
           "state": {
             "type": "string",
+            "description": "`copied` is a cc recipient: never released, never asked to act, and sent the completed copy only.",
             "enum": [
               "pending",
               "active",
               "signed",
-              "declined"
+              "declined",
+              "copied"
             ]
           },
           "signed_at": {

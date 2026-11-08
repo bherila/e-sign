@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Requests\Signing;
 
 use App\Domain\Preparation\Schema\FieldDefinition;
+use App\Domain\Preparation\Schema\RecipientDesignation;
 use App\Domain\Signing\Capture\ConsentPolicy;
 use App\Domain\Signing\Envelopes\AcceptanceRequest;
 use App\Domain\Signing\Models\EnvelopeFieldValue;
@@ -83,7 +84,10 @@ class AcceptAgreementRequest extends FormRequest
             // signer through, producing an attestation naming a version whose wording nobody
             // saw (docs/security/review-2026-09.md finding S-3). This is the refusal.
             if (! app(ConsentPolicy::class)
-                ->forRecordedVersion($context->envelope->consent_policy_version)
+                ->forRecordedVersion(
+                    $context->envelope->consent_policy_version,
+                    $context->recipient->designation === RecipientDesignation::Approver,
+                )
                 ->matchesRecordedVersion()) {
                 $validator->errors()->add(
                     'consent_version',
@@ -120,7 +124,7 @@ class AcceptAgreementRequest extends FormRequest
                 if (! in_array($fieldId, $filled, true)) {
                     $validator->errors()->add(
                         'signature_field_ids',
-                        'Every signature and initials box has to be completed before you can sign.',
+                        'Every signature, initials, and approval signature box has to be completed before you can sign or approve.',
                     );
 
                     return;
@@ -144,7 +148,7 @@ class AcceptAgreementRequest extends FormRequest
                 $fields,
                 static fn (FieldDefinition $field): bool => $field->required
                     && ! $field->readOnly
-                    && in_array($field->type->value, ['signature', 'initials'], true),
+                    && $field->type->capturesMark(),
             ),
         ));
     }

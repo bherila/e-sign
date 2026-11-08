@@ -9,10 +9,10 @@
 <x-mail::message>
 # {{ $context->recipientName }},
 
-{{ $context->senderName }} has asked you to review and sign **{{ $context->agreementTitle }}**.
+{{ $context->senderName }} has asked you to review and {{ $context->asksForApproval() ? 'approve' : 'sign' }} **{{ $context->agreementTitle }}**.
 
 <x-mail::button :url="$context->actionUrl">
-Review and sign
+{{ $context->asksForApproval() ? 'Review and approve' : 'Review and sign' }}
 </x-mail::button>
 
 @if ($context->expiresAt)
@@ -21,9 +21,15 @@ This link stops working on {{ $context->expiresAt->timezone(config('app.timezone
 If the link does not work, ask {{ $context->senderName }} to send a new one.
 @endif
 
+@if ($context->asksForApproval())
+Opening the link shows you the document. Nothing is approved until you say so on that page.
+
+If you were not expecting this, you can ignore it — no approval is recorded by doing nothing.
+@else
 Opening the link shows you the document. Nothing is signed until you say so on that page.
 
 If you were not expecting this, you can ignore it — no signature is applied by doing nothing.
+@endif
 
 Thanks,<br>
 {{ $brand }}

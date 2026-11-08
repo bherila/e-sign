@@ -93,7 +93,8 @@ class SendSigningRequestResource extends JsonResource
             /** @var EnvelopeRecipient $recipient */
             // Anything but `pending` means the stage they are in has been released. A later
             // signer in a sequential request stays pending until their turn.
-            if ($recipient->state !== RecipientState::Pending) {
+            // `copied` is a cc recipient, who is never released at all.
+            if ($recipient->state !== RecipientState::Pending && $recipient->state !== RecipientState::Copied) {
                 $addresses[] = $recipient->email;
             }
         }

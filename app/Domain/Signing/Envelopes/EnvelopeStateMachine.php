@@ -11,7 +11,6 @@ use App\Domain\Preparation\Anchoring\AnchorResolutionFailed;
 use App\Domain\Preparation\Anchoring\AnchorResolutionOutcome;
 use App\Domain\Preparation\Schema\FieldDefinition;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
-use App\Domain\Preparation\Schema\FieldType;
 use App\Domain\Preparation\Schema\RecipientDesignation;
 use App\Domain\Signing\Contracts\AnchorResolution;
 use App\Domain\Signing\Contracts\AssurancePolicyCheck;
@@ -164,6 +163,7 @@ final readonly class EnvelopeStateMachine
             $expectedVersion,
             function (Envelope $locked) use ($envelope, $prepared, $anchorProblems): TransitionResult {
                 $from = $this->assertLegal('send', $locked);
+                $this->copyCcRecipients($locked);
 
                 // Anchors first: the gate below reasons about the field set that will actually be
                 // sent, which is the resolved one. A field whose optional anchor was absent is gone
@@ -433,7 +433,7 @@ final readonly class EnvelopeStateMachine
                         throw FieldSubmissionRejected::serviceSupplied($fieldId);
                     }
 
-                    if (in_array($field->type, [FieldType::Signature, FieldType::Initials], true)) {
+                    if ($field->type->capturesMark()) {
                         throw FieldSubmissionRejected::requiresRecipient($fieldId);
                     }
 
@@ -1154,18 +1154,17 @@ final readonly class EnvelopeStateMachine
         }
 
         foreach ($recipients as $recipient) {
-            // Fail closed (#169): approvers and cc recipients can be prepared from schema 1.2,
-            // but what they do on a live envelope — approval evidence, staging, the copy they
-            // receive — arrives with the signing side of #169. Until then an envelope carrying
-            // one is refused here, rather than sent with that party treated as a signer.
-            if ($recipient->designation !== RecipientDesignation::Signer) {
-                $problems[] = [
-                    'code' => 'designation_not_yet_supported',
-                    'recipient' => $recipient->schema_recipient_id,
-                    'message' => 'Recipient "'.$recipient->schema_recipient_id.'" is designated '
-                        .$recipient->designation->value.'. Envelopes with approvers or cc recipients can be '
-                        .'prepared but not yet sent.',
-                ];
+            // A cc recipient owns no fields and gives no answer; all they are ever sent is the
+            // completed copy, so an address to send it to is the one thing they need.
+            if ($recipient->designation === RecipientDesignation::Cc) {
+                if (filter_var($recipient->email, FILTER_VALIDATE_EMAIL) === false) {
+                    $problems[] = [
+                        'code' => 'recipient_missing_email',
+                        'recipient' => $recipient->schema_recipient_id,
+                        'message' => 'Recipient "'.$recipient->schema_recipient_id.'" is copied on the agreement '
+                            .'and has no usable email address to send the completed copy to.',
+                    ];
+                }
 
                 continue;
             }
@@ -1515,6 +1514,28 @@ final readonly class EnvelopeStateMachine
     // ---------------------------------------------------------------------------------
     // Ordering
     // ---------------------------------------------------------------------------------
+
+    /**
+     * Put every cc recipient of a draft outside the order: `copied`, stage 0.
+     *
+     * The factory has written them that way since issue #169's signing side, but a draft created
+     * before it stored a cc recipient as `pending` in stage 1 — harmless while the send gate
+     * refused such drafts, and an invitation to someone who must never be asked to act once it
+     * stopped. Corrected here, under the envelope lock and before anything is released, so the
+     * rule holds for every draft whatever order the code and its data were deployed in.
+     */
+    private function copyCcRecipients(Envelope $locked): void
+    {
+        EnvelopeRecipient::query()
+            ->where('envelope_id', $locked->getKey())
+            ->where('designation', RecipientDesignation::Cc->value)
+            ->where('state', '!=', RecipientState::Copied->value)
+            ->increment('version', 1, [
+                'state' => RecipientState::Copied->value,
+                'order_index' => 0,
+                'updated_at' => CarbonImmutable::now(),
+            ]);
+    }
 
     /** Release one signing stage. Returns how many recipients it activated. */
     private function activateStage(Envelope $locked, int $stage, CarbonImmutable $at): int
