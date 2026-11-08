@@ -9,6 +9,7 @@ use App\Http\Controllers\Compat\Firma\SigningRequestFieldController;
 use App\Http\Controllers\Compat\Firma\SigningRequestUserController;
 use App\Http\Controllers\Compat\Firma\UnsupportedEndpointController;
 use App\Http\Middleware\Compat\FirmaErrorBoundary;
+use App\Http\Middleware\Compat\FirmaRequestSizeLimit;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -66,7 +67,9 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix(FirmaProfile::BASE_PATH)
     ->name('compat.firma.')
-    ->middleware([FirmaErrorBoundary::class])
+    // The size limit sits inside the error boundary so its refusal leaves in this
+    // surface's envelope, and ahead of everything that would parse the body.
+    ->middleware([FirmaErrorBoundary::class, FirmaRequestSizeLimit::class])
     ->group(function (): void {
 
         /*

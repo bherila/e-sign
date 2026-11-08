@@ -170,6 +170,7 @@ appears only when there is something structured to say. This is **not** the nati
 | `invalid_state` | 409 | The move is illegal from this state (`details.transition`, `details.from`) |
 | `ALREADY_SENT` | 409 | A send attempted on a request that has already been sent (`details.transition`, `details.from`) |
 | `no_document_available` | 409 | Asked for a document before the request was sent |
+| `REQUEST_TOO_LARGE` | 413 | The request body is over this surface's 6 MiB ceiling |
 | `unprocessable_entity` | 422 | Not sendable, or a template with no published version (`details.problems`) |
 | `validation_failed` | 422 | `create-and-send` two-phase validation; see below |
 | `unsupported` | 501 | Declared upstream, not implemented here (`details.unsupported_option`) |
