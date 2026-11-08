@@ -79,7 +79,14 @@ cancelling it, which records a reason and says so.
 ## Recipients
 
 Recipient progress is modelled independently of envelope completion (`docs/HANDOFF.md`
-section 6). A recipient is `pending`, `active`, `signed`, or `declined`.
+section 6). A recipient is `pending`, `active`, `signed`, `declined`, or `copied`.
+
+`copied` is a cc recipient (field schema 1.2, issue #169), from creation to the end: outside
+`signing_order` and stored at stage 0, so no release reaches them, nothing waits for them, and they
+cannot accept or decline. An approver is staged and released exactly like a signer, and their
+acceptance writes the same attestation; `signed` is the recipient state either way, and what the
+acceptance *was* is the recipient's designation, recorded in the field schema the attestation's
+`field_schema_sha256` covers and carried into the evidence as `designation`.
 
 - **Sequential** — `send()` activates stage 1 of the schema's `signing_order`. Each
   acceptance activates the next stage once no recipient in the current one is still
@@ -88,7 +95,7 @@ section 6). A recipient is `pending`, `active`, `signed`, or `declined`.
   envelope factory refuses parallel mode with a multi-stage `signing_order`: honouring one
   and dropping the other would be a silent no-op.
 
-Only an `active` recipient may submit values, accept, or decline. A later signer's invitation
+Only an `active` recipient may submit values, accept, or decline; a `copied` one never is. A later signer's invitation
 resolves from the moment the envelope is sent — plenty of deployments deliver all the mail at
 once — so the ordering guard lives in the domain, never in whether a link works.
 

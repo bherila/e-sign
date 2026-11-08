@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Signing;
 
 use App\Domain\Preparation\Documents\Models\Document;
+use App\Domain\Preparation\Schema\RecipientDesignation;
 use App\Domain\Signing\Envelopes\RecipientState;
 use App\Domain\Signing\Models\RecipientAttestation;
 use App\Domain\Signing\Sessions\GuestSigningContext;
@@ -87,12 +88,14 @@ class SigningSessionController extends Controller
         return view('signing.complete', [
             'title' => $context->envelope->title,
             'recipientName' => $context->recipient->name,
+            'approver' => $context->recipient->designation === RecipientDesignation::Approver,
             // The server's clock, in UTC, as recorded. Never a client timestamp, and never
             // reformatted into a zone the record does not claim.
             'acceptedAt' => $attestation?->accepted_at,
             'attestationId' => $attestation?->public_id,
+            // A cc recipient is never asked to act, so they are not someone still to sign.
             'everyoneSigned' => $context->envelope->recipients()
-                ->where('state', '!=', RecipientState::Signed->value)
+                ->whereNotIn('state', [RecipientState::Signed->value, RecipientState::Copied->value])
                 ->doesntExist(),
             'returnUrl' => $context->session->return_url,
             'signingEvent' => [

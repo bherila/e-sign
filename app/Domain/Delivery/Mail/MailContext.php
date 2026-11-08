@@ -32,6 +32,10 @@ use InvalidArgumentException;
  * to a human. They are escaped by Blade like any other view data and are never a place to
  * put a stack trace, an address, or a token.
  *
+ * `$requestedAction` is what an invitation or reminder asks for: null for a signature, which
+ * is every row written before issue #169, and `approve` for an approver. It is wording only;
+ * what the recipient may do is decided by the state machine, never by the mail.
+ *
  * `$otpCode` is the one exception to "there is nowhere in it for a secret to hide", and it
  * is a deliberate, bounded one. A one-time code has to reach a queue worker to be rendered,
  * and the worker renders from the persisted context — that is what makes delivery survive a
@@ -56,6 +60,7 @@ final class MailContext
         public readonly ?string $failureSummary = null,
         public readonly ?string $reference = null,
         public readonly ?string $otpCode = null,
+        public readonly ?string $requestedAction = null,
     ) {
         if (trim($recipientName) === '') {
             throw new InvalidArgumentException('A mail context needs a recipient name to address the message to.');
@@ -64,6 +69,19 @@ final class MailContext
         if ($actionUrl !== null) {
             self::assertUsableActionUrl($actionUrl);
         }
+
+        if ($requestedAction !== null && $requestedAction !== self::ACTION_APPROVE) {
+            throw new InvalidArgumentException("Unknown requested action '{$requestedAction}'.");
+        }
+    }
+
+    /** The one requested action that is not a signature. */
+    public const ACTION_APPROVE = 'approve';
+
+    /** True when the message asks for an approval rather than a signature. */
+    public function asksForApproval(): bool
+    {
+        return $this->requestedAction === self::ACTION_APPROVE;
     }
 
     /**
@@ -101,6 +119,11 @@ final class MailContext
             failureSummary: self::string($context, 'failure_summary'),
             reference: self::string($context, 'reference'),
             otpCode: self::string($context, 'otp_code'),
+            // Forgiving like the rest: an unknown value from a later release reads as a
+            // signature request rather than a message that can never render.
+            requestedAction: self::string($context, 'requested_action') === self::ACTION_APPROVE
+                ? self::ACTION_APPROVE
+                : null,
         );
     }
 
@@ -120,6 +143,7 @@ final class MailContext
             'failure_summary' => $this->failureSummary,
             'reference' => $this->reference,
             'otp_code' => $this->otpCode,
+            'requested_action' => $this->requestedAction,
         ];
     }
 
@@ -147,6 +171,7 @@ final class MailContext
                 'failureSummary' => $this->failureSummary,
                 'reference' => $this->reference,
                 'otpCode' => $this->otpCode,
+                'requestedAction' => $this->requestedAction,
                 default => throw new InvalidArgumentException("Unknown mail context field '{$field}'."),
             };
 

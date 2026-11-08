@@ -18,6 +18,7 @@ use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\FieldType;
 use App\Domain\Preparation\Schema\Rect;
 use App\Domain\Preparation\TcPdf\CoreFontMetrics;
+use App\Domain\Signing\Fields\FieldMateriality;
 
 /**
  * Draws the executed document: the reviewed revision with every field's value on it, and the
@@ -109,11 +110,13 @@ final readonly class ExecutedDocumentRenderer
     {
         $rect = $this->nativeRect($field->rect);
 
-        if ($field->type === FieldType::Checkbox) {
+        if ($field->type === FieldType::Checkbox || $field->type === FieldType::ApprovalCheckmark) {
             return $this->checkboxOverlays($field, $rect, $input->values[$field->id] ?? null);
         }
 
-        $value = $field->type === FieldType::SigningDate
+        // Both service-supplied dates are the owner's own acceptance time: a signer's
+        // `signing_date`, an approver's `approval_date`.
+        $value = FieldMateriality::isServiceSupplied($field->type)
             ? $this->signingDateFor($field, $input)
             : $input->values[$field->id] ?? null;
 
@@ -121,7 +124,7 @@ final readonly class ExecutedDocumentRenderer
             return [];
         }
 
-        if (in_array($field->type, [FieldType::Signature, FieldType::Initials], true)) {
+        if ($field->type->capturesMark()) {
             return $this->markOverlays($field, $rect, $value);
         }
 

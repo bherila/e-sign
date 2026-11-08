@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Evidence\Finalization;
 
 use App\Domain\Evidence\Sealing\AssuranceLevel;
+use App\Domain\Preparation\Schema\RecipientDesignation;
 use App\Domain\Signing\Fields\CanonicalValue;
 use App\Domain\Signing\Fields\MaterialValues;
 use App\Domain\Signing\Models\Envelope;
@@ -53,6 +54,7 @@ final readonly class FinalizationInput
      * @param  list<array{
      *     recipient: string,
      *     schema_recipient_id: string,
+     *     designation: string,
      *     name: string,
      *     email: string,
      *     order_index: int,
@@ -133,6 +135,9 @@ final readonly class FinalizationInput
             $attestations[] = [
                 'recipient' => $recipient?->public_id ?? '',
                 'schema_recipient_id' => $recipient?->schema_recipient_id ?? '',
+                // Signer or approver: what this acceptance *was* (issue #169). A cc recipient
+                // never attests, so never appears here.
+                'designation' => ($recipient?->designation ?? RecipientDesignation::Signer)->value,
                 'name' => $recipient?->name ?? '',
                 'email' => $recipient?->email ?? '',
                 'order_index' => (int) ($recipient?->order_index ?? 0),

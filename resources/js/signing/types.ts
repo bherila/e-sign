@@ -8,6 +8,7 @@
  */
 
 import type { PageGeometryPayload } from "@/components/editor/PageTransform";
+import type { RecipientDesignation } from "@/schema/fieldSchema";
 
 export interface SigningEnvelope {
   id: string;
@@ -23,6 +24,8 @@ export interface SigningRecipient {
   name: string;
   schema_recipient_id: string;
   state: string;
+  /** `approver` changes the page's wording; it never changes what the server allows. */
+  designation: RecipientDesignation;
 }
 
 /** Another party on the agreement: name and role only, deliberately no address. */
@@ -30,6 +33,7 @@ export interface SigningParty {
   schema_recipient_id: string;
   name: string;
   role: string | null;
+  designation: RecipientDesignation;
   state: string;
   is_you: boolean;
 }

@@ -29,9 +29,11 @@ final class RecipientNotEligible extends SigningException
     public static function notActive(EnvelopeRecipient $recipient, string $action): self
     {
         $state = $recipient->state;
-        $explanation = $state === RecipientState::Pending
-            ? 'an earlier signing stage has not finished'
-            : 'they are '.$state->value;
+        $explanation = match ($state) {
+            RecipientState::Pending => 'an earlier signing stage has not finished',
+            RecipientState::Copied => 'they are copied on the agreement, and a cc recipient does not act on it',
+            default => 'they are '.$state->value,
+        };
 
         return new self(
             sprintf(

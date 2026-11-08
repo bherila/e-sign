@@ -61,7 +61,7 @@ final readonly class FieldValueView
         ?CarbonImmutable $frozenAt,
         bool $includeImages,
     ): self {
-        $isMark = in_array($field->type, [FieldType::Signature, FieldType::Initials], true);
+        $isMark = $field->type->capturesMark();
 
         return new self(
             fieldId: $field->id,

@@ -12,7 +12,7 @@ import type { FieldValue } from "./types";
  * one rather than rendered as a text box, because a text box for a checkbox would collect a
  * value the server is about to refuse.
  *
- * `signing_date` never reaches here. It is supplied by the service from the recipient's own
+ * `signing_date` and `approval_date` never reach here. It is supplied by the service from the recipient's own
  * attestation (`FieldMateriality::isServiceSupplied()`), and the payload lists it separately
  * so the review pane can show "captured when you sign" instead of an input nobody may fill.
  */
@@ -34,12 +34,12 @@ export function FieldEntry({
   const label = field.label ?? defaultLabel(field);
   const inputId = `field-${field.id}`;
 
-  if (field.type === "signature" || field.type === "initials") {
+  if (field.type === "signature" || field.type === "initials" || field.type === "approval_signature") {
     return (
       <SignatureCapture
         fieldId={field.id}
         label={label}
-        kind={field.type}
+        kind={field.type === "initials" ? "initials" : "signature"}
         suggestedName={recipientName}
         value={typeof value === "string" ? value : null}
         maxBytes={maxSignatureBytes}
@@ -49,7 +49,7 @@ export function FieldEntry({
     );
   }
 
-  if (field.type === "checkbox") {
+  if (field.type === "checkbox" || field.type === "approval_checkmark") {
     return (
       <div className="flex items-start gap-3">
         <input
@@ -131,6 +131,10 @@ function defaultLabel(field: FieldDefinition): string {
       return "Agreement date";
     case "checkbox":
       return "Tick to confirm";
+    case "approval_signature":
+      return "Your approval signature";
+    case "approval_checkmark":
+      return "Tick to approve";
     default:
       return "Your answer";
   }

@@ -52,16 +52,21 @@ export function ConsentPanel({ payload, reviewed, ready, blockedReason }: Consen
   // (docs/security/review-2026-09.md finding S-3).
   const consentVersionAgrees = payload.consent.matches_recorded_version;
   const canSubmit = ready && consentVersionAgrees && consentAccepted && intentConfirmed;
+  // An approval is an attestation in the approver role (issue #169): the same two statements,
+  // worded as what an approver is actually doing.
+  const approving = payload.recipient.designation === "approver";
 
   return (
     <section className="mt-10 border-t border-black/10 pt-8 dark:border-white/10">
-      <h2 className="text-xl font-semibold tracking-tight">Before you sign</h2>
+      <h2 className="text-xl font-semibold tracking-tight">
+        {approving ? "Before you approve" : "Before you sign"}
+      </h2>
 
       {payload.consent.matches_recorded_version ? null : (
         <p className="text-destructive mt-4 rounded-md border border-destructive/40 p-3 text-sm" role="alert">
           The notice below is version {payload.consent.text_version}, and this agreement records
           version {payload.consent.recorded_version}. Ask the sender to confirm which applies
-          before you sign.
+          before you {approving ? "approve" : "sign"}.
         </p>
       )}
 
@@ -77,7 +82,7 @@ export function ConsentPanel({ payload, reviewed, ready, blockedReason }: Consen
 
       <p className="text-muted-foreground mt-2 text-xs">
         Consent notice version {payload.consent.recorded_version}. This version is recorded with
-        your signature.
+        your {approving ? "approval" : "signature"}.
       </p>
 
       <form method="POST" action={payload.urls.accept} className="mt-6 space-y-4">
@@ -108,7 +113,9 @@ export function ConsentPanel({ payload, reviewed, ready, blockedReason }: Consen
             className="mt-1 h-6 w-6 shrink-0"
           />
           <label htmlFor={consentId} className="text-sm leading-6">
-            I have read the notice above and agree to sign this agreement electronically.
+            {approving
+              ? "I have read the notice above and agree to approve this agreement electronically."
+              : "I have read the notice above and agree to sign this agreement electronically."}
           </label>
         </div>
 
@@ -123,8 +130,16 @@ export function ConsentPanel({ payload, reviewed, ready, blockedReason }: Consen
             className="mt-1 h-6 w-6 shrink-0"
           />
           <label htmlFor={intentId} className="text-sm leading-6">
-            I intend this to be my signature on <strong>{payload.envelope.title}</strong>, and I
-            agree to be bound by it.
+            {approving ? (
+              <>
+                I intend this to be my approval of <strong>{payload.envelope.title}</strong>.
+              </>
+            ) : (
+              <>
+                I intend this to be my signature on <strong>{payload.envelope.title}</strong>, and
+                I agree to be bound by it.
+              </>
+            )}
           </label>
         </div>
 
@@ -137,7 +152,7 @@ export function ConsentPanel({ payload, reviewed, ready, blockedReason }: Consen
           disabled={!canSubmit}
           className="inline-flex min-h-12 w-full items-center justify-center rounded-md bg-foreground px-6 text-base font-medium text-background disabled:opacity-50 sm:w-auto"
         >
-          Sign this agreement
+          {approving ? "Approve this agreement" : "Sign this agreement"}
         </button>
       </form>
 
@@ -194,7 +209,7 @@ export function ConsentPanel({ payload, reviewed, ready, blockedReason }: Consen
             onClick={() => setDeclining(true)}
             className="inline-flex min-h-11 items-center rounded-md border border-black/20 px-4 text-base dark:border-white/20"
           >
-            I do not want to sign this
+            {approving ? "I do not want to approve this" : "I do not want to sign this"}
           </button>
         )}
       </div>

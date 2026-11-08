@@ -22,7 +22,12 @@ class ReminderMail extends OutboundMailable
 
     public function subjectLine(): string
     {
-        return sprintf('Reminder: "%s" is waiting for your signature', $this->title());
+        return sprintf(
+            $this->context->asksForApproval()
+                ? 'Reminder: "%s" is waiting for your approval'
+                : 'Reminder: "%s" is waiting for your signature',
+            $this->title(),
+        );
     }
 
     protected function markdownView(): string

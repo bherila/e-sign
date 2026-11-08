@@ -96,6 +96,9 @@ final class MailCopy
      */
     public readonly ?string $otpCode;
 
+    /** Wording only: an approver is asked to approve rather than sign (issue #169). */
+    private readonly bool $asksForApproval;
+
     private function __construct(MailContext $context)
     {
         $this->recipientName = self::escape($context->recipientName) ?? '';
@@ -110,6 +113,12 @@ final class MailCopy
         // Not escaped: see the class docblock.
         $this->actionUrl = $context->actionUrl;
         $this->expiresAt = $context->expiresAt;
+        $this->asksForApproval = $context->asksForApproval();
+    }
+
+    public function asksForApproval(): bool
+    {
+        return $this->asksForApproval;
     }
 
     public static function from(MailContext $context): self

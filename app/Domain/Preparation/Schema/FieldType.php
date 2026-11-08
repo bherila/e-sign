@@ -89,6 +89,17 @@ enum FieldType: string
         return $this === self::Signature || $this === self::Initials;
     }
 
+    /**
+     * True for every type whose value is a captured mark: an adopted image or typed text,
+     * re-encoded on the way in, described rather than echoed on the way out, and drawn as a
+     * mark on the executed PDF. A signer's signature and initials, and an approver's approval
+     * signature (issue #169).
+     */
+    public function capturesMark(): bool
+    {
+        return $this->isSignatureMark() || $this === self::ApprovalSignature;
+    }
+
     /** The first schema minor that declares the approval types. */
     public const APPROVAL_SINCE_MINOR = 2;
 }

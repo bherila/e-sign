@@ -7,6 +7,7 @@ namespace App\Domain\Signing\Envelopes;
 use App\Domain\Identity\Models\Workspace;
 use App\Domain\Preparation\Documents\Models\DocumentRevision;
 use App\Domain\Preparation\Schema\Recipient as SchemaRecipient;
+use App\Domain\Preparation\Schema\RecipientDesignation;
 use App\Domain\Signing\Contracts\EnvelopeEventSink;
 use App\Domain\Signing\Exceptions\InvalidEnvelopeSnapshot;
 use App\Domain\Signing\Models\Envelope;
@@ -126,9 +127,13 @@ final readonly class EnvelopeFactory
         EnvelopeSourceSnapshot $snapshot,
         SchemaRecipient $recipient,
     ): EnvelopeRecipient {
-        // Guaranteed non-null: `recipient_not_in_signing_order` is a validation error the
-        // schema importer already raises, and the snapshot re-imported the document.
-        $stage = $snapshot->fieldSchema->stageOf($recipient->id) ?? 1;
+        // A cc recipient sits outside `signing_order` (schema 1.2) and is never staged: stage 0
+        // and `copied` from the start, so no release ever reaches them (issue #169). For
+        // everyone else the stage is guaranteed non-null: `recipient_not_in_signing_order` is
+        // a validation error the schema importer already raises, and the snapshot re-imported
+        // the document.
+        $copied = $recipient->designation === RecipientDesignation::Cc;
+        $stage = $copied ? 0 : ($snapshot->fieldSchema->stageOf($recipient->id) ?? 1);
 
         return EnvelopeRecipient::query()->create([
             'envelope_id' => $envelope->getKey(),
@@ -137,7 +142,7 @@ final readonly class EnvelopeFactory
             'name' => $recipient->name,
             'email' => $recipient->email,
             'order_index' => $stage,
-            'state' => RecipientState::Pending,
+            'state' => $copied ? RecipientState::Copied : RecipientState::Pending,
             'version' => 1,
             // A copy of who this party was when the envelope was created. The schema is
             // immutable; the person behind it is not, and evidence has to record the former.

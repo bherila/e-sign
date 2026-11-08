@@ -220,9 +220,9 @@ final class SigningFixtures
     public static function sampleValue(FieldDefinition $field): mixed
     {
         return match ($field->type) {
-            FieldType::Checkbox => true,
-            FieldType::AgreementDate, FieldType::SigningDate => '2026-01-31',
-            FieldType::Signature, FieldType::Initials => 'data:image/png;base64,'
+            FieldType::Checkbox, FieldType::ApprovalCheckmark => true,
+            FieldType::AgreementDate, FieldType::SigningDate, FieldType::ApprovalDate => '2026-01-31',
+            FieldType::Signature, FieldType::Initials, FieldType::ApprovalSignature => 'data:image/png;base64,'
                 .'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
             default => 'Synthetic '.$field->type->value.' value',
         };

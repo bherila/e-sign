@@ -5,7 +5,7 @@
 <x-mail::message>
 # {{ $context->recipientName }},
 
-**{{ $context->agreementTitle }}** is complete. Everyone who was asked to sign has done so.
+**{{ $context->agreementTitle }}** is complete. Everyone who was asked to sign or approve has done so.
 
 @if ($context->actionUrl)
 <x-mail::button :url="$context->actionUrl">

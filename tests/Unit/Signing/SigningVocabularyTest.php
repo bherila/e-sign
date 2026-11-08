@@ -59,7 +59,7 @@ class SigningVocabularyTest extends TestCase
 
     public function test_the_remaining_vocabularies(): void
     {
-        $this->assertSame(['pending', 'active', 'signed', 'declined'], RecipientState::values());
+        $this->assertSame(['pending', 'active', 'signed', 'declined', 'copied'], RecipientState::values());
         $this->assertSame(['sequential', 'parallel'], SigningMode::values());
         $this->assertSame(['sender', 'recipient'], ValueSource::values());
         $this->assertSame([

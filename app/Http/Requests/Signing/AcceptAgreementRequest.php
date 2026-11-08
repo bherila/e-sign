@@ -120,7 +120,7 @@ class AcceptAgreementRequest extends FormRequest
                 if (! in_array($fieldId, $filled, true)) {
                     $validator->errors()->add(
                         'signature_field_ids',
-                        'Every signature and initials box has to be completed before you can sign.',
+                        'Every signature, initials, and approval signature box has to be completed before you can sign or approve.',
                     );
 
                     return;
@@ -144,7 +144,7 @@ class AcceptAgreementRequest extends FormRequest
                 $fields,
                 static fn (FieldDefinition $field): bool => $field->required
                     && ! $field->readOnly
-                    && in_array($field->type->value, ['signature', 'initials'], true),
+                    && $field->type->capturesMark(),
             ),
         ));
     }
