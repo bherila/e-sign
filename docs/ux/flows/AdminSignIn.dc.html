@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sign in</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1a1a1a}a:hover{color:#000}
+</style>
+</helmet>
+<div style="min-height: 760px; box-sizing: border-box; background: #fcfcfc; font-family: 'Instrument Sans', system-ui, sans-serif; color: #1a1a1a; display: flex; flex-direction: column">
+  <nav aria-label="Main" style="border-bottom: 1px solid rgba(0,0,0,0.1)">
+    <div style="max-width: 1120px; margin: 0 auto; padding: 12px 24px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px">
+      <a href="#" style="text-decoration: none; font-size: 18px; font-weight: 600; letter-spacing: -0.01em">Application</a>
+      <ul style="margin: 0; padding: 0; list-style: none; display: flex; gap: 20px; font-size: 14px">
+        <li><a href="#" style="text-decoration: none">Home</a></li>
+        <li><a href="#" style="text-decoration: none">Sign in</a></li>
+      </ul>
+    </div>
+  </nav>
+  <main style="flex-grow: 1; padding: 48px 24px; display: flex; flex-direction: column; align-items: center">
+    <div style="width: 100%; max-width: 448px; display: flex; flex-direction: column">
+      <h1 style="margin: 0 0 24px; font-size: 24px; font-weight: 600; letter-spacing: -0.01em">Sign in to BWH eSign</h1>
+      <div style="border: 1px solid rgba(0,0,0,0.1); border-radius: 12px; background: #ffffff; box-shadow: 0 1px 2px rgba(0,0,0,0.05); padding: 24px; display: flex; flex-direction: column; gap: 16px">
+        <div style="display: flex; flex-direction: column; gap: 6px">
+          <h2 style="margin: 0; font-size: 18px; font-weight: 600">Continue with your organization account</h2>
+          <p style="margin: 0; font-size: 14px; line-height: 1.5; color: #71717a">Authentication happens at your identity provider. This application never sees your password.</p>
+        </div>
+        <a href="AdminDashboard.dc.html" style="display: flex; align-items: center; justify-content: center; min-height: 44px; border-radius: 6px; background: #1a1a1a; color: #fcfcfc; font-size: 15px; font-weight: 500; text-decoration: none">Sign in with single sign-on</a>
+      </div>
+      <div style="margin-top: 24px; border: 1px dashed #a1a1aa; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 12px">
+        <p style="margin: 0; font-size: 13px; font-weight: 600">Standalone deployments instead show “Sign in”</p>
+        <p style="margin: 0; font-size: 13px; line-height: 1.5; color: #52525b">“Use the credentials an operator created for you. There is no self-service registration.” Then Email address, Password and a Sign in button. A failure shows a red alert titled “Could not sign you in”.</p>
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

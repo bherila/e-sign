@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Join a workspace</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1a1a1a}a:hover{color:#000}
+</style>
+</helmet>
+<div style="min-height: 760px; box-sizing: border-box; background: #fcfcfc; font-family: 'Instrument Sans', system-ui, sans-serif; color: #1a1a1a; display: flex; flex-direction: column">
+  <nav aria-label="Main" style="border-bottom: 1px solid rgba(0,0,0,0.1)">
+    <div style="max-width: 1120px; margin: 0 auto; padding: 12px 24px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px">
+      <a href="#" style="text-decoration: none; font-size: 18px; font-weight: 600; letter-spacing: -0.01em">Application</a>
+      <ul style="margin: 0; padding: 0; list-style: none; display: flex; gap: 20px; font-size: 14px">
+        <li><a href="#" style="text-decoration: none">Home</a></li>
+        <li><a href="AdminDashboard.dc.html" style="text-decoration: none">Workspaces</a></li>
+      </ul>
+    </div>
+  </nav>
+  <main style="flex-grow: 1; padding: 40px 24px">
+    <div style="max-width: 576px; margin: 0 auto; display: flex; flex-direction: column">
+      <h1 style="margin: 0 0 8px; font-size: 24px; font-weight: 600; letter-spacing: -0.01em">Join Acme Synthetic Ltd</h1>
+      <p style="margin: 0 0 16px; line-height: 1.55">You have been invited to join this workspace as <strong>Sender</strong>. The invitation expires 15 November 2026, 14:00 UTC and can be used once.</p>
+      <p style="margin: 0 0 24px; line-height: 1.55; color: #71717a">Accepting adds the workspace to the account you are signed in with now, <strong style="color: #1a1a1a">Sam Sender</strong>. If the invitation was meant for a different account, sign out and open the link again.</p>
+      <button type="button" style="align-self: flex-start; padding: 8px 16px; border: 0; border-radius: 4px; background: #18181b; color: #fafafa; font-family: inherit; font-size: 14px; font-weight: 500">Accept invitation</button>
+      <div style="margin-top: 40px; border: 1px dashed #a1a1aa; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 6px">
+        <p style="margin: 0; font-size: 13px; font-weight: 600">Other states</p>
+        <p style="margin: 0; font-size: 13px; line-height: 1.5; color: #52525b">Already a member: “You are already a member of this workspace, so there is nothing to accept.” + Go to your workspaces. Expired, revoked or used: “This invitation cannot be used”.</p>
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

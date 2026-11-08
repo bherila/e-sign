@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Members</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1a1a1a}a:hover{color:#000}
+</style>
+</helmet>
+<div style="min-height: 900px; box-sizing: border-box; background: #fcfcfc; font-family: 'Instrument Sans', system-ui, sans-serif; color: #1a1a1a; display: flex; flex-direction: column">
+  <nav aria-label="Main" style="border-bottom: 1px solid rgba(0,0,0,0.1)">
+    <div style="max-width: 1120px; margin: 0 auto; padding: 12px 24px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px">
+      <a href="#" style="text-decoration: none; font-size: 18px; font-weight: 600; letter-spacing: -0.01em">Application</a>
+      <ul style="margin: 0; padding: 0; list-style: none; display: flex; gap: 20px; font-size: 14px">
+        <li><a href="#" style="text-decoration: none">Home</a></li>
+        <li><a href="AdminDashboard.dc.html" style="text-decoration: none">Workspaces</a></li>
+      </ul>
+    </div>
+  </nav>
+  <main style="flex-grow: 1; padding: 40px 24px">
+    <div style="max-width: 896px; margin: 0 auto; display: flex; flex-direction: column">
+      <p style="margin: 0 0 8px; font-size: 14px"><a href="AdminDashboard.dc.html" style="text-decoration: underline; text-underline-offset: 4px">Your workspaces</a></p>
+      <h1 style="margin: 0 0 8px; font-size: 24px; font-weight: 600; letter-spacing: -0.01em">Members of Acme Synthetic Ltd</h1>
+      <p style="margin: 0 0 32px; color: #71717a; line-height: 1.5">Invite someone with a single-use link, change a role, or remove access. Removing someone ends their access and nothing else: envelopes, documents and the audit trail stay exactly as they are.</p>
+
+      <section aria-labelledby="members-heading" style="display: flex; flex-direction: column">
+        <h2 id="members-heading" style="margin: 0 0 12px; font-size: 18px; font-weight: 600">Members</h2>
+        <div style="overflow-x: auto; border: 1px solid rgba(0,0,0,0.1); border-radius: 8px; background: #ffffff">
+          <table style="width: 100%; border-collapse: collapse; font-size: 14px">
+            <thead>
+              <tr style="border-bottom: 1px solid rgba(0,0,0,0.1); text-align: left; color: #71717a">
+                <th scope="col" style="padding: 12px 16px; font-weight: 500">Name</th>
+                <th scope="col" style="padding: 12px 16px; font-weight: 500">Email</th>
+                <th scope="col" style="padding: 12px 16px; font-weight: 500">Role</th>
+                <th scope="col" style="padding: 12px 16px"><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="border-bottom: 1px solid rgba(0,0,0,0.06)">
+                <td style="padding: 12px 16px; font-weight: 500">Riley Owner</td>
+                <td style="padding: 12px 16px; color: #71717a">riley@acme.example.test</td>
+                <td style="padding: 12px 16px">Owner</td>
+                <td style="padding: 12px 16px"></td>
+              </tr>
+              <tr>
+                <td style="padding: 12px 16px; font-weight: 500">Sam Sender</td>
+                <td style="padding: 12px 16px; color: #71717a">sam@acme.example.test</td>
+                <td style="padding: 12px 16px">
+                  <label for="role-sam" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Role for Sam Sender</label>
+                  <select id="role-sam" style="min-height: 36px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; padding: 0 8px; font-family: inherit; font-size: 14px; background: #ffffff">
+                    <option>Administrator</option>
+                    <option selected>Sender</option>
+                    <option>Auditor</option>
+                  </select>
+                </td>
+                <td style="padding: 12px 16px; text-align: right"><button type="button" aria-label="Remove Sam Sender" style="min-height: 36px; padding: 0 12px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; background: #ffffff; font-family: inherit; font-size: 13px">Remove</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section aria-labelledby="invite-heading" style="margin-top: 40px; display: flex; flex-direction: column; gap: 12px">
+        <h2 id="invite-heading" style="margin: 0; font-size: 18px; font-weight: 600">Invite someone</h2>
+        <p style="margin: 0; font-size: 14px; line-height: 1.5; color: #71717a">Creates a link that works once and expires after seven days. Whoever opens it and accepts while signed in joins with the role you choose, so send it only to the person it is for.</p>
+        <div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px">
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <label for="invite-role" style="font-size: 14px; font-weight: 500">Role for the new member</label>
+            <select id="invite-role" style="min-height: 40px; min-width: 220px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; padding: 0 8px; font-family: inherit; font-size: 14px; background: #ffffff">
+              <option>Sender</option>
+              <option>Administrator</option>
+              <option>Auditor</option>
+            </select>
+          </div>
+          <button type="button" style="min-height: 40px; padding: 0 16px; border: 0; border-radius: 6px; background: #1a1a1a; color: #fcfcfc; font-family: inherit; font-size: 14px; font-weight: 500">Create invitation link</button>
+        </div>
+      </section>
+
+      <section aria-labelledby="invitations-heading" style="margin-top: 40px; display: flex; flex-direction: column">
+        <h2 id="invitations-heading" style="margin: 0 0 12px; font-size: 18px; font-weight: 600">Open invitations</h2>
+        <p style="margin: 0; font-size: 14px; color: #71717a">No invitations are waiting to be accepted.</p>
+      </section>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

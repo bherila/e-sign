@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Signed confirmation</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1a1a1a}a:hover{color:#000}
+</style>
+</helmet>
+<div style="width: 390px; height: 900px; box-sizing: border-box; background: #fcfcfc; font-family: 'Instrument Sans', system-ui, sans-serif; color: #1a1a1a; display: flex; flex-direction: column">
+  <header style="border-bottom: 1px solid rgba(0,0,0,0.1); padding: 12px 16px">
+    <p style="margin: 0; font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: #71717a">BWH eSign</p>
+  </header>
+  <main style="flex-grow: 1; padding: 24px 16px; display: flex; flex-direction: column">
+    <h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.01em">You have signed this agreement</h1>
+    <p style="margin: 8px 0 0; font-size: 14px; color: #71717a">Synthetic Mutual NDA</p>
+    <dl style="margin: 24px 0 0; display: flex; flex-direction: column; gap: 12px; font-size: 14px">
+      <div style="display: flex; flex-direction: column; gap: 2px"><dt style="color: #71717a">Signed as</dt><dd style="margin: 0; font-weight: 500">Dana Buyer</dd></div>
+      <div style="display: flex; flex-direction: column; gap: 2px"><dt style="color: #71717a">Accepted at (server time, UTC)</dt><dd style="margin: 0; font-weight: 500; font-variant-numeric: tabular-nums">8 Nov 2026, 14:12:09 UTC</dd></div>
+      <div style="display: flex; flex-direction: column; gap: 2px"><dt style="color: #71717a">Record reference</dt><dd style="margin: 0; font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all">01JSYNTHETICATTESTATION000</dd></div>
+    </dl>
+    <div style="margin-top: 32px; display: flex; flex-direction: column; gap: 12px; font-size: 14px; line-height: 1.55">
+      <p style="margin: 0">Other parties still have to sign. Once they have, the finished PDF is produced and sealed with this service's certificate, and you will be emailed a copy.</p>
+      <p style="margin: 0; color: #71717a">The seal belongs to this service, not to you. It lets a reader detect whether the finished document has been altered afterwards; it is not a personal signing certificate and does not represent an eIDAS advanced or qualified electronic signature.</p>
+    </div>
+    <a href="#" style="margin-top: 32px; align-self: flex-start; display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: 6px; border: 1px solid rgba(0,0,0,0.2); font-size: 16px; font-weight: 500; text-decoration: none">Return to app.example.test</a>
+    <p style="margin: 8px 0 0; font-size: 12px; color: #71717a">Shown only when the invitation carried an allowlisted return URL.</p>
+  </main>
+  <footer style="border-top: 1px solid rgba(0,0,0,0.1); padding: 24px 16px; text-align: center; font-size: 12px; color: #71717a">
+    <p style="margin: 0">Electronic signature service. People sign; the finished PDF is sealed with this service's own certificate.</p>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

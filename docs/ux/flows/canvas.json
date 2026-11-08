@@ -1,0 +1,247 @@
+{
+  "v": 3,
+  "createdOnFiles": {
+    "v": 1,
+    "at": "2026-11-08T02:40:00Z"
+  },
+  "title": "eSign UX flows",
+  "launch": {
+    "view": "canvas"
+  },
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 390,
+      "h": 760,
+      "title": "1 · Invitation email",
+      "is_interactive": true
+    },
+    "SignLanding.dc.html": {
+      "x": 470,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "2 · Landing (GET is harmless)",
+      "is_interactive": true
+    },
+    "SignCode.dc.html": {
+      "x": 940,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "3 · Landing — one-time code",
+      "is_interactive": true
+    },
+    "SignSession.dc.html": {
+      "x": 1410,
+      "y": 0,
+      "w": 390,
+      "h": 2040,
+      "title": "4 · Signing page",
+      "is_interactive": true
+    },
+    "SignDecline.dc.html": {
+      "x": 1880,
+      "y": 0,
+      "w": 390,
+      "h": 900,
+      "title": "5 · Signing page — declining",
+      "is_interactive": true
+    },
+    "SignComplete.dc.html": {
+      "x": 2350,
+      "y": 0,
+      "w": 390,
+      "h": 900,
+      "title": "6 · Signed"
+    },
+    "SignDeclined.dc.html": {
+      "x": 2820,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "7 · Declined"
+    },
+    "SignStale.dc.html": {
+      "x": 0,
+      "y": 2460,
+      "w": 390,
+      "h": 760,
+      "title": "Review moved (409)",
+      "is_interactive": true
+    },
+    "SignNoSession.dc.html": {
+      "x": 470,
+      "y": 2460,
+      "w": 390,
+      "h": 760,
+      "title": "Session ended"
+    },
+    "SignUnavailable.dc.html": {
+      "x": 940,
+      "y": 2460,
+      "w": 390,
+      "h": 760,
+      "title": "Link cannot be used"
+    },
+    "SignRateLimited.dc.html": {
+      "x": 1410,
+      "y": 2460,
+      "w": 390,
+      "h": 760,
+      "title": "Too many attempts"
+    },
+    "SignDeclineUnavailable.dc.html": {
+      "x": 1880,
+      "y": 2460,
+      "w": 390,
+      "h": 760,
+      "title": "Decline not allowed (#165)",
+      "is_interactive": true
+    },
+    "SignLegacy.dc.html": {
+      "x": 2350,
+      "y": 2460,
+      "w": 390,
+      "h": 844,
+      "title": "Bare recipient link — confirm email",
+      "is_interactive": true
+    },
+    "AdminSignIn.dc.html": {
+      "x": 0,
+      "y": 3730,
+      "w": 1280,
+      "h": 760,
+      "title": "Sign in",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "AdminDashboard.dc.html": {
+      "x": 1360,
+      "y": 3730,
+      "w": 1280,
+      "h": 760,
+      "title": "Dashboard — your workspaces",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "AdminMembers.dc.html": {
+      "x": 2720,
+      "y": 3730,
+      "w": 1280,
+      "h": 900,
+      "title": "Members and invitations",
+      "expand": "fill"
+    },
+    "AdminInvitation.dc.html": {
+      "x": 4080,
+      "y": 3730,
+      "w": 1280,
+      "h": 760,
+      "title": "Accept a workspace invitation",
+      "expand": "fill"
+    },
+    "AdminEditor.dc.html": {
+      "x": 0,
+      "y": 4890,
+      "w": 1440,
+      "h": 980,
+      "title": "Template field editor",
+      "expand": "fill"
+    }
+  },
+  "order": [
+    "Main.dc.html",
+    "SignLanding.dc.html",
+    "SignCode.dc.html",
+    "SignSession.dc.html",
+    "SignDecline.dc.html",
+    "SignComplete.dc.html",
+    "SignDeclined.dc.html",
+    "SignStale.dc.html",
+    "SignNoSession.dc.html",
+    "SignUnavailable.dc.html",
+    "SignRateLimited.dc.html",
+    "SignDeclineUnavailable.dc.html",
+    "SignLegacy.dc.html",
+    "AdminSignIn.dc.html",
+    "AdminDashboard.dc.html",
+    "AdminMembers.dc.html",
+    "AdminInvitation.dc.html",
+    "AdminEditor.dc.html"
+  ],
+  "notes": {
+    "rowSigner": {
+      "x": 0,
+      "y": -300,
+      "text": "Signer: invitation to signature",
+      "kind": "title1",
+      "maxW": 3210
+    },
+    "rowSignerSticky": {
+      "x": 3290,
+      "y": 0,
+      "w": 460,
+      "text": "Signer happy path, phone width (the signing pages are a single column built for 375px).\n\n1 → 2: the mail links to a landing page that reads rows and consumes nothing — mail scanners are safe.\n2 → 3: only when OTP is required (deployment, workspace or envelope).\n3 → 4: the code starts a session; the invitation is spent here, on POST.\n4: review the PDF, fill your fields, Save, tick two separate statements, Sign. Optional 'Save and finish later' and Decline both follow #165's settings.\n4 → 6 / 5 → 7: confirmation pages are rendered from state, so a reload shows the same thing.",
+      "fill": "blue",
+      "size": "m"
+    },
+    "rowSignerQuestions": {
+      "x": 3290,
+      "y": 700,
+      "w": 460,
+      "text": "Review questions\n\n• The signing page is one long scroll (document, fields, consent, decline). Split into steps, or add a sticky 'next required field' bar?\n• 'Save what I have filled in' is a manual save — autosave on blur?\n• Two consent tick boxes are deliberate (notice read vs intent to be bound). Wording OK?\n• Decline sits under a separator at the very bottom. Discoverable enough, or too hidden?",
+      "fill": "orange",
+      "size": "m"
+    },
+    "rowRefusals": {
+      "x": 0,
+      "y": 2160,
+      "text": "Signer: interruptions and refusals",
+      "kind": "title1",
+      "maxW": 2740
+    },
+    "rowRefusalsSticky": {
+      "x": 2820,
+      "y": 2460,
+      "w": 460,
+      "text": "Every refusal page says what to do next and that nothing was signed.\n\n'Link cannot be used' deliberately does not say why (expired, used, replaced, closed): telling them apart would be an oracle for which links exist.\n\nReview question: these are all plain text pages with no visual state cue. Add an icon/colour per kind (info vs stop)?",
+      "fill": "orange",
+      "size": "m"
+    },
+    "rowAdmin": {
+      "x": 0,
+      "y": 3430,
+      "text": "Sender and workspace admin",
+      "kind": "title1",
+      "maxW": 5360
+    },
+    "rowAdminSticky": {
+      "x": 1520,
+      "y": 4890,
+      "w": 520,
+      "text": "Gap: there is no sender UI for agreements.\n\nUploading a document, building an envelope from a template, sending it, watching who has signed, reminding, cancelling and downloading the executed PDF all exist only in the native API and the compatibility API. The only sender screens are workspaces, members and the template field editor.\n\nThat is the biggest design decision on this canvas: design an agreements list + detail + 'new agreement' flow, or keep the product API-first?",
+      "fill": "red",
+      "size": "m"
+    },
+    "rowAdminSticky2": {
+      "x": 2120,
+      "y": 4890,
+      "w": 520,
+      "text": "Coming soon, needs screens\n\n• #169 Approvers: an approval page ('I approve…', approval checkmark / stamp / date) and an 'Approved by' section on the completion report.\n• #169 CC recipients: no signing page; they only get the completed-copy mail.\n• #163 Multi-document: the review step and the editor both need a document switcher.\n• Template settings for Decline / Finish later (#165) have no UI yet (API only).",
+      "fill": "purple",
+      "size": "m"
+    },
+    "a11yFinding": {
+      "x": 2720,
+      "y": 4890,
+      "w": 520,
+      "text": "Findings from this pass (each is a small fix)\n\n• Consent notice says “choose I agree”, but the button reads “Sign this agreement”.\n• Sender navbar brand reads “Application”, not BWH eSign.\n• “Accept invitation” is ~36px tall (py-2 text-sm); signing pages use 44px targets.\n• Editor field-type picker shows raw values (agreement_date, signing_date) as labels.\n• Destructive colour token (hsl 0 84% 60%) is ~3.7:1 for small error text; these mock-ups use #dc2626 (~4.7:1).",
+      "fill": "gray",
+      "size": "m"
+    }
+  },
+  "designSystems": []
+}

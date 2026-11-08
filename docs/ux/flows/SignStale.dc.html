@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agreement changed while reading</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1a1a1a}a:hover{color:#000}
+</style>
+</helmet>
+<div style="width: 390px; height: 760px; box-sizing: border-box; background: #fcfcfc; font-family: 'Instrument Sans', system-ui, sans-serif; color: #1a1a1a; display: flex; flex-direction: column">
+  <header style="border-bottom: 1px solid rgba(0,0,0,0.1); padding: 12px 16px">
+    <p style="margin: 0; font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: #71717a">BWH eSign</p>
+  </header>
+  <main style="flex-grow: 1; padding: 24px 16px; display: flex; flex-direction: column">
+    <h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.01em">The agreement changed while you were reading it</h1>
+    <p style="margin: 8px 0 0; font-size: 14px; color: #71717a">Synthetic Mutual NDA</p>
+    <p style="margin: 24px 0 0; font-size: 14px; line-height: 1.55">Your signature was not applied. Something in the agreement moved after the copy you were shown was loaded — a value another party filled in, a correction from the sender, or the consent notice being updated.</p>
+    <p style="margin: 16px 0 0; font-size: 14px; line-height: 1.55">Please open the current version and read it again before signing. Anything you had already filled in is still saved.</p>
+    <a href="SignSession.dc.html" style="margin-top: 32px; display: flex; align-items: center; justify-content: center; min-height: 44px; border-radius: 6px; background: #1a1a1a; color: #fcfcfc; font-size: 16px; font-weight: 500; text-decoration: none">Review the current version</a>
+  </main>
+  <footer style="border-top: 1px solid rgba(0,0,0,0.1); padding: 24px 16px; text-align: center; font-size: 12px; color: #71717a">
+    <p style="margin: 0">Electronic signature service. People sign; the finished PDF is sealed with this service's own certificate.</p>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

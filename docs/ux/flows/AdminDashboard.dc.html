@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Your workspaces</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1a1a1a}a:hover{color:#000}
+</style>
+</helmet>
+<div style="min-height: 760px; box-sizing: border-box; background: #fcfcfc; font-family: 'Instrument Sans', system-ui, sans-serif; color: #1a1a1a; display: flex; flex-direction: column">
+  <nav aria-label="Main" style="border-bottom: 1px solid rgba(0,0,0,0.1)">
+    <div style="max-width: 1120px; margin: 0 auto; padding: 12px 24px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px">
+      <a href="#" style="text-decoration: none; font-size: 18px; font-weight: 600; letter-spacing: -0.01em">Application</a>
+      <ul style="margin: 0; padding: 0; list-style: none; display: flex; gap: 20px; font-size: 14px">
+        <li><a href="#" style="text-decoration: none">Home</a></li>
+        <li><a href="#" style="text-decoration: none">Workspaces</a></li>
+      </ul>
+    </div>
+  </nav>
+  <main style="flex-grow: 1; padding: 40px 24px">
+    <div style="max-width: 896px; margin: 0 auto; display: flex; flex-direction: column">
+      <h1 style="margin: 0 0 8px; font-size: 24px; font-weight: 600; letter-spacing: -0.01em">Your workspaces</h1>
+      <p style="margin: 0 0 24px; color: #71717a">Read-only. Roles are granted by a workspace owner or administrator.</p>
+      <div style="overflow-x: auto; border: 1px solid rgba(0,0,0,0.1); border-radius: 8px; background: #ffffff">
+        <table style="width: 100%; border-collapse: collapse; font-size: 14px">
+          <thead>
+            <tr style="border-bottom: 1px solid rgba(0,0,0,0.1); text-align: left; color: #71717a">
+              <th scope="col" style="padding: 12px 16px; font-weight: 500">Workspace</th>
+              <th scope="col" style="padding: 12px 16px; font-weight: 500">Slug</th>
+              <th scope="col" style="padding: 12px 16px; font-weight: 500">Your role</th>
+              <th scope="col" style="padding: 12px 16px"><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom: 1px solid rgba(0,0,0,0.06)">
+              <td style="padding: 12px 16px; font-weight: 500">Acme Synthetic Ltd</td>
+              <td style="padding: 12px 16px; color: #71717a">acme-synthetic</td>
+              <td style="padding: 12px 16px"><span style="display: inline-block; padding: 2px 10px; border-radius: 999px; background: #f4f4f5; font-size: 12px; font-weight: 500">Owner</span></td>
+              <td style="padding: 12px 16px; text-align: right"><a href="AdminMembers.dc.html" style="text-decoration: underline; text-underline-offset: 4px">Manage members</a></td>
+            </tr>
+            <tr>
+              <td style="padding: 12px 16px; font-weight: 500">Synthetic Partners</td>
+              <td style="padding: 12px 16px; color: #71717a">synthetic-partners</td>
+              <td style="padding: 12px 16px"><span style="display: inline-block; padding: 2px 10px; border-radius: 999px; background: #f4f4f5; font-size: 12px; font-weight: 500">Sender</span></td>
+              <td style="padding: 12px 16px"></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <form style="margin-top: 32px"><button type="button" style="border: 0; background: none; padding: 0; min-height: 44px; font-size: 14px; text-decoration: underline; text-underline-offset: 4px; font-family: inherit; color: #1a1a1a">Sign out</button></form>
+      <div style="margin-top: 32px; border: 1px dashed #dc2626; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 6px">
+        <p style="margin: 0; font-size: 14px; font-weight: 600">Where a sender expects “Agreements”, there is nothing</p>
+        <p style="margin: 0; font-size: 14px; line-height: 1.5; color: #52525b">No list of envelopes, no “New agreement”, no status or download. All of that is API-only today.</p>
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>
