@@ -38,6 +38,36 @@ enum FirmaErrorCode: string
 
     case Forbidden = 'forbidden';
 
+    /*
+     * The multi-document contract (reference v1.39.0; issues #163, #182). Upstream's codes, in
+     * this enum's lowercase vocabulary, as every other member is. Each is the answer a caller
+     * branches on, so none of them is folded into `invalid_request`.
+     */
+
+    /** More than one of `document`, `document_id`, `document_ids` and `template_id`. */
+    case ConflictingDocumentSource = 'conflicting_document_source';
+
+    /** The same upload id twice in one `document_ids`. */
+    case DuplicateDocumentId = 'duplicate_document_id';
+
+    /** More than 20 documents in one set. */
+    case MaxDocumentsExceeded = 'max_documents_exceeded';
+
+    /** An upload id this workspace never received, one that expired, or one already used. */
+    case DocumentUploadNotFound = 'document_upload_not_found';
+
+    /** A reorder that does not name every document exactly once. */
+    case InvalidDocumentOrder = 'invalid_document_order';
+
+    /** Removing the last document. */
+    case MinDocumentsRequired = 'min_documents_required';
+
+    /** A replacement with a different number of pages. */
+    case PageCountMismatch = 'page_count_mismatch';
+
+    /** A replacement with a page of a different size. */
+    case DimensionMismatch = 'dimension_mismatch';
+
     /* ------------------------------------------------------------------------ 404 */
 
     /**
@@ -50,6 +80,9 @@ enum FirmaErrorCode: string
      * (`tests/Fixtures/firma/firma-compat-v1/README.md`).
      */
     case NotFound = 'not_found';
+
+    /** No document with that id in this signing request. */
+    case DocumentNotFound = 'document_not_found';
 
     /* ------------------------------------------------------------------------ 409 */
 
@@ -70,6 +103,15 @@ enum FirmaErrorCode: string
      */
     case AlreadySent = 'already_sent';
 
+    /** A change to the document set of a request that is no longer a draft. */
+    case DocumentSetLocked = 'document_set_locked';
+
+    /** A `documents_layout_version` that is not the request's current one. */
+    case DocumentSetVersionConflict = 'document_set_version_conflict';
+
+    /** A field write on a multi-document request without `documents_layout_version`. */
+    case DocumentsLayoutVersionRequired = 'documents_layout_version_required';
+
     /* ------------------------------------------------------------------------ 413 */
 
     /**
@@ -79,6 +121,9 @@ enum FirmaErrorCode: string
      * the token here follows this enum's lowercase vocabulary, as every other member does.
      */
     case RequestTooLarge = 'request_too_large';
+
+    /** A document set over 100 MB, or an upload over its own limit. */
+    case DocumentSetTooLarge = 'document_set_too_large';
 
     /* ------------------------------------------------------------------ 422 */
 
@@ -106,12 +151,17 @@ enum FirmaErrorCode: string
     public function status(): int
     {
         return match ($this) {
-            self::InvalidRequest, self::MalformedPdf => Response::HTTP_BAD_REQUEST,
+            self::InvalidRequest, self::MalformedPdf,
+            self::ConflictingDocumentSource, self::DuplicateDocumentId, self::MaxDocumentsExceeded,
+            self::DocumentUploadNotFound, self::InvalidDocumentOrder, self::MinDocumentsRequired,
+            self::PageCountMismatch, self::DimensionMismatch => Response::HTTP_BAD_REQUEST,
             self::Unauthorized => Response::HTTP_UNAUTHORIZED,
             self::Forbidden => Response::HTTP_FORBIDDEN,
-            self::NotFound => Response::HTTP_NOT_FOUND,
-            self::NoDocumentAvailable, self::InvalidState, self::AlreadySent => Response::HTTP_CONFLICT,
-            self::RequestTooLarge => Response::HTTP_REQUEST_ENTITY_TOO_LARGE,
+            self::NotFound, self::DocumentNotFound => Response::HTTP_NOT_FOUND,
+            self::NoDocumentAvailable, self::InvalidState, self::AlreadySent,
+            self::DocumentSetLocked, self::DocumentSetVersionConflict,
+            self::DocumentsLayoutVersionRequired => Response::HTTP_CONFLICT,
+            self::RequestTooLarge, self::DocumentSetTooLarge => Response::HTTP_REQUEST_ENTITY_TOO_LARGE,
             self::UnprocessableEntity, self::ValidationFailed => Response::HTTP_UNPROCESSABLE_ENTITY,
             self::Unsupported => Response::HTTP_NOT_IMPLEMENTED,
             self::InternalError => Response::HTTP_INTERNAL_SERVER_ERROR,

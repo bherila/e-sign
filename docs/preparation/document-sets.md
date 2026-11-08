@@ -56,6 +56,36 @@ The evidence document lists the set (each document's position, title, original a
 digests, page range) and the digest of each per-document artifact, so a reader holding one
 document's sealed copy can tie it to the agreement.
 
+## Changing a draft's set
+
+While an envelope is a draft its set can change: add a document (at a position, or last),
+reorder, replace one with a document of the same shape, rename one, or remove one. Each is one
+state-machine transition, `change_documents`, legal from `draft` only
+(`EnvelopeStateMachine::changeDocumentSet()`, built from `DocumentSetChange`), under the envelope
+lock and its version compare-and-swap. In one statement it rewrites the set's rows, the
+envelope's first document, the digest an acceptance will bind, and the copied field schema.
+
+- **Fields move with their pages.** Pages are absolute, so a document that changes place moves
+  the number of every page after it; each field is carried to its page's new number. A field is
+  never left on a page the change removes: removing a document that still has fields is refused.
+- **A replacement has the same shape**: the same number of pages, every page the same displayed
+  size within 1 pt. Nothing placed moves, and the digest changes because the bytes did.
+- **A rename binds nothing.** The digest covers each member's position and SHA-256, not its title,
+  so a rename leaves the digest and the field schema exactly as they were.
+- **Ids are stable.** Each row keeps its `public_id` through every change, so a caller's
+  `document_id` keeps naming the same document. A set reduced to one document keeps its one row,
+  and with it that id; a set of one binds its document's own digest whether it has a row or not.
+  (The creation migration's comment, that a row is written only for a set of two or more, still
+  describes what creation writes.)
+- **Two counters.** `envelopes.documents_version` advances on every change;
+  `documents_layout_version` only when pages move. Both start at 1.
+
+`envelopes.document_revision_id`, `document_sha256` and `field_schema` are snapshot columns the
+model refuses to change through an ordinary save. This transition, and anchor resolution at send,
+are the two reviewed paths that change them, both on a draft, both through the state machine's
+query-builder compare-and-swap. docs/HANDOFF.md section 6 invariant 4 freezes content at the first
+acceptance; a draft has none, and after send the transition is illegal.
+
 ## Limits
 
 At most 20 documents and 100 MB per set, upstream's limits. Each member is a document that passed
@@ -69,8 +99,11 @@ intake and preflight on its own; the set does not re-admit them.
 - **Firma facade, read side:** `documents[]` on `GET /signing-requests/{id}` and
   `GET /signing-requests/{id}/documents/{document_id}/download?type=original|document`. For a set
   the top-level `document_url` is null. See the capability matrix for what differs from upstream.
-- **Firma facade, write side (a follow-up):** `document_ids` on create, upload by
-  `POST /documents` (streamed through the application, never a pre-signed URL), and editing a
-  draft's set. Each answers `501` by name until then.
+- **Firma facade, write side (issue #182):** documents are uploaded first, by **upload a small
+  document** (`POST /documents/inline`, base64, up to 4.5 MB) or **upload a large document**
+  (`POST /documents`, then `PUT` the raw bytes to the application's own signed `upload_url`, up to
+  50 MB; never a pre-signed storage URL). `document_id` / `document_ids` on create take the
+  upload ids, and a draft's `/documents` routes change its set. See
+  `docs/api/firma-compat-v1.md`.
 - **Templates:** a draft version takes `additional_document_ids` after `document_id`; the editor
   shows every document, its pages numbered across the set.

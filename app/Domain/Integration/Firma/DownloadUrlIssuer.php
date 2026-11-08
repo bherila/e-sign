@@ -82,22 +82,27 @@ final class DownloadUrlIssuer
      */
     public const MEMBER_TYPES = ['original', 'document'];
 
-    /** The token kind naming document `$position`'s `$type` file. */
-    public static function member(int $position, string $type): string
+    /**
+     * The token kind naming document `$documentId`'s `$type` file.
+     *
+     * By the document's id, never its position: a draft's set can be reordered (issue #182), and
+     * a link issued before a reorder must still name the document it was issued for, or nothing.
+     */
+    public static function member(string $documentId, string $type): string
     {
-        return 'member-'.$type.'-'.$position;
+        return 'member-'.$type.'-'.$documentId;
     }
 
     /**
-     * @return array{position: int, type: string}|null Null for a kind that names no set member.
+     * @return array{document_id: string, type: string}|null Null for a kind that names no set member.
      */
     public static function parseMember(string $kind): ?array
     {
-        if (preg_match('/^member-(original|document)-([1-9][0-9]?)$/D', $kind, $matches) !== 1) {
+        if (preg_match('/^member-(original|document)-([0-9A-HJKMNP-TV-Z]{26})$/D', $kind, $matches) !== 1) {
             return null;
         }
 
-        return ['position' => (int) $matches[2], 'type' => $matches[1]];
+        return ['document_id' => $matches[2], 'type' => $matches[1]];
     }
 
     /** Route name of the streaming endpoint. */

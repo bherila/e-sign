@@ -14,6 +14,7 @@ use App\Domain\Preparation\Schema\InvalidFieldSchemaException;
 use App\Domain\Preparation\Schema\ValidationError;
 use App\Domain\Preparation\Templates\TemplateStateException;
 use App\Domain\Signing\Envelopes\EnvelopeState;
+use App\Domain\Signing\Exceptions\DocumentSetChangeRejected;
 use App\Domain\Signing\Exceptions\FieldSubmissionRejected;
 use App\Domain\Signing\Exceptions\IllegalTransition;
 use App\Domain\Signing\Exceptions\InvalidEnvelopeSnapshot;
@@ -118,6 +119,8 @@ final class FirmaErrorMap
                 ['reason' => $exception->reason],
             ),
 
+            $exception instanceof DocumentSetChangeRejected => self::documentSetChange($exception),
+
             $exception instanceof SigningException => FirmaException::of(
                 FirmaErrorCode::InvalidRequest,
                 $exception->getMessage(),
@@ -177,6 +180,17 @@ final class FirmaErrorMap
     {
         $from = EnvelopeState::tryFrom($exception->from);
 
+        // Upstream: "A sent, finished, cancelled or declined signing request answers
+        // `409 DOCUMENT_SET_LOCKED`" on every /documents mutation.
+        if ($exception->transition === 'change_documents') {
+            return FirmaException::of(
+                FirmaErrorCode::DocumentSetLocked,
+                'This signing request is no longer a draft, so its documents cannot change. A correction is a new '
+                .'signing request.',
+                ['from' => $exception->from],
+            );
+        }
+
         $alreadySent = $exception->transition === 'send' && $from !== null && in_array($from, [
             EnvelopeState::Sent,
             EnvelopeState::InProgress,
@@ -189,6 +203,26 @@ final class FirmaErrorMap
             $alreadySent ? FirmaErrorCode::AlreadySent : FirmaErrorCode::InvalidState,
             $exception->getMessage(),
             ['transition' => $exception->transition, 'from' => $exception->from],
+        );
+    }
+
+    private static function documentSetChange(DocumentSetChangeRejected $exception): FirmaException
+    {
+        $code = match ($exception->reason) {
+            DocumentSetChangeRejected::NOT_FOUND => FirmaErrorCode::DocumentNotFound,
+            DocumentSetChangeRejected::TOO_MANY => FirmaErrorCode::MaxDocumentsExceeded,
+            DocumentSetChangeRejected::TOO_LARGE => FirmaErrorCode::DocumentSetTooLarge,
+            DocumentSetChangeRejected::INVALID_ORDER => FirmaErrorCode::InvalidDocumentOrder,
+            DocumentSetChangeRejected::MIN_DOCUMENTS => FirmaErrorCode::MinDocumentsRequired,
+            DocumentSetChangeRejected::PAGE_COUNT_MISMATCH => FirmaErrorCode::PageCountMismatch,
+            DocumentSetChangeRejected::DIMENSION_MISMATCH => FirmaErrorCode::DimensionMismatch,
+            default => FirmaErrorCode::InvalidRequest,
+        };
+
+        return FirmaException::of(
+            $code,
+            $exception->getMessage(),
+            ['reason' => $exception->reason, ...$exception->details],
         );
     }
 

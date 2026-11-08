@@ -85,6 +85,10 @@ class SigningRequestDetailResource extends JsonResource
             'document_url_expires_at' => $expiresAt->toIso8601String(),
             'document_page_count' => $isSet ? $set->totalPages() : $revision?->page_count,
             'documents' => $this->downloads->documentSummaries($envelope, $expiresAt),
+            // Upstream's two set counters (issue #182): every change, and every change that moved
+            // pages. A field write on a set sends the second back (PATCH, `documents_layout_version`).
+            'documents_version' => $envelope->documents_version,
+            'documents_layout_version' => $envelope->documents_layout_version,
         ]
             + $this->settings->deprecatedIntegers($envelope)
             + [

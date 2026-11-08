@@ -3,7 +3,9 @@
 declare(strict_types=1);
 
 use App\Domain\Integration\Firma\FirmaProfile;
+use App\Http\Controllers\Compat\Firma\DocumentUploadController;
 use App\Http\Controllers\Compat\Firma\SigningRequestController;
+use App\Http\Controllers\Compat\Firma\SigningRequestDocumentController;
 use App\Http\Controllers\Compat\Firma\SigningRequestDownloadController;
 use App\Http\Controllers\Compat\Firma\SigningRequestFieldController;
 use App\Http\Controllers\Compat\Firma\SigningRequestUserController;
@@ -95,6 +97,35 @@ Route::prefix(FirmaProfile::BASE_PATH)
             // the two agree, because a rename that missed one would mint links to nothing.
             ->name('downloads.show');
 
+        /*
+         * **Upload a large document**, step two: the raw bytes, PUT to the `upload_url` that
+         * `POST /documents` returned (issue #182).
+         *
+         * Outside the authenticated group for the reason the download route is: upstream's URL is
+         * a pre-signed one, followed without an API key. Here it is this application's, signed and
+         * expiring, and the bytes stream through the same intake as every other upload
+         * (docs/BLOB_STORAGE.md rule 1). App\Http\Middleware\Compat\FirmaRequestSizeLimit lets
+         * this one path past the 6 MiB JSON ceiling; the upload's own declared size, at most
+         * 50 MB, is enforced while the body is read.
+         */
+        Route::put('/documents/uploads/{upload}', [DocumentUploadController::class, 'putContent'])
+            ->middleware('signed')
+            ->where('upload', '[0-9A-HJKMNP-TV-Z]{26}')
+            // A contract with App\Domain\Integration\Firma\Uploads\FirmaDocumentUploads::CONTENT_ROUTE.
+            ->name('documents.upload-large.content');
+
+        Route::middleware(['service-credential', 'require-scope:'.FirmaProfile::SCOPE, 'require-scope:envelopes:write'])
+            ->prefix('documents')
+            ->name('documents.')
+            ->group(function (): void {
+                // **Upload a large document** (up to 50 MB), step one. Upstream's route.
+                Route::post('/', [DocumentUploadController::class, 'storeLarge'])->name('upload-large');
+
+                // **Upload a small document** (up to 4.5 MB) in one call, base64 in the body.
+                // This facade's addition; it answers the same kind of `document_id`.
+                Route::post('/inline', [DocumentUploadController::class, 'storeSmall'])->name('upload-small');
+            });
+
         Route::middleware(['service-credential', 'require-scope:'.FirmaProfile::SCOPE])
             ->prefix('signing-requests')
             ->name('signing-requests.')
@@ -121,6 +152,13 @@ Route::prefix(FirmaProfile::BASE_PATH)
                     Route::patch('/{id}', [SigningRequestController::class, 'update'])->name('update');
                     Route::post('/{id}/send', [SigningRequestController::class, 'send'])->name('send');
                     Route::post('/{id}/cancel', [SigningRequestController::class, 'cancel'])->name('cancel');
+
+                    // A draft's document set (issue #182). `order` is declared before
+                    // `{document_id}` so it is never read as a document id.
+                    Route::post('/{id}/documents', [SigningRequestDocumentController::class, 'store'])->name('documents.store');
+                    Route::put('/{id}/documents/order', [SigningRequestDocumentController::class, 'reorder'])->name('documents.order');
+                    Route::patch('/{id}/documents/{document_id}', [SigningRequestDocumentController::class, 'update'])->name('documents.update');
+                    Route::delete('/{id}/documents/{document_id}', [SigningRequestDocumentController::class, 'destroy'])->name('documents.destroy');
                 });
 
                 Route::middleware('require-scope:envelopes:read')->group(function (): void {
@@ -128,8 +166,7 @@ Route::prefix(FirmaProfile::BASE_PATH)
                     Route::get('/{id}/users', [SigningRequestUserController::class, 'index'])->name('users');
                     Route::get('/{id}/fields', [SigningRequestFieldController::class, 'index'])->name('fields');
                     Route::get('/{id}/download', [SigningRequestDownloadController::class, 'show'])->name('download');
-                    // One document of a set (issue #163). The rest of `/documents*` — adding,
-                    // replacing, renaming, reordering and removing — still answers the 501 below.
+                    // One document of a set (issue #163).
                     Route::get('/{id}/documents/{document_id}/download', [SigningRequestDownloadController::class, 'showDocument'])
                         ->name('documents.download');
                 });

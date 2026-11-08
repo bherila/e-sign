@@ -52,6 +52,8 @@ class FirmaContractTest extends TestCase
      */
     private const DETAIL_ADDED_AFTER_RECORDING = [
         'documents', // reference v1.39.0, issue #163
+        'documents_version', // reference v1.39.0, issue #182
+        'documents_layout_version', // reference v1.39.0, issue #182
     ];
 
     private const SETTINGS_ADDED_AFTER_RECORDING = [

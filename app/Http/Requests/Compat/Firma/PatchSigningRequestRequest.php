@@ -7,6 +7,7 @@ namespace App\Http\Requests\Compat\Firma;
 use App\Domain\Integration\Firma\FirmaErrorCode;
 use App\Domain\Integration\Firma\FirmaException;
 use App\Domain\Integration\Firma\UnsupportedOptions;
+use App\Domain\Signing\Models\Envelope;
 
 /**
  * `PATCH /signing-requests/{id}`: the consumer's **singular** `field` payload.
@@ -35,10 +36,10 @@ class PatchSigningRequestRequest extends FirmaRequest
     /** Members of the properties-only form, which this build cannot honour. */
     private const PROPERTY_MEMBERS = [
         'name', 'description', 'template_description', 'expiration_hours',
-        // Post-pin (reference v1.39.0/v1.40.0, issue #171): a settings change, a seal
-        // participant, and the multi-document layout precondition. Each is refused by name
-        // rather than dropped, so none of them can be a silent no-op.
-        'settings', 'seal_participant', 'documents_layout_version',
+        // Post-pin (reference v1.39.0/v1.40.0, issue #171): a settings change and a seal
+        // participant. Each is refused by name rather than dropped, so neither can be a silent
+        // no-op. `documents_layout_version` is honoured instead: see guardLayoutVersion().
+        'settings', 'seal_participant',
     ];
 
     /**
@@ -72,6 +73,51 @@ class PatchSigningRequestRequest extends FirmaRequest
             'seal_participant' => ['nullable', 'array'],
             'documents_layout_version' => ['nullable'],
         ];
+    }
+
+    /**
+     * Upstream's precondition on a field write (reference v1.39.0, issue #182).
+     *
+     * `documents_layout_version` is "the `documents_layout_version` of your last read": required
+     * for a field write on a request with more than one document or whose layout has changed, and
+     * refused when stale. A caller that numbered pages before a reorder is told its numbers are
+     * out of date instead of writing against the wrong page. Checked on any PATCH that sends it.
+     *
+     * @throws FirmaException
+     */
+    public function guardLayoutVersion(Envelope $envelope, bool $fieldWrite): void
+    {
+        $sent = $this->input('documents_layout_version');
+
+        if ($sent === null) {
+            if ($fieldWrite && ($envelope->documentSet()->isMultiple() || $envelope->documents_layout_version > 1)) {
+                throw FirmaException::of(
+                    FirmaErrorCode::DocumentsLayoutVersionRequired,
+                    'This signing request has more than one document, or its documents have changed, so a field write '
+                    .'must say which layout it was made against: send `documents_layout_version` from your last read.',
+                    ['documents_layout_version' => $envelope->documents_layout_version],
+                );
+            }
+
+            return;
+        }
+
+        if (! is_int($sent) && ! (is_string($sent) && ctype_digit($sent))) {
+            throw FirmaException::of(
+                FirmaErrorCode::InvalidRequest,
+                '`documents_layout_version` must be a non-negative integer.',
+                ['key' => 'documents_layout_version'],
+            );
+        }
+
+        if ((int) $sent !== $envelope->documents_layout_version) {
+            throw FirmaException::of(
+                FirmaErrorCode::DocumentSetVersionConflict,
+                'The documents of this signing request have changed since layout version '.(int) $sent.'; the current '
+                .'one is '.$envelope->documents_layout_version.'. Read the request again before writing.',
+                ['documents_layout_version' => $envelope->documents_layout_version],
+            );
+        }
     }
 
     /**

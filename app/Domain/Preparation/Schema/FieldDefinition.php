@@ -45,6 +45,29 @@ final readonly class FieldDefinition
         return $this->anchor instanceof AnchorPlacement;
     }
 
+    /**
+     * The same field on another absolute page; nothing else moves (issue #182).
+     *
+     * For a draft's document set, when the document the field sits on changes place: the field
+     * stays on the same page of the same document, and that page's number across the set changed.
+     */
+    public function onPage(int $page): self
+    {
+        return new self(
+            $this->id,
+            $this->recipientId,
+            $this->type,
+            $page,
+            $this->rect,
+            $this->required,
+            $this->readOnly,
+            $this->label,
+            $this->alias,
+            $this->prefill,
+            $this->anchor,
+        );
+    }
+
     /** The same field carrying a different anchor request; nothing else moves. */
     public function withAnchor(AnchorPlacement $anchor): self
     {

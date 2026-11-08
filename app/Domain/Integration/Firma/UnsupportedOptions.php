@@ -18,7 +18,7 @@ namespace App\Domain\Integration\Firma;
  * | Option | Why |
  * |---|---|
  * | `settings.hand_drawn_only: true` | `RenderSettings::$signatureAppearance` records a preference (`drawn`, `typed`, `either`) and **nothing in the signing flow enforces it**: a typed signature is accepted whatever it says. Recording the setting would therefore promise a caller something nothing keeps — an agreement captured under an assurance the sender was told they had asked for. |
- * | `settings.allow_editing_before_sending: true` | A sent envelope's content is frozen; a correction is a new envelope with renewed signatures. |
+ * | `settings.allow_editing_before_sending: true` | A draft's fields are one snapshot and are not edited; a correction after send is a new envelope with renewed signatures. |
  * | `settings.attach_pdf_on_finish: true` | The completion mail carries an authorized link, not the bytes. Attaching an executed agreement to an email takes it outside the boundary that authorizes it. |
  * | `settings.identity_editable_fields` (non-empty) | A recipient cannot rewrite their own identity here: it is recorded in the attestation. |
  * | `notify_signers: false` on cancel | Withdrawal notices go to everyone who was written to, decided by `EnvelopeAudience`, not by the caller. Accepting `false` and mailing anyway would be a lie in the response. |
@@ -42,8 +42,9 @@ final class UnsupportedOptions
         'hand_drawn_only' => 'Signature capture in this build accepts a typed or a drawn signature, and nothing '
             .'in the signing flow refuses a typed one — the appearance is a rendering preference, not a rule. '
             .'Recording this option would promise an assurance nothing enforces.',
-        'allow_editing_before_sending' => 'A signing request cannot be edited once it has been built from its '
-            .'document: the snapshot is immutable, and a correction is a new request with renewed signatures.',
+        'allow_editing_before_sending' => 'A signing request\'s fields are not edited once it has been built: '
+            .'they are one snapshot, and a correction is a new request with renewed signatures. A draft\'s '
+            .'documents can change through the `/documents` routes, each placed field moving with its page.',
         'attach_pdf_on_finish' => 'The completion email carries an authorized download link rather than the '
             .'executed PDF, so that the bytes stay behind a request this service authorizes.',
     ];
@@ -66,10 +67,6 @@ final class UnsupportedOptions
             .'signing.',
         'completion_redirect_delay' => 'This service does not redirect a signer to a third-party URL after '
             .'signing.',
-        'document_id' => 'Documents are supplied inline as base64 `document`; the two-step upload through '
-            .'`POST /documents` is not part of this profile.',
-        'document_ids' => 'A signing request here carries exactly one document (docs/HANDOFF.md section 6, '
-            .'issue #163); a multi-document request cannot be built.',
         'seal_participants' => 'This service has no organization seals (issue #164). The finished PDF is sealed '
             .'with the service\'s own certificate, which is not a participant and cannot be ordered.',
         'anchor_tags' => 'Anchor tags are supplied per field as `fields[].anchor`, which this profile '

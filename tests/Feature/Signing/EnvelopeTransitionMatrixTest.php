@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Signing;
 
+use App\Domain\Preparation\Documents\DocumentSet;
+use App\Domain\Signing\Envelopes\DocumentSetChange;
 use App\Domain\Signing\Envelopes\EnvelopeState;
 use App\Domain\Signing\Envelopes\EnvelopeStateMachine;
 use App\Domain\Signing\Exceptions\IllegalTransition;
@@ -54,7 +56,7 @@ class EnvelopeTransitionMatrixTest extends TestCase
         }
 
         // 9 states x 12 transitions, minus the 21 legal pairs.
-        $this->assertSame(87, $attempted);
+        $this->assertSame(95, $attempted);
     }
 
     public function test_every_legal_transition_is_reachable(): void
@@ -164,6 +166,7 @@ class EnvelopeTransitionMatrixTest extends TestCase
         match ($transition) {
             'send' => $machine->send($envelope),
             'update' => $machine->correctRecipients($envelope, []),
+            'change_documents' => $machine->changeDocumentSet($envelope, static fn (DocumentSet $set): DocumentSetChange => DocumentSetChange::reorder($set, [])),
             'submit_values' => $machine->submitValues($recipient, []),
             'set_sender_values' => $machine->setSenderValues($envelope, []),
             // A session reference that cannot collide with the one `signAs()` used to

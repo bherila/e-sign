@@ -10,17 +10,19 @@ use App\Domain\Identity\Credentials\MissingScope;
 use App\Domain\Identity\Credentials\Scope;
 use App\Domain\Identity\Credentials\ServiceCredential;
 use App\Domain\Identity\Models\Workspace;
+use App\Domain\Integration\Firma\Uploads\FirmaDocumentUploads;
 use App\Domain\Integration\Native\EnvelopeService;
 use App\Domain\Integration\Native\NewEnvelope;
+use App\Domain\Preparation\Documents\DocumentBlobStore;
 use App\Domain\Preparation\Documents\DocumentIntake;
 use App\Domain\Preparation\Documents\Models\Document;
 use App\Domain\Preparation\Documents\Models\DocumentRevision;
-use App\Domain\Preparation\Preflight\PreflightCode;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\Recipient;
 use App\Domain\Preparation\Schema\RecipientDesignation;
 use App\Domain\Preparation\Templates\Models\TemplateVersion;
 use App\Domain\Signing\Models\Envelope;
+use Illuminate\Support\Facades\DB;
 
 /**
  * `POST /signing-requests` and `POST /signing-requests/create-and-send`.
@@ -85,6 +87,8 @@ final readonly class SigningRequestCreation
         private PageGeometryReader $pages,
         private DocumentIntake $intake,
         private CurrentPrincipal $principal,
+        private FirmaDocumentUploads $uploads,
+        private DocumentBlobStore $blobs,
     ) {}
 
     /**
@@ -98,18 +102,62 @@ final readonly class SigningRequestCreation
 
         $templateId = self::string($body, 'template_id');
         $document = self::string($body, 'document');
+        $uploadIds = self::uploadIds($body);
 
-        if (($templateId === null) === ($document === null)) {
+        // Upstream: "Exactly one of document, document_id or document_ids or template_id".
+        $sources = array_keys(array_filter([
+            'template_id' => $templateId !== null,
+            'document' => $document !== null,
+            'document_id' => self::string($body, 'document_id') !== null,
+            'document_ids' => is_array($body['document_ids'] ?? null) && $body['document_ids'] !== [],
+        ]));
+
+        if (count($sources) !== 1) {
             throw FirmaException::of(
-                FirmaErrorCode::InvalidRequest,
-                'Supply exactly one of `template_id` or `document`. A request with both does not say which '
-                .'agreement is meant, and one with neither has nothing to sign.',
+                count($sources) > 1 ? FirmaErrorCode::ConflictingDocumentSource : FirmaErrorCode::InvalidRequest,
+                'Supply exactly one of `template_id`, `document`, `document_id` or `document_ids`. A request with '
+                .'more than one does not say which agreement is meant, and one with none has nothing to sign.',
+                ['sources' => $sources],
             );
         }
 
-        return $templateId !== null
-            ? $this->fromTemplate($workspace, $credential, $body, $templateId)
-            : $this->fromDocument($workspace, $credential, $body, $document ?? '');
+        return match ($sources[0]) {
+            'template_id' => $this->fromTemplate($workspace, $credential, $body, (string) $templateId),
+            'document' => $this->fromDocument($workspace, $credential, $body, (string) $document),
+            default => $this->fromUploads($workspace, $credential, $body, $uploadIds),
+        };
+    }
+
+    /**
+     * `document_id`, or `document_ids` in order, as one list.
+     *
+     * @param  array<string, mixed>  $body
+     * @return list<string>
+     *
+     * @throws FirmaException
+     */
+    private static function uploadIds(array $body): array
+    {
+        $single = self::string($body, 'document_id');
+
+        if ($single !== null) {
+            return [$single];
+        }
+
+        $ids = [];
+
+        foreach (is_array($body['document_ids'] ?? null) ? array_values($body['document_ids']) : [] as $index => $id) {
+            if (! is_string($id) || trim($id) === '') {
+                throw FirmaException::of(
+                    FirmaErrorCode::InvalidRequest,
+                    '`document_ids['.$index.']` must be an upload id from `POST /documents`.',
+                );
+            }
+
+            $ids[] = trim($id);
+        }
+
+        return $ids;
     }
 
     /* ------------------------------------------------------------------ template */
@@ -329,7 +377,7 @@ final readonly class SigningRequestCreation
         array $body,
         string $base64,
     ): Envelope {
-        $bytes = self::decode($base64);
+        $bytes = InlineDocument::decode($base64);
         $title = self::string($body, 'name') ?? 'Untitled agreement';
 
         $recipients = $this->placement->recipients(
@@ -356,7 +404,7 @@ final readonly class SigningRequestCreation
         $revision = $document->reviewRevision();
 
         if (! $revision instanceof DocumentRevision) {
-            throw self::preflightRefused($document);
+            throw PreflightRefusal::of($document);
         }
 
         $settings = is_array($body['settings'] ?? null) ? $body['settings'] : [];
@@ -393,6 +441,117 @@ final readonly class SigningRequestCreation
             ),
             $credential,
         );
+    }
+
+    /* ------------------------------------------------------------------- uploads */
+
+    /**
+     * A request built from documents uploaded beforehand (issue #182): one `document_id`, or a
+     * set by `document_ids` in order.
+     *
+     * Exactly the document path, with the documents already ingested. `fields[].page_number` is
+     * absolute across the set (docs/preparation/document-sets.md), so the placement is given the
+     * set's pages numbered that way. The uploads are used once, in the same transaction that
+     * creates the request: a request that is refused leaves them usable.
+     *
+     * @param  array<string, mixed>  $body
+     * @param  list<string>  $uploadIds
+     *
+     * @throws FirmaException
+     */
+    private function fromUploads(
+        Workspace $workspace,
+        ServiceCredential $credential,
+        array $body,
+        array $uploadIds,
+    ): Envelope {
+        $recipients = $this->placement->recipients(
+            is_array($body['recipients'] ?? null) ? array_values($body['recipients']) : [],
+        );
+        $fields = is_array($body['fields'] ?? null) ? array_values($body['fields']) : [];
+        $this->placement->validateWithoutDocument($fields);
+
+        $resolved = $this->uploads->resolve($workspace, $uploadIds);
+        $first = $resolved[0];
+        $isSet = count($resolved) > 1;
+
+        if ($isSet && self::hasAnchors($fields)) {
+            throw FirmaException::unsupported(
+                'fields[].anchor',
+                'Anchors on a multi-document request are not resolved by this build at creation, where a field '
+                .'would need to say which document its text is in. Place the fields by `page_number` across the '
+                .'set, or build the request from one document.',
+            );
+        }
+
+        $pages = [];
+        $offset = 0;
+
+        foreach ($resolved as $member) {
+            foreach ($this->pages->forRevision($member['revision']->setRelation('document', $member['document'])) as $number => $geometry) {
+                $pages[$offset + $number] = $geometry->withPageNumber($offset + $number);
+            }
+
+            $offset += (int) $member['revision']->page_count;
+        }
+
+        $settings = is_array($body['settings'] ?? null) ? $body['settings'] : [];
+        $title = self::string($body, 'name') ?? $first['document']->title;
+
+        $schema = $this->placement->schema(
+            documentId: $first['document']->public_id,
+            pages: $pages,
+            recipients: $recipients,
+            fields: $fields,
+            // Anchors are refused above for a set, so only a single document is ever read here.
+            documentBytes: fn (): string => (string) $this->blobs->disk($first['revision']->disk)->get($first['revision']->path),
+            useSigningOrder: ($settings['use_signing_order'] ?? true) !== false,
+        );
+
+        $buttons = self::signerButtons($body);
+
+        return DB::transaction(function () use ($workspace, $credential, $body, $resolved, $first, $isSet, $schema, $title, $recipients, $fields, $buttons): Envelope {
+            $this->uploads->consume(array_map(static fn (array $member) => $member['upload'], $resolved));
+
+            return $this->envelopes->create(
+                $workspace,
+                new NewEnvelope(
+                    documentId: $first['document']->public_id,
+                    fieldSchema: $schema,
+                    title: $title,
+                    recipients: array_map(
+                        static fn (PlannedRecipient $recipient): array => $recipient->toContactOverride(),
+                        $recipients,
+                    ),
+                    values: self::placedPrefills($schema, $fields),
+                    expiresInHours: self::expirationHours($body),
+                    expirySpecified: array_key_exists('expiration_hours', $body),
+                    requireOtp: self::requireOtp($body),
+                    allowDecline: $buttons['allowDecline'],
+                    allowDeclineSpecified: $buttons['allowDeclineSpecified'],
+                    showSaveForLater: $buttons['showSaveForLater'],
+                    showSaveForLaterSpecified: $buttons['showSaveForLaterSpecified'],
+                    documentIds: $isSet
+                        ? array_map(static fn (array $member): string => $member['document']->public_id, $resolved)
+                        : [],
+                ),
+                $credential,
+            );
+        });
+    }
+
+    /**
+     * @param  list<mixed>  $fields
+     */
+    private static function hasAnchors(array $fields): bool
+    {
+        foreach ($fields as $field) {
+            if (is_array($field) && ($field['anchor'] ?? null) !== null) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /* -------------------------------------------------------------------- values */
@@ -481,78 +640,6 @@ final readonly class SigningRequestCreation
     }
 
     /* --------------------------------------------------------------------- input */
-
-    /**
-     * @throws FirmaException
-     */
-    private static function decode(string $base64): string
-    {
-        // Data URLs turn up in practice even where the contract says base64.
-        $payload = preg_replace('#^data:application/pdf;base64,#i', '', trim($base64)) ?? $base64;
-        $bytes = base64_decode(strtr($payload, '-_', '+/'), true);
-
-        if ($bytes === false || $bytes === '') {
-            throw FirmaException::of(
-                FirmaErrorCode::InvalidRequest,
-                '`document` is not valid base64.',
-            );
-        }
-
-        if (strlen($bytes) > FirmaProfile::MAX_INLINE_DOCUMENT_BYTES) {
-            throw FirmaException::of(
-                FirmaErrorCode::InvalidRequest,
-                'The inline `document` decodes to '.strlen($bytes).' bytes, over the '
-                .FirmaProfile::MAX_INLINE_DOCUMENT_BYTES.'-byte limit for a document sent in a JSON body.',
-            );
-        }
-
-        return $bytes;
-    }
-
-    /**
-     * The preflight parser refused the document. Its findings go to the caller verbatim.
-     *
-     * The document row is deliberately kept, with its report — that is intake's rule, and it
-     * is what an operator needs when a sender says "the system rejected our contract". No
-     * envelope exists, so nothing is half-built.
-     */
-    private static function preflightRefused(Document $document): FirmaException
-    {
-        $report = is_array($document->preflight_report) ? $document->preflight_report : [];
-        $findings = is_array($report['findings'] ?? null) ? $report['findings'] : [];
-
-        // A damaged page is upstream's own refusal (`MALFORMED_PDF`, reference v1.40.1), so it
-        // gets its own token and the page numbers a caller shows its user. The findings ride
-        // along unchanged, so nothing else the parser found is hidden behind it.
-        $malformedPages = [];
-        foreach ($findings as $finding) {
-            if (is_array($finding) && ($finding['code'] ?? null) === PreflightCode::MalformedPage->value
-                && is_int($finding['page'] ?? null)) {
-                $malformedPages[] = $finding['page'];
-            }
-        }
-
-        if ($malformedPages !== []) {
-            sort($malformedPages);
-
-            return FirmaException::of(
-                FirmaErrorCode::MalformedPdf,
-                'The PDF is damaged: page '.$malformedPages[0].' has no valid content. Repair or '
-                .'re-export the file, then upload it again.',
-                [
-                    'malformed_pages' => array_values(array_unique($malformedPages)),
-                    'document_position' => 1,
-                    'findings' => array_values($findings),
-                ],
-            );
-        }
-
-        return FirmaException::of(
-            FirmaErrorCode::InvalidRequest,
-            'The document was refused by the PDF preflight check, so no signing request was created.',
-            ['findings' => array_values($findings)],
-        );
-    }
 
     /**
      * `settings.allow_decline` and `settings.show_save_for_later` (reference v1.40.0, issue #165).
