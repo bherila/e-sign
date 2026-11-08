@@ -9,13 +9,14 @@ than return a successful no-op (`AGENTS.md`, "Fail closed").
 
 | | |
 |---|---|
-| Upstream reference | Firma Partner API **v1.35.0** (`info.version` = `01.35.00`), OpenAPI 3.0.3 |
-| Pinned document | `https://docs.firma.dev/api-reference/v01.35.00/openapi-v01.35.00.json`, SHA-256 `91c7128a35ae52ac3937715041e41c1bee119cfb69b3dcf6fdc8135a4e3c98b9`, retrieved 2026-09-08T06:52:14Z |
+| Upstream reference | Firma Partner API **v1.40.4** (`info.version` = `01.40.04`), OpenAPI 3.0.3 — re-pinned from v1.35.0 by issue #171; every delta is accounted for in [Delta from v1.35.0](#delta-from-v1350) |
+| Pinned document | `https://docs.firma.dev/api-reference/v01.40.04/openapi-v01.40.04.json`, SHA-256 `6a05e97d3def17ed25dd5fc707bcd7fc42eba556ba11929d917ad6dd2aef2228`, retrieved 2026-11-08T02:02:29Z |
+| Previous pin | v1.35.0, SHA-256 `91c7128a…98b9`, retrieved 2026-09-08 — no longer served by the docs site (`tests/Fixtures/firma/SCHEMA.md`, "Why the pin moved") |
 | Pin record | `tests/Fixtures/firma/SCHEMA.md` (also explains why the document is not vendored) |
-| Prose sources | `https://docs.firma.dev/guides/webhooks` (unversioned, retrieved 2026-09-08) for the webhook envelope, event names and signature scheme — none of which are in the machine-readable document |
+| Prose sources | `https://docs.firma.dev/guides/webhooks` (unversioned, retrieved 2026-09-08) for the webhook envelope and signature scheme, which are not in the machine-readable document; the event **names** are in it since v1.40.2. `https://docs.firma.dev/guides/api-changelog.md` (retrieved 2026-11-08) for the v1.36–v1.40.4 deltas that carry no schema change |
 | Facade base path | `/functions/v1/signing-request-api` (upstream `servers[0]` is `https://api.firma.dev/functions/v1/signing-request-api`) |
 | Adapter version | **1** — `app/Domain/Integration/Firma`, `app/Http/Controllers/Compat/Firma`, `routes/compat-firma.php` (issue #33) |
-| Fixture version | **2026-09-08** — `tests/Fixtures/firma/firma-compat-v1/`, four workflows × four endpoints |
+| Fixture version | **2026-09-08** — `tests/Fixtures/firma/firma-compat-v1/`, four workflows × four endpoints. Recorded under v1.35.0 and not re-recorded: members added since are named where the contract test compares key sets (`FirmaContractTest::SETTINGS_ADDED_AFTER_RECORDING`) |
 
 **Every "upstream shape" cell below is read off the pinned document unless it is tagged
 `(prose)`.** Nothing here is inferred from a numeric magnitude or from consumer behaviour
@@ -35,13 +36,15 @@ is the acceptance criterion of issue #33. Counts are in [Status summary](#status
 
 ## Status summary
 
-Every row of every table below, counted. There are no `unknown` rows.
+Every row of every table below that has a `Status` column, from "Authentication and transport"
+through "Delta from v1.35.0", counted. There are no `unknown` rows. Recounted for issue #171;
+the previous figures (48 / 47 / 14) had not been updated as rows were added.
 
 | Status | Rows |
 |---|---|
-| supported | 48 |
-| intentionally different | 47 |
-| unsupported | 14 |
+| supported | 58 |
+| intentionally different | 59 |
+| unsupported | 23 |
 | **unknown** | **0** |
 
 "Intentionally different" outnumbering "supported" is the accurate reading of what a
@@ -273,6 +276,45 @@ Implemented in `app/Domain/Delivery/Webhooks` (issue #34). Contract and runbook:
 | Duplicate suppression | Receivers are told to deduplicate on the event id | supported | `DeliverWebhookTest::test_a_replay_is_a_new_attempt_of_the_same_event` | Deduplication is the receiver's job; our side of the bargain is that the event id never changes across retries or replays, and neither do the body bytes. |
 | Delivery ordering | Not stated by the guide | **intentionally different** | `OutboxWriterTest::test_two_events_keep_the_order_in_which_they_occurred` | We make no ordering promise — a retry can reorder anything — and instead guarantee `created_at` reflects when the transition occurred, so a receiver can order and reject regressions itself. |
 
+## Delta from v1.35.0
+
+Issue #171. Every change between the previous pin and v1.40.4 that touches an in-profile route,
+an in-profile option, or this surface's error and event vocabulary, with the decision made
+about it. Located by diffing the in-profile operations of the two documents (request members,
+response members, response codes) and reading the changelog for the releases that changed
+behaviour without changing the schema. The v1.35.0 side of the diff is the copy in upstream's
+documentation repository, which is a later revision of the pinned bytes, so the changelog is
+the authority for *when* a change landed.
+
+Families that are out of profile as a whole — `/templates*` (including the new
+`/templates/{id}/documents*`), `/seals*`, `/webhooks*` administration, `/company*`,
+`/workspaces*`, the list route — stay out of profile and answer `501` (see
+[Out of profile](#out-of-profile)); their deltas are not listed one by one.
+
+| Delta | Reference release | Status | Fixture / test | Notes |
+|---|---|---|---|---|
+| Structured errors: `code` (uppercase) and `errors[]` on every error body | v1.36.0 | **intentionally different** | `FirmaAuthTest`, `FirmaLifecycleTest` | This surface keeps its `{error, message, details}` envelope with lowercase tokens in `error` (D1 for `create-and-send`). Adding a second, uppercase vocabulary beside the first would give every refusal two names to keep in step; the tokens adopted from the post-pin reference (`already_sent`, `request_too_large`, `malformed_pdf`) are upstream's codes in this vocabulary. |
+| `warnings[]` on the `create-and-send` response | v1.36.0 | **intentionally different** | | Not emitted. Nothing here is accepted with a caveat: what cannot be honoured is refused with a body naming it, so there is never a warning to report. |
+| `create-and-send` `201` no longer lists `fields[]` | v1.36.0 | **intentionally different** | `FirmaCreateAndSendTest` | Still emitted. Removing a member a consumer written against the pinned shape may read would break it for no gain; an extra member is harmless to one written against the current shape. |
+| `anchor_tags[].add_white_background`, `anchor_tags[].document_index` | v1.36.0, v1.39.0 | unsupported | `FirmaCreateAndSendTest` (`anchor_tags`) | `anchor_tags[]` as a whole is `501`; anchors are supplied per field as `fields[].anchor`. |
+| Organization seals: `seal_participants[]`, `fields[].seal_attribute`, `fields[].seal_participant_temp_id`, `PATCH` `seal_participant`, seal inheritance from templates, `dropped` | v1.37.0, v1.39.1 | unsupported | `FirmaLifecycleTest::test_post_pin_members_this_build_cannot_honour_are_refused_by_name` | No seal participants exist here (issue #164). A non-empty `seal_participants` and either field member are `501` naming the member; `seal_participants: []` — upstream's "create without seals" — is simply true and accepted. Before this change these members were dropped by request validation and the request built without them, a silent no-op. Responses do not carry `seal_participants`. |
+| `designation: "CC"` stored and returned; `Approver` | v1.37.1 (and v01.14.00) | unsupported | `FirmaCreateAndSendTest::test_a_non_signer_designation_is_not_implemented` | `Approver` and `CC` are `501` naming the designation (issue #169). |
+| Catalan (`ca`) language | v1.38.0 | unsupported | | `language` is `501` in every value; the signing pages are served in this application's locale. |
+| Multiple documents: `document_ids`, the `/signing-requests/{id}/documents*` routes, `documents[]`, `documents_version`, `documents_layout_version` | v1.39.0 | unsupported | `FirmaLifecycleTest::test_post_pin_members_this_build_cannot_honour_are_refused_by_name`, `::test_patching_settings_is_refused_rather_than_dropped` | One document per request (`docs/HANDOFF.md` §6, issue #163). `document_ids` is `501`, as is `PATCH` with `documents_layout_version`; the `/documents*` sub-routes answer the catch-all `501`. `document_id` (the v1.29.0 two-step upload, also post-dating nothing but never declared) is now `501` rather than dropped. Responses do not carry `documents[]`. |
+| Participant order: one order space for signers, approvers and seals; `INVALID_SIGNING_ORDER`, `SEAL_ORDER_COLLISION`, `SIGNING_ORDER_LOCKED_APPLIED` | v1.39.0 | **intentionally different** | | With signers only, the order space is the signers' `order`, and the seal-specific codes cannot arise. Upstream's shift-insert moves of a participant are `PATCH` operations this surface does not offer. |
+| `settings.allow_decline`, `settings.show_save_for_later` | v1.40.0 | supported | `SignerButtonsTest` | See the `POST /signing-requests` row. `PATCH` of `settings` is `501` rather than dropped. |
+| `413 REQUEST_TOO_LARGE` over 6 MiB | v1.40.0 | supported | `FirmaLifecycleTest::test_a_body_over_the_size_limit_is_refused_before_anything_is_created` | `request_too_large`; see the transport table. |
+| `400 MALFORMED_PDF` with `malformed_pages`, `document_position`, `document_id` | v1.40.1 | supported | `FirmaCreateAndSendTest::test_a_document_with_a_damaged_page_is_refused_as_malformed` | `malformed_pdf`; see the `POST /signing-requests` row (issue #167). |
+| Unreadable PDF: `400 VALIDATION_ERROR` instead of `500` | v1.40.1 | **intentionally different** | `FirmaCreateAndSendTest::test_an_encrypted_document_is_refused_before_anything_is_created` | Already a `400` here, as `invalid_request` with the parser's findings — the token this surface uses for a body it cannot use. |
+| Webhook event list corrected to the 26 sent | v1.40.2 | supported | `WebhookEventNameTest` | See the catalog audit under [Webhook events](#webhook-events) (issue #170). |
+| `otp_verified` audit events; `verify-signing-otp` responses | v1.40.3 | unsupported | `GuestSigningOtpTest`, `CompletionReportOtpTest` | `/audit` and `verify-signing-otp` are out of profile. The evidence is kept natively (issue #166); see [Out of profile](#out-of-profile). |
+| `409 ALREADY_SENT` on a repeated send; `400` for cancelled or declined | v1.40.4 | supported | `FirmaLifecycleTest::test_sending_twice_is_a_conflict`, `::test_sending_a_cancelled_request_is_not_already_sent` | `already_sent`; the cancelled/declined case stays `409 invalid_state`. See the `/send` table. |
+| `409 SEND_IN_PROGRESS` | v1.40.4 | **intentionally different** | | Never emitted: a send here is synchronous under the envelope lock, so there is no in-flight send state for a second call to observe. A concurrent second send waits for the lock and then gets `already_sent`. |
+| `create-and-send` removes the request when the send step fails before sending; `409` with `signing_request_id` once sending started | v1.40.4 | **intentionally different** | `FirmaCreateAndSendTest` | A send refused by its gate here is `422 validation_failed` with `phase: send_validation`, and the draft is kept, unsent and never announced, as the record of what was submitted; its id is not in the body. A send cannot partially start here, so the `409` case does not arise. A caller retrying the same body creates a second draft. |
+| `GET /signing-requests/{id}/download` partial snapshot for any unfinished sent request; `409` while the certificate is generating | v1.40.4 | supported | `FirmaDownloadTest` | Matches D11's resolution: the partial snapshot is served and flagged. Completion and the report are one transaction here, so the "certificate still generating" window does not exist. |
+| `document_only_hash` describes the sealed per-document PDF | v1.40.4 | unsupported | | Only on the multi-document `documents[]` objects, which are not emitted. |
+| Webhook secret rotation: once per hour, one previous secret kept, `429 COOLDOWN_ACTIVE` | v1.40.4 | **intentionally different** | `DeliverWebhookTest::test_during_a_rotation_both_secrets_sign_the_same_attempt` | Rotation is an operator command here, not an HTTP route; see the rotation-overlap row. |
+
 ## Disagreements
 
 Recorded in Stage 0, **resolved here**. Each entry keeps the original description of the
@@ -393,7 +435,7 @@ neither (only `consecutive_failures`, `auto_disabled_at`, `enabled`, timestamps)
 
 **D15 — The unversioned spec URL is not the pinned one.**
 `https://docs.firma.dev/api-reference/openapi.json` resolves but served a different, smaller
-document (31 paths) than the pinned v01.35.00 file (72 paths) at retrieval time. Anyone
+document (31 paths) than the then-pinned v01.35.00 file (72 paths) at retrieval time. Anyone
 re-deriving this matrix must use the versioned URL in `tests/Fixtures/firma/SCHEMA.md`.
 
 **Resolved:** unchanged. Anyone re-deriving this matrix uses the versioned URL in `tests/Fixtures/firma/SCHEMA.md`; `scripts/fetch-firma-schema.sh` verifies the digest.

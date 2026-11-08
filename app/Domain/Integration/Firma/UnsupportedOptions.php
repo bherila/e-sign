@@ -66,6 +66,12 @@ final class UnsupportedOptions
             .'signing.',
         'completion_redirect_delay' => 'This service does not redirect a signer to a third-party URL after '
             .'signing.',
+        'document_id' => 'Documents are supplied inline as base64 `document`; the two-step upload through '
+            .'`POST /documents` is not part of this profile.',
+        'document_ids' => 'A signing request here carries exactly one document (docs/HANDOFF.md section 6, '
+            .'issue #163); a multi-document request cannot be built.',
+        'seal_participants' => 'This service has no organization seals (issue #164). The finished PDF is sealed '
+            .'with the service\'s own certificate, which is not a participant and cannot be ordered.',
         'anchor_tags' => 'Anchor tags are supplied per field as `fields[].anchor`, which this profile '
             .'resolves against the document text. The separate `anchor_tags[]` collection, with its own '
             .'offset units and its own type enum, is not implemented.',
@@ -83,6 +89,17 @@ final class UnsupportedOptions
 
             if ($value !== null && $value !== '' && $value !== []) {
                 throw FirmaException::unsupported($key, $reason);
+            }
+        }
+
+        foreach (is_array($body['fields'] ?? null) ? $body['fields'] : [] as $field) {
+            foreach (['seal_attribute', 'seal_participant_temp_id'] as $member) {
+                if (is_array($field) && ($field[$member] ?? null) !== null) {
+                    throw FirmaException::unsupported(
+                        'fields[].'.$member,
+                        'This service has no organization seals (issue #164), so no field can belong to one.',
+                    );
+                }
             }
         }
 
@@ -138,7 +155,7 @@ final class UnsupportedOptions
 
         throw FirmaException::unsupported(
             'PATCH '.implode(', ', $properties),
-            'A signing request\'s own properties cannot be changed after it has been built. Its title, its '
+            'A signing request\'s own properties and settings cannot be changed after it has been built. Its title, its '
             .'document and its field schema are one immutable snapshot, which is what lets an executed '
             .'agreement be proved against what the parties were shown. Only a field value or a recipient\'s '
             .'contact details can be patched, and only while the request is a draft.',

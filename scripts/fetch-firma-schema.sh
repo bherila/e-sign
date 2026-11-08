@@ -17,12 +17,13 @@
 
 set -euo pipefail
 
-FIRMA_SCHEMA_VERSION="${FIRMA_SCHEMA_VERSION:-v01.35.00}"
+FIRMA_SCHEMA_VERSION="${FIRMA_SCHEMA_VERSION:-v01.40.04}"
 FIRMA_SCHEMA_URL="${FIRMA_SCHEMA_URL:-https://docs.firma.dev/api-reference/${FIRMA_SCHEMA_VERSION}/openapi-${FIRMA_SCHEMA_VERSION}.json}"
 
-# SHA-256 of the bytes served for v01.35.00, retrieved 2026-09-08T06:52:14Z.
+# SHA-256 of the bytes served for v01.40.04, retrieved 2026-11-08T02:02:29Z (issue #171).
+# The previous pin, v01.35.00, is no longer served by the docs site.
 # Keep this in sync with tests/Fixtures/firma/SCHEMA.md.
-FIRMA_SCHEMA_SHA256="${FIRMA_SCHEMA_SHA256:-91c7128a35ae52ac3937715041e41c1bee119cfb69b3dcf6fdc8135a4e3c98b9}"
+FIRMA_SCHEMA_SHA256="${FIRMA_SCHEMA_SHA256:-6a05e97d3def17ed25dd5fc707bcd7fc42eba556ba11929d917ad6dd2aef2228}"
 
 output="${1:-${TMPDIR:-/tmp}/firma-openapi-${FIRMA_SCHEMA_VERSION}.json}"
 

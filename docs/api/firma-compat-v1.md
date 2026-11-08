@@ -12,7 +12,7 @@ Implements issue #33. Acceptance profile **`firma-compat-v1`**.
 |---|---|
 | Base path | `/functions/v1/signing-request-api` — upstream's `servers[0]`, verbatim |
 | Profile contract | [`docs/compatibility/firma-capability-matrix.md`](../compatibility/firma-capability-matrix.md) — every route, field, status and event, with a final status and a test reference |
-| Upstream reference | Firma Partner API v1.35.0, pinned in [`tests/Fixtures/firma/SCHEMA.md`](../../tests/Fixtures/firma/SCHEMA.md) |
+| Upstream reference | Firma Partner API v1.40.4 (re-pinned from v1.35.0, issue #171), pinned in [`tests/Fixtures/firma/SCHEMA.md`](../../tests/Fixtures/firma/SCHEMA.md) |
 | Recorded fixtures | `tests/Fixtures/firma/firma-compat-v1/` — four consumer workflows × four endpoints |
 | Routes | `routes/compat-firma.php`, mounted by `App\Providers\IntegrationServiceProvider` |
 | HTTP | `app/Http/Controllers/Compat/Firma`, `app/Http/Requests/Compat/Firma`, `app/Http/Resources/Compat/Firma`, `app/Http/Middleware/Compat` |
