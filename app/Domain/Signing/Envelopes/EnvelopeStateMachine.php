@@ -97,6 +97,7 @@ final readonly class EnvelopeStateMachine
      */
     public const TRANSITIONS = [
         'send' => ['draft'],
+        'update' => ['draft'],
         'submit_values' => ['sent', 'in_progress'],
         'set_sender_values' => ['draft', 'sent', 'in_progress'],
         'accept' => ['sent', 'in_progress'],
@@ -337,6 +338,74 @@ final readonly class EnvelopeStateMachine
      *
      * @throws IllegalTransition|FieldSubmissionRejected|StaleEnvelope
      */
+    /**
+     * Correct the name or address of draft recipients (S-5).
+     *
+     * A draft's parties may be corrected before anyone has been written to; after send, a
+     * correction is a new envelope, because the invitation has gone to the old address. The
+     * check that this is still a draft is made **under the envelope lock**, and each row is
+     * written through the recipient compare-and-swap, so a correction racing a send either
+     * lands before it (and the invitation goes to the corrected address) or is refused after
+     * it. It can no longer rewrite an address, or the identity snapshot, after the invitation
+     * was scheduled. The envelope's version advances when anything changed, so a reader holding
+     * the old view loses its own compare-and-swap.
+     *
+     * Lock order is envelope, then recipient, as everywhere else in this class.
+     *
+     * @param  array<string, array{name: string, email: string}>  $corrections  Keyed by schema recipient id.
+     * @return list<string> The schema recipient ids that actually changed.
+     *
+     * @throws IllegalTransition|StaleEnvelope
+     */
+    public function correctRecipients(Envelope $envelope, array $corrections, ?int $expectedVersion = null): array
+    {
+        return $this->withLockedEnvelope(
+            $envelope,
+            $expectedVersion,
+            function (Envelope $locked) use ($envelope, $corrections): array {
+                $this->assertLegal('update', $locked);
+
+                $changed = [];
+
+                foreach (EnvelopeRecipient::query()->where('envelope_id', $locked->getKey())->orderBy('id')->get() as $row) {
+                    $correction = $corrections[$row->schema_recipient_id] ?? null;
+
+                    if ($correction === null) {
+                        continue;
+                    }
+
+                    $lockedRow = $this->lockRecipient($row);
+
+                    if ($correction['name'] === $lockedRow->name && $correction['email'] === $lockedRow->email) {
+                        continue;
+                    }
+
+                    // The snapshot records who this party was, so it is corrected with them rather
+                    // than left describing the address the invitation is no longer going to.
+                    $snapshot = array_replace($lockedRow->identity_snapshot ?? [], [
+                        'name' => $correction['name'],
+                        'email' => $correction['email'],
+                    ]);
+
+                    $this->commitRecipient($lockedRow, [
+                        'name' => $correction['name'],
+                        'email' => $correction['email'],
+                        'identity_snapshot' => json_encode($snapshot, JSON_THROW_ON_ERROR),
+                    ]);
+
+                    $changed[] = $lockedRow->schema_recipient_id;
+                }
+
+                if ($changed !== []) {
+                    $this->commitEnvelope($locked, []);
+                    $this->syncBack($envelope, $locked);
+                }
+
+                return $changed;
+            },
+        );
+    }
+
     public function setSenderValues(
         Envelope $envelope,
         array $values,
