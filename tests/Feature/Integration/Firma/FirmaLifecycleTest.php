@@ -617,6 +617,62 @@ class FirmaLifecycleTest extends TestCase
         $this->assertFalse($users->json('results.0.required_read_only_fields.0.has_value'));
     }
 
+    /**
+     * `create-and-send` refused at its send step names the draft it kept, and that draft is the
+     * one a retry corrects and sends: no second draft, no lost submission.
+     */
+    public function test_a_refused_create_and_send_names_its_draft_and_the_draft_can_be_fixed_and_sent(): void
+    {
+        $scenario = FirmaFacadeScenario::create();
+        $issued = $scenario->credential();
+        $version = $scenario->publishedTemplate();
+        $headers = FirmaFacadeScenario::headers($issued);
+
+        $refused = $this->postJson(self::BASE.'/create-and-send', [
+            'template_id' => $version->template->public_id,
+            'name' => 'Synthetic without its prefill',
+            'recipients' => [
+                ['order' => 1, 'first_name' => 'Dana', 'email' => 'dana@buyer.example.test'],
+                ['order' => 2, 'first_name' => 'Sam', 'email' => 'sam@seller.example.test'],
+            ],
+        ], $headers)
+            ->assertStatus(422)
+            ->assertJsonPath('error', 'validation_failed')
+            ->assertJsonPath('phase', 'send_validation')
+            ->assertJsonPath('validation_errors.0.missing_fields', ['agreement_date']);
+
+        $id = (string) $refused->json('signing_request_id');
+        $draft = Envelope::query()->where('public_id', $id)->firstOrFail();
+        $this->assertSame(EnvelopeState::Draft, $draft->state);
+        $this->assertSame(1, Envelope::query()->count(), 'Exactly the one draft, and the body names it.');
+
+        $this->patchJson(self::BASE.'/'.$id, [
+            'field' => ['variable_name' => 'agreement_date', 'value' => '2026-03-15'],
+        ], $headers)->assertOk();
+
+        $this->postJson(self::BASE.'/'.$id.'/send', [], $headers)->assertOk();
+
+        $this->assertSame(EnvelopeState::Sent, $draft->refresh()->state);
+        $this->assertSame(1, Envelope::query()->count());
+    }
+
+    /**
+     * A body refused before anything is built names no draft, because there is none.
+     */
+    public function test_a_create_and_send_refused_before_creation_names_no_draft(): void
+    {
+        $scenario = FirmaFacadeScenario::create();
+        $issued = $scenario->credential();
+
+        $response = $this->postJson(self::BASE.'/create-and-send', [
+            'template_id' => '01JSYNTHETICMISSINGTEMPLATE',
+        ], FirmaFacadeScenario::headers($issued));
+
+        $this->assertGreaterThanOrEqual(400, $response->status());
+        $this->assertNull($response->json('signing_request_id'));
+        $this->assertSame(0, Envelope::query()->count());
+    }
+
     /** `/cancel`, with the reason recorded on the envelope. */
     public function test_a_sent_request_is_cancelled_with_a_reason(): void
     {
