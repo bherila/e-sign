@@ -399,8 +399,30 @@ class FirmaLifecycleTest extends TestCase
             FirmaFacadeScenario::headers($issued),
         )
             ->assertStatus(409)
+            ->assertJsonPath('error', 'ALREADY_SENT')
+            ->assertJsonPath('details.transition', 'send')
+            ->assertJsonPath('details.from', 'sent');
+    }
+
+    /**
+     * A send on a request that was withdrawn is the generic conflict, not the
+     * already-sent one: nothing went out, so there is no send to retry into.
+     */
+    public function test_sending_a_cancelled_request_is_not_already_sent(): void
+    {
+        $scenario = FirmaFacadeScenario::create();
+        $issued = $scenario->credential();
+        $envelope = $scenario->cancelled();
+
+        $this->postJson(
+            self::BASE.'/'.$envelope->public_id.'/send',
+            [],
+            FirmaFacadeScenario::headers($issued),
+        )
+            ->assertStatus(409)
             ->assertJsonPath('error', 'invalid_state')
-            ->assertJsonPath('details.transition', 'send');
+            ->assertJsonPath('details.transition', 'send')
+            ->assertJsonPath('details.from', 'cancelled');
     }
 
     /**
