@@ -303,7 +303,10 @@ final readonly class SigningRequestCreation
                 );
             }
 
-            $copies[] = ['order' => (int) ($recipient['order'] ?? PHP_INT_MAX), 'name' => self::displayName($recipient), 'email' => $email];
+            // The address stands in for a name that was not given, as it does for a recipient of
+            // a document-based request (FieldPlacement::displayName()): a schema recipient's name
+            // may not be empty, and an email-only CC is a complete CC.
+            $copies[] = ['order' => (int) ($recipient['order'] ?? PHP_INT_MAX), 'name' => self::displayName($recipient) ?? $email, 'email' => $email];
         }
 
         // Created in upstream's separate cc sequence, so the place each one is reported at

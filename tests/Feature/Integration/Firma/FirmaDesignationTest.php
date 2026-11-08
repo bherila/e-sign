@@ -15,6 +15,7 @@ use App\Domain\Signing\Envelopes\EnvelopeState;
 use App\Domain\Signing\Envelopes\RecipientState;
 use App\Domain\Signing\Models\Envelope;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Tests\Feature\Signing\EnvelopeDesignationTest;
 use Tests\Support\FirmaFacadeScenario;
@@ -85,6 +86,40 @@ class FirmaDesignationTest extends TestCase
             Artifact::query()->where('envelope_id', $envelope->getKey())->where('kind', ArtifactKind::EvidenceJson->value)->firstOrFail()->path,
         ), true);
         $this->assertSame(['signer', 'approver'], array_column($evidence['attestation_chain'], 'designation'));
+    }
+
+    /**
+     * A cc recipient sorts first (stage 0) and is never invited, so it must never be the
+     * `first_signer` a create-and-send response hands back a link for.
+     */
+    public function test_create_and_send_names_the_first_signer_and_never_a_cc_recipient(): void
+    {
+        // The production default: invitations go out on the queue, so when the response is built
+        // nobody has an `invited_at` yet and the answer has to come from the recipients alone.
+        Queue::fake();
+        [, $issued] = $this->scenario();
+
+        $created = $this->postJson(self::BASE.'/create-and-send', self::documentRequest(), FirmaFacadeScenario::headers($issued))
+            ->assertStatus(201);
+
+        $this->assertSame('dana@buyer.example.test', $created->json('first_signer.email'));
+    }
+
+    public function test_an_email_only_cc_is_added_to_a_template_request(): void
+    {
+        [$scenario, $issued] = $this->scenario();
+        $version = $scenario->publishedTemplate(EnvelopeDesignationTest::schemaWithApproverAndCc(), 'Synthetic approval template');
+
+        $created = $this->postJson(self::BASE, [
+            'template_id' => $version->template->public_id,
+            'recipients' => [['email' => 'audit@cc.example.test', 'designation' => 'CC', 'order' => 1]],
+        ], FirmaFacadeScenario::headers($issued))->assertStatus(201);
+
+        $copy = Envelope::query()->where('public_id', $created->json('id'))->firstOrFail()
+            ->recipients()->where('email', 'audit@cc.example.test')->firstOrFail();
+
+        $this->assertSame('audit@cc.example.test', $copy->name);
+        $this->assertSame(RecipientState::Copied, $copy->state);
     }
 
     public function test_the_webhook_payload_and_the_facade_spell_designations_the_same_way(): void
