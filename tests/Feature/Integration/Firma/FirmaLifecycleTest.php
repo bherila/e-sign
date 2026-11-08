@@ -399,7 +399,7 @@ class FirmaLifecycleTest extends TestCase
             FirmaFacadeScenario::headers($issued),
         )
             ->assertStatus(409)
-            ->assertJsonPath('error', 'ALREADY_SENT')
+            ->assertJsonPath('error', 'already_sent')
             ->assertJsonPath('details.transition', 'send')
             ->assertJsonPath('details.from', 'sent');
     }
@@ -423,6 +423,40 @@ class FirmaLifecycleTest extends TestCase
             ->assertJsonPath('error', 'invalid_state')
             ->assertJsonPath('details.transition', 'send')
             ->assertJsonPath('details.from', 'cancelled');
+    }
+
+    /**
+     * A body over the documented 6 MiB ceiling is refused in this surface's envelope
+     * before anything is parsed or created.
+     */
+    public function test_a_body_over_the_size_limit_is_refused_before_anything_is_created(): void
+    {
+        $scenario = FirmaFacadeScenario::create();
+        $issued = $scenario->credential();
+        $before = Envelope::query()->count();
+
+        $this->postJson(self::BASE, [
+            'name' => 'Synthetic oversized',
+            'document' => str_repeat('A', 6_291_457),
+        ], FirmaFacadeScenario::headers($issued))
+            ->assertStatus(413)
+            ->assertJsonPath('error', 'request_too_large');
+
+        $this->assertSame($before, Envelope::query()->count());
+    }
+
+    /** A body under the ceiling is judged on its contents, never refused for its size. */
+    public function test_a_body_under_the_size_limit_is_not_refused_for_its_size(): void
+    {
+        $scenario = FirmaFacadeScenario::create();
+        $issued = $scenario->credential();
+
+        $response = $this->postJson(self::BASE, [
+            'name' => 'Synthetic under the ceiling',
+            'document' => str_repeat('A', 6_000_000),
+        ], FirmaFacadeScenario::headers($issued));
+
+        $this->assertNotSame(413, $response->getStatusCode());
     }
 
     /**
