@@ -58,6 +58,7 @@ for frontend changes `pnpm run type-check && pnpm run lint && pnpm run test && p
 | Eight committed artifacts validated by pyHanko, each against a **required outcome** in a manifest — matched on the stated verdict, not the exit status | `validation` CI job, `scripts/validate-seal.sh`, `tests/Fixtures/validation/manifest.tsv`, `tests/Feature/Evidence/ValidationFixturesTest.php` |
 | Modified content, over-claimed `/ByteRange`, truncation, an appended incremental revision, a spliced foreign CMS, and an untrusted signer each required to fail | `tests/Feature/Evidence/SealedArtifactTamperingTest.php` (9 cases), same manifest |
 | An untrusted TSA required to fail on TSA trust alone, so "signed" is not confused with "trusted" | `sealed-b-t-untrusted-tsa.pdf`, required `invalid` |
+| B-T reached offline against a local RFC 3161 authority, and a bad response — empty, malformed, a `rejection` status, trailing bytes, another request's imprint or nonce, an altered signature, an expired TSA certificate — each failing the seal with no artifact and no downgrade to B-B; never skipped | `tests/Feature/Evidence/TimestampResponseRejectionTest.php` (9 cases), `tests/Support/FakeTimestampAuthority.php` |
 | The sealer re-reads its own output and refuses an artifact below the requested level, or signed by other material | `tests/Feature/Evidence/TcLibPdfSealerTest.php` |
 | Unusable material — expired, mismatched key, wrong passphrase, unsupported digest, absent — each a typed exception | `tests/Unit/Evidence/SealMaterialTest.php` |
 
