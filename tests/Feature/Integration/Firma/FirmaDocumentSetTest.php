@@ -23,8 +23,8 @@ use Tests\TestCase;
  * The read side of a document set on the Firma facade (issue #163): `documents[]` on the
  * polling response, and `GET /signing-requests/{id}/documents/{document_id}/download`.
  *
- * The write side — `POST /documents`, `document_ids`, and editing a draft's set — is not in this
- * build and still answers 501 by name.
+ * The write side — uploads, `document_ids`, and editing a draft's set (issue #182) — is
+ * FirmaDocumentSetWriteTest.
  */
 class FirmaDocumentSetTest extends TestCase
 {
@@ -134,16 +134,28 @@ class FirmaDocumentSetTest extends TestCase
         $this->assertContains(4, array_column($body['fields'], 'page_number'));
     }
 
-    public function test_editing_a_set_is_not_in_this_build_and_says_so(): void
+    /**
+     * Once sent, a set is locked: upstream's `409 DOCUMENT_SET_LOCKED` on every mutation, checked
+     * before anything about the body is looked at.
+     */
+    public function test_a_sent_sets_documents_are_locked(): void
     {
         $scenario = FirmaFacadeScenario::create();
         $issued = $scenario->credential();
         $headers = FirmaFacadeScenario::headers($issued);
         [$envelope] = $this->sentSet($scenario);
+        $ids = array_column($this->getJson(self::BASE.'/'.$envelope->public_id, $headers)->json('documents'), 'document_id');
 
-        $this->postJson(self::BASE.'/'.$envelope->public_id.'/documents', [], $headers)->assertStatus(501);
-        $this->putJson(self::BASE.'/'.$envelope->public_id.'/documents/order', [], $headers)->assertStatus(501);
-        $this->postJson('/functions/v1/signing-request-api/documents', [], $headers)->assertStatus(501);
+        $this->postJson(self::BASE.'/'.$envelope->public_id.'/documents', ['document_id' => '01JSYNTHETICUPLOAD00000000'], $headers)
+            ->assertStatus(409)->assertJsonPath('error', 'document_set_locked');
+        $this->putJson(self::BASE.'/'.$envelope->public_id.'/documents/order', ['document_ids' => array_reverse($ids)], $headers)
+            ->assertStatus(409)->assertJsonPath('error', 'document_set_locked');
+        $this->patchJson(self::BASE.'/'.$envelope->public_id.'/documents/'.$ids[0], ['label' => 'Renamed'], $headers)
+            ->assertStatus(409)->assertJsonPath('error', 'document_set_locked');
+        $this->deleteJson(self::BASE.'/'.$envelope->public_id.'/documents/'.$ids[1], [], $headers)
+            ->assertStatus(409)->assertJsonPath('error', 'document_set_locked');
+
+        $this->assertSame(1, $envelope->refresh()->documents_version);
     }
 
     /**

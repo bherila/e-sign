@@ -121,6 +121,7 @@ class SigningRequestController extends Controller
     {
         $envelope = $request->signingRequest();
         [$kind, $payload] = $request->target();
+        $request->guardLayoutVersion($envelope, $kind === 'field');
 
         if ($kind === 'field') {
             return response()->json($this->patchField($request, $envelope, $payload));

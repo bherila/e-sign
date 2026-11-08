@@ -885,7 +885,9 @@ class FirmaCreateAndSendTest extends TestCase
             'recipients' => [['first_name' => 'Dana', 'email' => 'dana@buyer.example.test', 'order' => 1]],
         ], FirmaFacadeScenario::headers($issued))
             ->assertStatus(400)
-            ->assertJsonPath('error', 'invalid_request');
+            // Upstream's code for more than one source (reference v1.39.0, issue #182).
+            ->assertJsonPath('error', 'conflicting_document_source')
+            ->assertJsonPath('details.sources', ['template_id', 'document']);
     }
 
     /**

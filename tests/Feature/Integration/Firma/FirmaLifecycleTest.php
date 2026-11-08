@@ -532,9 +532,15 @@ class FirmaLifecycleTest extends TestCase
             ],
         ];
 
+        // `document_id` and `document_ids` are honoured now (issue #182), so beside a template
+        // they are a second source rather than an unsupported member.
+        foreach (['document_ids' => ['01JSYNTHETICDOCUMENT000000'], 'document_id' => '01JSYNTHETICDOCUMENT000000'] as $key => $value) {
+            $this->postJson(self::BASE, $base + [$key => $value], FirmaFacadeScenario::headers($issued))
+                ->assertStatus(400)
+                ->assertJsonPath('error', 'conflicting_document_source');
+        }
+
         foreach ([
-            'document_ids' => ['document_ids' => ['01JSYNTHETICDOCUMENT000000']],
-            'document_id' => ['document_id' => '01JSYNTHETICDOCUMENT000000'],
             'seal_participants' => ['seal_participants' => [['seal_id' => 'synthetic', 'order' => 1]]],
             'fields[].seal_attribute' => ['fields' => [['variable_name' => 'agreement_date', 'seal_attribute' => 'name']]],
         ] as $option => $extra) {

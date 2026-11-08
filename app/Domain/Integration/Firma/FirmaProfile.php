@@ -88,6 +88,26 @@ final class FirmaProfile
      */
     public const MAX_INLINE_DOCUMENT_BYTES = 4_718_592;
 
+    /**
+     * Upstream's ceiling for one document uploaded through `POST /documents` (50 MB), the
+     * two-step route for a file too large for a JSON body (issue #182).
+     */
+    public const MAX_UPLOAD_BYTES = 52_428_800;
+
+    /**
+     * How long the URL a large upload is PUT to stays valid. The same fifteen minutes as every
+     * download link this facade issues, and signed rather than advisory
+     * ({@see DownloadUrlIssuer}).
+     */
+    public const UPLOAD_URL_TTL_MINUTES = 15;
+
+    /**
+     * How long an uploaded document's `document_id` can be used before it expires. Upstream calls
+     * it a temporary upload and does not say for how long; a day is long enough for a client to
+     * upload a set and build its request, and short enough that an id found in a log is stale.
+     */
+    public const UPLOAD_USABLE_HOURS = 24;
+
     /** Upstream's `designation` for a native one. */
     public static function designationOf(?RecipientDesignation $designation): string
     {

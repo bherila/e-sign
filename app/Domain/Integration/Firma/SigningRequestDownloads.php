@@ -7,8 +7,10 @@ namespace App\Domain\Integration\Firma;
 use App\Domain\Evidence\Finalization\ArtifactDownloader;
 use App\Domain\Evidence\Finalization\Artifacts\Artifact;
 use App\Domain\Evidence\Finalization\Artifacts\ArtifactKind;
+use App\Domain\Integration\Firma\Uploads\FirmaDocumentUpload;
 use App\Domain\Integration\Native\FinalizedArtifactLocator;
 use App\Domain\Preparation\Documents\DocumentBlobStore;
+use App\Domain\Preparation\Documents\DocumentSet;
 use App\Domain\Preparation\Documents\DocumentSetEntry;
 use App\Domain\Preparation\Documents\Models\DocumentRevision;
 use App\Domain\Signing\Envelopes\EnvelopeState;
@@ -226,7 +228,7 @@ final readonly class SigningRequestDownloads
         $member = DownloadUrlIssuer::parseMember($kind);
 
         if ($member !== null) {
-            return $this->streamMember($envelope, $member['position'], $member['type']);
+            return $this->streamMember($envelope, $member['document_id'], $member['type']);
         }
 
         return match ($kind) {
@@ -293,7 +295,7 @@ final readonly class SigningRequestDownloads
         $expiresAt = $this->urls->expiresAt($now);
 
         return [
-            'download_url' => $this->urls->urlFor($envelope, DownloadUrlIssuer::member($entry->position, $type), $expiresAt),
+            'download_url' => $this->urls->urlFor($envelope, DownloadUrlIssuer::member((string) $entry->publicId, $type), $expiresAt),
             'type' => $type,
             'expires_at' => $expiresAt->toIso8601String(),
         ];
@@ -312,6 +314,7 @@ final readonly class SigningRequestDownloads
     {
         $set = $envelope->documentSet();
         $summaries = [];
+        $fileNames = self::uploadedFileNames($set);
 
         foreach ($set->entries as $entry) {
             $sealed = $set->isMultiple() && $envelope->state === EnvelopeState::Completed
@@ -320,15 +323,15 @@ final readonly class SigningRequestDownloads
 
             $url = match (true) {
                 ! $set->isMultiple() => $this->documentUrl($envelope, $expiresAt),
-                $sealed instanceof Artifact => $this->urls->urlFor($envelope, DownloadUrlIssuer::member($entry->position, 'document'), $expiresAt),
-                default => $this->urls->urlFor($envelope, DownloadUrlIssuer::member($entry->position, 'original'), $expiresAt),
+                $sealed instanceof Artifact => $this->urls->urlFor($envelope, DownloadUrlIssuer::member((string) $entry->publicId, 'document'), $expiresAt),
+                default => $this->urls->urlFor($envelope, DownloadUrlIssuer::member((string) $entry->publicId, 'original'), $expiresAt),
             };
 
             $summaries[] = [
                 'document_id' => $entry->publicId,
                 'position' => $entry->position,
                 'label' => $entry->title === '' ? null : $entry->title,
-                'original_filename' => null,
+                'original_filename' => $fileNames[$entry->revisionId] ?? null,
                 'page_count' => $entry->pageCount,
                 'document_url' => $url,
                 'document_url_kind' => $sealed instanceof Artifact ? 'signed' : 'stored',
@@ -337,6 +340,35 @@ final readonly class SigningRequestDownloads
         }
 
         return $summaries;
+    }
+
+    /**
+     * The file name each member was uploaded under through `POST /documents` (issue #182), by
+     * revision id. A document that arrived some other way — inline, or through the native API —
+     * has none recorded, and upstream's member is then null.
+     *
+     * @return array<int, string>
+     */
+    private static function uploadedFileNames(DocumentSet $set): array
+    {
+        $documents = DocumentRevision::query()
+            ->whereIn('id', array_map(static fn (DocumentSetEntry $entry): int => $entry->revisionId, $set->entries))
+            ->pluck('document_id', 'id');
+
+        $names = FirmaDocumentUpload::query()
+            ->whereIn('document_id', $documents->values()->all())
+            ->orderBy('id')
+            ->pluck('file_name', 'document_id');
+
+        $byRevision = [];
+
+        foreach ($documents as $revisionId => $documentId) {
+            if (isset($names[$documentId])) {
+                $byRevision[(int) $revisionId] = (string) $names[$documentId];
+            }
+        }
+
+        return $byRevision;
     }
 
     /** @throws FirmaException */
@@ -352,16 +384,23 @@ final readonly class SigningRequestDownloads
     }
 
     /** @throws FirmaException */
-    private function streamMember(Envelope $envelope, int $position, string $type): StreamedResponse
+    private function streamMember(Envelope $envelope, string $documentId, string $type): StreamedResponse
     {
-        $entry = $envelope->documentSet()->entryAt($position);
+        $entry = null;
 
-        if ($entry === null || $entry->publicId === null) {
+        foreach ($envelope->documentSet()->entries as $candidate) {
+            if ($candidate->publicId !== null && hash_equals($candidate->publicId, $documentId)) {
+                $entry = $candidate;
+            }
+        }
+
+        if ($entry === null) {
+            // Removed from the draft since the link was issued.
             throw FirmaException::notFound('download');
         }
 
         if ($type === 'document') {
-            return $this->downloader->stream($this->memberArtifact($envelope, $position));
+            return $this->downloader->stream($this->memberArtifact($envelope, $entry->position));
         }
 
         $revision = DocumentRevision::query()->with('document')->find($entry->revisionId);

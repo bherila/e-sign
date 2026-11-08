@@ -15,15 +15,19 @@ use App\Domain\Preparation\Schema\RecipientDesignation;
 use App\Domain\Preparation\Schema\SchemaVersion;
 use App\Domain\Preparation\Templates\Models\Template;
 use App\Domain\Preparation\Templates\Models\TemplateVersion;
+use App\Domain\Signing\Envelopes\DocumentSetChange;
 use App\Domain\Signing\Envelopes\EnvelopeFactory;
 use App\Domain\Signing\Envelopes\EnvelopeSourceSnapshot;
 use App\Domain\Signing\Envelopes\EnvelopeState;
 use App\Domain\Signing\Envelopes\EnvelopeStateMachine;
+use App\Domain\Signing\Exceptions\DocumentSetChangeRejected;
 use App\Domain\Signing\Exceptions\IllegalTransition;
 use App\Domain\Signing\Exceptions\InvalidEnvelopeSnapshot;
 use App\Domain\Signing\Exceptions\SendPreconditionsFailed;
+use App\Domain\Signing\Exceptions\StaleEnvelope;
 use App\Domain\Signing\Models\Envelope;
 use App\Domain\Signing\Models\EnvelopeRecipient;
+use Closure;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -194,6 +198,49 @@ final readonly class EnvelopeService
                     ],
                 );
             }
+
+            return $this->reload($envelope);
+        });
+    }
+
+    /**
+     * Change a draft's document set (issue #182), through the state machine, with an audit event.
+     *
+     * `$before` runs first inside the same transaction — the facade uses it to claim the upload a
+     * change uses — so a change the state machine refuses leaves nothing claimed.
+     *
+     * @param  Closure(DocumentSet): DocumentSetChange  $change
+     * @param  (Closure(): void)|null  $before
+     *
+     * @throws IllegalTransition|StaleEnvelope|DocumentSetChangeRejected
+     */
+    public function changeDocumentSet(
+        Envelope $envelope,
+        Closure $change,
+        ?ServiceCredential $credential = null,
+        ?Closure $before = null,
+    ): Envelope {
+        return DB::transaction(function () use ($envelope, $change, $credential, $before): Envelope {
+            if ($before !== null) {
+                $before();
+            }
+
+            $result = $this->machine->changeDocumentSet($envelope, $change);
+
+            $this->audit->record(
+                $this->actor($credential),
+                'integration.envelope.document_set_changed',
+                $envelope,
+                [
+                    'envelope' => $envelope->public_id,
+                    'operation' => $result->operation,
+                    'document_id' => $result->documentId,
+                    'documents' => count($result->members),
+                    'document_sha256' => $envelope->document_sha256,
+                    'documents_version' => $envelope->documents_version,
+                    'documents_layout_version' => $envelope->documents_layout_version,
+                ],
+            );
 
             return $this->reload($envelope);
         });

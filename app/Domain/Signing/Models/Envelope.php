@@ -70,6 +70,8 @@ use RuntimeException;
  * @property SigningMode $signing_mode
  * @property EnvelopeState $state
  * @property int $version
+ * @property int $documents_version Advances on every change to the document set (issue #182).
+ * @property int $documents_layout_version Advances only when the set's pages move.
  * @property int|null $expiration_hours
  * @property CarbonImmutable|null $sent_at
  * @property CarbonImmutable|null $completed_at
@@ -166,6 +168,8 @@ class Envelope extends Model
             'signing_mode' => SigningMode::class,
             'state' => EnvelopeState::class,
             'version' => 'integer',
+            'documents_version' => 'integer',
+            'documents_layout_version' => 'integer',
             'require_otp' => 'boolean',
             'allow_decline' => 'boolean',
             'show_save_for_later' => 'boolean',

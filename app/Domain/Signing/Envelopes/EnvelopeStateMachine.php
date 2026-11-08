@@ -9,6 +9,9 @@ use App\Domain\Preparation\Anchoring\AnchorOmission;
 use App\Domain\Preparation\Anchoring\AnchorResolutionDefect;
 use App\Domain\Preparation\Anchoring\AnchorResolutionFailed;
 use App\Domain\Preparation\Anchoring\AnchorResolutionOutcome;
+use App\Domain\Preparation\Documents\DocumentSet;
+use App\Domain\Preparation\Documents\DocumentSetEntry;
+use App\Domain\Preparation\Documents\Models\DocumentRevision;
 use App\Domain\Preparation\Schema\FieldDefinition;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\RecipientDesignation;
@@ -17,6 +20,7 @@ use App\Domain\Signing\Contracts\AssurancePolicyCheck;
 use App\Domain\Signing\Contracts\EnvelopeEventSink;
 use App\Domain\Signing\Exceptions\ConsentMismatch;
 use App\Domain\Signing\Exceptions\DeclineNotAllowed;
+use App\Domain\Signing\Exceptions\DocumentSetChangeRejected;
 use App\Domain\Signing\Exceptions\FieldSubmissionRejected;
 use App\Domain\Signing\Exceptions\IllegalTransition;
 use App\Domain\Signing\Exceptions\MissingArtifactReference;
@@ -30,6 +34,7 @@ use App\Domain\Signing\Fields\FieldMateriality;
 use App\Domain\Signing\Fields\FieldValueValidator;
 use App\Domain\Signing\Fields\MaterialValues;
 use App\Domain\Signing\Models\Envelope;
+use App\Domain\Signing\Models\EnvelopeDocument;
 use App\Domain\Signing\Models\EnvelopeFieldValue;
 use App\Domain\Signing\Models\EnvelopeRecipient;
 use App\Domain\Signing\Models\RecipientAttestation;
@@ -37,6 +42,7 @@ use Carbon\CarbonImmutable;
 use Closure;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use InvalidArgumentException;
 
 /**
@@ -98,6 +104,7 @@ final readonly class EnvelopeStateMachine
     public const TRANSITIONS = [
         'send' => ['draft'],
         'update' => ['draft'],
+        'change_documents' => ['draft'],
         'submit_values' => ['sent', 'in_progress'],
         'set_sender_values' => ['draft', 'sent', 'in_progress'],
         'accept' => ['sent', 'in_progress'],
@@ -403,6 +410,84 @@ final readonly class EnvelopeStateMachine
                 }
 
                 return $changed;
+            },
+        );
+    }
+
+    /**
+     * Change a draft's document set (issue #182): add, reorder, replace, rename or remove one.
+     *
+     * Draft only. Nobody has been invited, so nobody has reviewed anything: docs/HANDOFF.md
+     * section 6 invariant 4 freezes content at the first acceptance, and before send this is the
+     * last cheap moment to change it, exactly as it is for prefills and recipients. After send
+     * the transition is illegal and the surfaces answer that the set is locked.
+     *
+     * The change is computed from the set **as locked**, so two concurrent edits cannot both
+     * apply to the set they each read: the second either sees the first's result or loses the
+     * compare-and-swap. Everything that moves commits in one statement with the version: the set's
+     * rows, the first document, the digest an acceptance will bind, the copied field schema with
+     * each field carried to its page's new absolute number, and the two set counters. A field on a
+     * page the change removes refuses the change; nothing is moved, dropped or guessed.
+     *
+     * `envelopes.document_revision_id`, `document_sha256` and `field_schema` are snapshot columns
+     * that the model refuses to change through an ordinary save. This is the one reviewed path,
+     * like anchor resolution at send: a query-builder compare-and-swap under the envelope lock, on
+     * a draft.
+     *
+     * @param  Closure(DocumentSet): DocumentSetChange  $change
+     *
+     * @throws IllegalTransition|StaleEnvelope|DocumentSetChangeRejected
+     */
+    public function changeDocumentSet(Envelope $envelope, Closure $change, ?int $expectedVersion = null): DocumentSetChange
+    {
+        return $this->withLockedEnvelope(
+            $envelope,
+            $expectedVersion,
+            function (Envelope $locked) use ($envelope, $change): DocumentSetChange {
+                $this->assertLegal('change_documents', $locked);
+
+                $result = $change($locked->documentSet());
+                $next = DocumentSet::of(array_map(static fn (array $member): array => [
+                    'revision_id' => $member['revision_id'],
+                    'title' => $member['title'],
+                    'sha256' => $member['sha256'],
+                    'page_count' => $member['page_count'],
+                    'public_id' => $member['public_id'],
+                ], $result->members));
+
+                $this->assertSetWithinLimits($locked, $next);
+
+                $schemaChanges = $this->schemaFollowingPages($locked, $result);
+
+                // Rows are replaced wholesale: positions are unique per envelope, so moving them
+                // in place would collide midway. Each keeps its public id, which is the
+                // document_id a caller holds, and a new document is given one.
+                EnvelopeDocument::query()->where('envelope_id', $locked->getKey())->delete();
+
+                foreach ($next->entries as $entry) {
+                    (new EnvelopeDocument)->forceFill([
+                        'public_id' => $entry->publicId ?? (string) Str::ulid(),
+                        'envelope_id' => $locked->getKey(),
+                        'position' => $entry->position,
+                        'document_revision_id' => $entry->revisionId,
+                        'title' => $entry->title,
+                        'sha256' => $entry->sha256,
+                        'page_count' => $entry->pageCount,
+                        'first_page' => $entry->firstPage,
+                    ])->save();
+                }
+
+                $this->commitEnvelope($locked, [
+                    'document_revision_id' => $next->first()->revisionId,
+                    'document_sha256' => $next->digest(),
+                    'documents_version' => $locked->documents_version + 1,
+                    'documents_layout_version' => $locked->documents_layout_version + ($result->layoutChanged ? 1 : 0),
+                    ...$schemaChanges,
+                ]);
+
+                $this->syncBack($envelope, $locked);
+
+                return $result;
             },
         );
     }
@@ -879,6 +964,88 @@ final readonly class EnvelopeStateMachine
     // ---------------------------------------------------------------------------------
     // Locking, compare-and-swap, and the legality table
     // ---------------------------------------------------------------------------------
+
+    /**
+     * Upstream's per-set limits, and the tenancy of every member: a revision of another
+     * workspace's document is as absent here as anywhere else.
+     *
+     * @throws DocumentSetChangeRejected
+     */
+    private function assertSetWithinLimits(Envelope $locked, DocumentSet $next): void
+    {
+        if ($next->count() > DocumentSet::MAX_DOCUMENTS) {
+            throw DocumentSetChangeRejected::tooMany(DocumentSet::MAX_DOCUMENTS);
+        }
+
+        $revisions = DocumentRevision::query()
+            ->with('document')
+            ->whereIn('id', array_map(static fn (DocumentSetEntry $entry): int => $entry->revisionId, $next->entries))
+            ->get()
+            ->keyBy('id');
+
+        $bytes = 0;
+
+        foreach ($next->entries as $entry) {
+            $revision = $revisions->get($entry->revisionId);
+
+            if (! $revision instanceof DocumentRevision || $revision->document?->workspace_id !== $locked->workspace_id) {
+                throw DocumentSetChangeRejected::notFound((string) ($entry->publicId ?? $entry->revisionId));
+            }
+
+            $bytes += (int) $revision->bytes;
+        }
+
+        if ($bytes > DocumentSet::MAX_TOTAL_BYTES) {
+            throw DocumentSetChangeRejected::tooLarge($bytes, DocumentSet::MAX_TOTAL_BYTES);
+        }
+    }
+
+    /**
+     * The copied field schema with every field on its page's new absolute number, or nothing
+     * when no field moves — so a rename or a replacement leaves the schema, and its digest,
+     * byte-for-byte as they were.
+     *
+     * @return array<string, string>
+     *
+     * @throws DocumentSetChangeRejected
+     */
+    private function schemaFollowingPages(Envelope $locked, DocumentSetChange $change): array
+    {
+        $schema = $locked->fieldSchema();
+        $fields = [];
+        $stranded = [];
+        $moved = false;
+
+        foreach ($schema->fields as $field) {
+            $page = $change->pageMap[$field->page] ?? null;
+
+            if ($page === null) {
+                $stranded[] = $field->id;
+
+                continue;
+            }
+
+            $moved = $moved || $page !== $field->page;
+            $fields[] = $page === $field->page ? $field : $field->onPage($page);
+        }
+
+        if ($stranded !== []) {
+            throw DocumentSetChangeRejected::fieldsOnDocument((string) $change->documentId, $stranded);
+        }
+
+        if (! $moved) {
+            return [];
+        }
+
+        $rewritten = $schema->withFields($fields);
+
+        return [
+            // Encoded here for the reason resolvedSchemaChanges() gives: a query-builder update
+            // does not apply the model's casts.
+            'field_schema' => json_encode($rewritten->toArray(), JSON_THROW_ON_ERROR),
+            'field_schema_sha256' => hash('sha256', $rewritten->canonicalJson()),
+        ];
+    }
 
     /**
      * Run `$work` against a locked, version-checked copy of the envelope.

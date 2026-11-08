@@ -83,7 +83,7 @@ Two gates, and a caller passes both.
 |---|---|
 | `compat:firma-v1` | **Admission to this surface.** Required on every route here. Grants no resource authority of its own. |
 | `envelopes:read` | `GET /signing-requests/{id}`, `/users`, `/fields`, `/download`, `/documents/{document_id}/download` |
-| `envelopes:write` | `POST /signing-requests`, `/create-and-send`, `PATCH`, `/send`, `/cancel` |
+| `envelopes:write` | `POST /signing-requests`, `/create-and-send`, `PATCH`, `/send`, `/cancel`, both document uploads, and a draft's `/documents` changes |
 | `templates:read` | additionally required by **any create that supplies `template_id`**, on either create route |
 
 **Nothing is implied.** A credential issued for `/api/v1` does not gain a second HTTP surface
@@ -168,10 +168,23 @@ appears only when there is something structured to say. This is **not** the nati
 | `unauthorized` | 401 | No key, or one that is unknown, revoked, or expired |
 | `forbidden` | 403 | Valid key, missing scope (`details.required_scope`), or an expired/edited download link |
 | `not_found` | 404 | No such signing request **in your workspace** — identical to one that does not exist |
+| `conflicting_document_source` | 400 | More than one of `template_id`, `document`, `document_id`, `document_ids` (`details.sources`) |
+| `duplicate_document_id` | 400 | An upload named twice in `document_ids` |
+| `max_documents_exceeded` | 400 | More than 20 documents in one set |
+| `document_upload_not_found` | 400 | An upload id that is unknown in your workspace, expired, or already used (`details.document_id`) |
+| `invalid_document_order` | 400 | A reorder that does not name every document exactly once |
+| `min_documents_required` | 400 | Removing the last document |
+| `page_count_mismatch` | 400 | A replacement with a different number of pages |
+| `dimension_mismatch` | 400 | A replacement with a page of a different size (`details.page`) |
+| `document_not_found` | 404 | No document with that id in this signing request |
 | `invalid_state` | 409 | The move is illegal from this state (`details.transition`, `details.from`) |
+| `document_set_locked` | 409 | A change to the documents of a request that is no longer a draft |
+| `document_set_version_conflict` | 409 | A `documents_layout_version` that is not the current one (`details.documents_layout_version`) |
+| `documents_layout_version_required` | 409 | A field write on a multi-document request without `documents_layout_version` |
 | `already_sent` | 409 | A send attempted on a request that has already been sent (`details.transition`, `details.from`) |
 | `no_document_available` | 409 | Asked for a document before the request was sent |
 | `request_too_large` | 413 | The request body is over this surface's 6 MiB ceiling |
+| `document_set_too_large` | 413 | A set over 100 MB, or an upload's bytes over its declared `file_size` |
 | `unprocessable_entity` | 422 | Not sendable, or a template with no published version (`details.problems`) |
 | `validation_failed` | 422 | `create-and-send` two-phase validation; see below |
 | `unsupported` | 501 | Declared upstream, not implemented here (`details.unsupported_option`) |
@@ -219,7 +232,7 @@ Refused options, and why each one:
 | Option | Why |
 |---|---|
 | `settings.hand_drawn_only: true` | The template's `signature_appearance` records a *preference* and **nothing in the signing flow enforces it** — a typed signature is accepted whatever it says. Recording the option would promise an assurance nothing keeps. |
-| `settings.allow_editing_before_sending: true` | A request's document and field schema are one immutable snapshot; a correction is a new request with renewed signatures. |
+| `settings.allow_editing_before_sending: true` | Upstream: "allow editing fields before sending". A draft's fields are one snapshot and are not edited here; its documents can change through the `/documents` routes, each field moving with its page, and a correction after send is a new request with renewed signatures. |
 | `settings.attach_pdf_on_finish: true` | The completion email carries an authorized link, not the bytes. |
 | `settings.identity_editable_fields` | Who signed is recorded in their attestation; an editable identity field would let that record change after the fact. |
 | `notify_signers: false` on cancel | Which parties a withdrawal notice reaches is decided by the service — everyone written to, nobody who was not. Accepting `false` and mailing anyway would make the response untrue. |
@@ -229,7 +242,8 @@ Refused options, and why each one:
 | `fields[].type` in `dropdown`, `file`, `image`, `number`, `radio`, `radio_buttons`, `stamp`, `url` | Declared upstream, not placeable here. Never coerced into a text box: a field a signer was never asked to complete is worse than a rejected request. |
 | PATCH properties (`name`, `description`, `expiration_hours`) | The title is part of the immutable snapshot. |
 | PATCH `field.prefilled_editable` / `field.read_only` that **changes** the field | Editability belongs to the copied schema. A value that agrees with the field is honoured as the no-op it is. |
-| `document_id` on create | `POST /documents` is out of profile, so you cannot obtain one here; accepting the field would accept an id we never issued. |
+| `content_type` other than `application/pdf` on `POST /documents` | Upstream converts a Word document to PDF; this build does not. The sender makes the PDF every party reviews. |
+| `fields[].anchor` with `document_ids` of more than one document | Which document an anchor's text is in is not said per field; place fields by `page_number` across the set. |
 
 Sending `hand_drawn_only: false`, or `null`, is not a request for anything and passes.
 
@@ -302,7 +316,10 @@ Here there is one unit — the profile's own, percentages of the page.
 
 | Method | Path | Scope | Notes |
 |---|---|---|---|
-| `POST` | `/signing-requests` | `envelopes:write` | A draft, from a `template_id` or an inline `document` |
+| `POST` | `/documents/inline` | `envelopes:write` | **Upload a small document** (PDF up to 4.5 MB) in one call: base64 in the body. Answers a `document_id`. This facade's addition |
+| `POST` | `/documents` | `envelopes:write` | **Upload a large document** (PDF up to 50 MB), step one: answers a `document_id` and an `upload_url` |
+| `PUT` | `/documents/uploads/{document_id}` | — | **Upload a large document**, step two: the raw bytes, to the `upload_url`. Signed URL, no API key |
+| `POST` | `/signing-requests` | `envelopes:write` | A draft, from a `template_id`, an inline `document`, an uploaded `document_id`, or `document_ids` (a set) |
 | `POST` | `/signing-requests/create-and-send` | `envelopes:write` + `templates:read` | Create and release in one call |
 | `GET` | `/signing-requests/{id}` | `envelopes:read` | The polling endpoint |
 | `PATCH` | `/signing-requests/{id}` | `envelopes:write` | One `field` or one `recipient`, drafts only |
@@ -312,7 +329,64 @@ Here there is one unit — the profile's own, percentages of the page.
 | `GET` | `/signing-requests/{id}/fields` | `envelopes:read` | `{results: […]}`, `?include=images` |
 | `GET` | `/signing-requests/{id}/download` | `envelopes:read` | JSON with a short-lived `download_url` |
 | `GET` | `/signing-requests/{id}/documents/{document_id}/download` | `envelopes:read` | One document of a set: JSON with a short-lived `download_url`; `type=original` (default) or `document` (its own sealed copy, after completion) |
+| `POST` | `/signing-requests/{id}/documents` | `envelopes:write` | Add an uploaded document to a draft, at `position` or last |
+| `PUT` | `/signing-requests/{id}/documents/order` | `envelopes:write` | Reorder a draft's documents: `document_ids`, every one exactly once |
+| `PATCH` | `/signing-requests/{id}/documents/{document_id}` | `envelopes:write` | Replace a draft's document with an upload (`document_id`), or rename it (`label`) |
+| `DELETE` | `/signing-requests/{id}/documents/{document_id}` | `envelopes:write` | Remove a document from a draft; never the last |
 | `GET` | `/downloads/{token}` | — | The bytes. Signed URL, no API key |
+
+### Uploading a document: which route
+
+| You have | Use | Calls |
+|---|---|---|
+| A PDF up to 4.5 MB | **Upload a small document**: `POST /documents/inline` with `{ "file_name", "document": "<base64>" }` | one |
+| A PDF up to 50 MB | **Upload a large document**: `POST /documents` with `{ "file_name", "file_size", "content_type": "application/pdf" }`, then `PUT` the raw bytes to the `upload_url` it returns, with `Content-Type: application/pdf` and no API key | two |
+| One PDF up to 4.5 MB and nothing else to do with it | Skip the upload: send it as `document` on `POST /signing-requests` | none |
+
+Either upload answers a `document_id`: pass it as `document_id`, or several in order as
+`document_ids`, on `POST /signing-requests` or `/create-and-send`, or to a draft's `/documents`
+routes. An upload is **used once** and expires 24 hours after it was requested; a used,
+expired or unknown one is `400 document_upload_not_found`. The `upload_url` expires in 15
+minutes (`expires_in`, seconds) and accepts one file: a second `PUT` is `409 invalid_state`.
+
+The large route is upstream's `POST /documents`, with one difference: upstream's `upload_url`
+is a pre-signed storage URL, and this service never pre-signs (`docs/BLOB_STORAGE.md` rule 1).
+The URL is this application's, signed and expiring like every download link, and the bytes
+stream through the same intake and PDF preflight as an inline `document`. A body over the
+declared `file_size` is `413 document_set_too_large`; a refused PDF is reported on the `PUT`
+itself (`malformed_pdf`, or `invalid_request` with the parser's findings) and again if its
+`document_id` is used. Upstream also accepts a Word document and converts it; this build does
+not (`501`, `content_type`).
+
+### A draft's documents
+
+A request may carry up to 20 documents and 100 MB (issue #163). `fields[].page_number` counts
+across the whole set: the first document's pages are 1..n, the second's start at n+1. While the
+request is a draft its documents can change; every change goes through the same state machine
+as a send, under the request's lock, and answers the whole set and its two counters:
+
+```json
+{
+  "documents": [ { "document_id": "01J…", "position": 1, "label": "master-agreement.pdf", "original_filename": "master-agreement.pdf", "page_count": 3, "document_url": "…", "document_url_kind": "stored", "document_only_hash": null } ],
+  "documents_version": 2,
+  "documents_layout_version": 2
+}
+```
+
+- **Every placed field moves with its page.** Adding a document before another, or reordering,
+  changes absolute page numbers, and each field is carried to its page's new number.
+- **A field is never stranded.** Removing a document that still has fields on it is refused
+  (`400 invalid_request`, `details.reason: fields_on_document`, `details.fields`); this build
+  cannot move or delete a placed field.
+- **A replacement has the same shape**: the same number of pages (`page_count_mismatch`) and
+  every page the same size within 1 pt (`dimension_mismatch`), so every field stays where it was.
+- `documents_version` advances on every change, a rename included; `documents_layout_version`
+  only when pages move. A field `PATCH` on a request with more than one document, or whose layout
+  has changed, sends `documents_layout_version` from its last read: without it the answer is
+  `409 documents_layout_version_required`, and with a stale one `409 document_set_version_conflict`.
+- Once sent, the set is locked: `409 document_set_locked`.
+- With no `label`, a document is named as it was uploaded (upstream leaves it null);
+  `PATCH … {"label": null}` clears it.
 
 ### Three status representations, and why none is collapsed
 
@@ -643,8 +717,8 @@ order (upstream's `DocumentSummary`); a single document is listed once with `doc
 For a set, the top-level `document_url` is null: download each member with
 `GET /signing-requests/{id}/documents/{document_id}/download`, `type=original` for the reviewed
 document or `type=document` for its own sealed copy once the agreement is complete. A member's
-sealed copy ends with the completion report. Creating or editing a set through this surface is a
-follow-up and answers `501`; a set can be created through the native API.
+sealed copy ends with the completion report. Creating and editing a set: see
+[Uploading a document](#uploading-a-document-which-route) and [A draft's documents](#a-drafts-documents).
 
 `GET /signing-requests/{id}/download` returns JSON, not bytes:
 

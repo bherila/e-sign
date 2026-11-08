@@ -46,6 +46,13 @@ class FirmaRequestSizeLimit
             return $next($request);
         }
 
+        // A large upload's raw bytes (issue #182) are not a JSON body: they have their own limit,
+        // the size declared when the upload was requested (at most 50 MB), enforced while they are
+        // read. Measuring them here would read the whole body into memory before the route ran.
+        if ($request->isMethod('PUT') && $request->is(FirmaProfile::BASE_PATH.'/documents/uploads/*')) {
+            return $next($request);
+        }
+
         $declared = $request->headers->get('Content-Length');
         $size = $declared !== null ? (int) $declared : strlen($request->getContent());
 

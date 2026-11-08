@@ -43,13 +43,14 @@ stays visibly failed rather than becoming a completed row with nothing behind it
 The table below is the code's own table, `EnvelopeStateMachine::TRANSITIONS`, and
 `EnvelopeTransitionMatrixTest::test_the_documented_transition_table_matches_the_code()` fails
 if the two drift. Every pair not listed is refused with `IllegalTransition`; the same test
-attempts all 87 of them.
+attempts all 95 of them.
 
 <!-- transitions:start -->
 | Transition | Legal from |
 |---|---|
 | `send` | `draft` |
 | `update` | `draft` |
+| `change_documents` | `draft` |
 | `submit_values` | `sent`, `in_progress` |
 | `set_sender_values` | `draft`, `sent`, `in_progress` |
 | `accept` | `sent`, `in_progress` |
@@ -62,7 +63,10 @@ attempts all 87 of them.
 | `retry_finalization` | `finalization_failed` |
 <!-- transitions:end -->
 
-Three of these are not state changes on their own. `update` corrects a draft recipient's
+Four of these are not state changes on their own. `change_documents` adds, reorders, replaces,
+renames or removes a draft's document (issue #182; docs/preparation/document-sets.md): the set's
+rows, the first document, the digest an acceptance will bind and every field's absolute page move
+in one compare-and-swap. `update` corrects a draft recipient's
 name or address (and the identity snapshot beside them) under the envelope lock, so it cannot
 race a `send` (S-5). `submit_values` and `set_sender_values` write field values; all three
 advance the envelope's `version`; `submit_values` also moves `sent` to
