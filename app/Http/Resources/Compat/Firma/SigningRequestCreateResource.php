@@ -59,14 +59,17 @@ class SigningRequestCreateResource extends JsonResource
         /** @var Envelope $envelope */
         $envelope = $this->resource;
         $expiresAt = app(DownloadUrlIssuer::class)->expiresAt();
+        // A set has no single reviewed file: no link that would always refuse, and the page
+        // count is the whole set's, as on the detail response.
+        $set = $envelope->documentSet();
 
         return [
             'id' => $envelope->public_id,
             'name' => $envelope->title,
             'status' => $envelope->state === EnvelopeState::Draft ? 'draft' : $envelope->state->value,
             'template_id' => self::templateId($envelope),
-            'document_url' => $this->downloads->documentUrl($envelope, $expiresAt),
-            'page_count' => $envelope->documentRevision?->page_count,
+            'document_url' => $set->isMultiple() ? null : $this->downloads->documentUrl($envelope, $expiresAt),
+            'page_count' => $set->isMultiple() ? $set->totalPages() : $envelope->documentRevision?->page_count,
             'expiration_hours' => $envelope->expiration_hours,
             'settings' => $this->settings->for($envelope),
             'recipients' => $this->recipients($envelope),

@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Domain\Evidence\Finalization;
 
 use App\Domain\Evidence\Sealing\AssuranceLevel;
+use App\Domain\Preparation\Documents\DocumentSetEntry;
+use App\Domain\Preparation\Documents\Models\DocumentRevision;
 use App\Domain\Preparation\Schema\RecipientDesignation;
 use App\Domain\Signing\Fields\CanonicalValue;
 use App\Domain\Signing\Fields\MaterialValues;
@@ -87,6 +89,13 @@ final readonly class FinalizationInput
         public array $values,
         public array $attestations,
         public string $capturedAt,
+        /**
+         * A document set's members (issue #163), in order; empty for a single document, whose
+         * revision is {@see $documentRevisionId}.
+         *
+         * @var list<array{position: int, title: string, revision_id: int, revision: string, sha256: string, page_count: int, first_page: int}>
+         */
+        public array $documents = [],
     ) {}
 
     /**
@@ -171,6 +180,7 @@ final readonly class FinalizationInput
             values: $values,
             attestations: $attestations,
             capturedAt: CarbonImmutable::now()->utc()->toIso8601ZuluString(),
+            documents: self::documentsOf($envelope),
         );
     }
 
@@ -228,6 +238,44 @@ final readonly class FinalizationInput
             'assurance_level' => $this->assuranceLevel->value,
             'field_values' => $this->valueDigests,
             'attestations' => $this->attestations,
+            // Only for a set, so a single-document envelope's snapshot — and the digest an earlier
+            // run recorded for it — is exactly what it always was.
+            ...($this->documents === [] ? [] : ['documents' => array_map(
+                static fn (array $document): array => array_diff_key($document, ['revision_id' => true]),
+                $this->documents,
+            )]),
         ];
+    }
+
+    /** True when the envelope carries a document set of two or more. */
+    public function hasDocumentSet(): bool
+    {
+        return $this->documents !== [];
+    }
+
+    /**
+     * @return list<array{position: int, title: string, revision_id: int, revision: string, sha256: string, page_count: int, first_page: int}>
+     */
+    private static function documentsOf(Envelope $envelope): array
+    {
+        $set = $envelope->documentSet();
+
+        if (! $set->isMultiple()) {
+            return [];
+        }
+
+        $publicIds = DocumentRevision::query()
+            ->whereIn('id', array_map(static fn (DocumentSetEntry $entry): int => $entry->revisionId, $set->entries))
+            ->pluck('public_id', 'id');
+
+        return array_map(static fn (DocumentSetEntry $entry): array => [
+            'position' => $entry->position,
+            'title' => $entry->title,
+            'revision_id' => $entry->revisionId,
+            'revision' => (string) ($publicIds[$entry->revisionId] ?? ''),
+            'sha256' => $entry->sha256,
+            'page_count' => $entry->pageCount,
+            'first_page' => $entry->firstPage,
+        ], $set->entries);
     }
 }

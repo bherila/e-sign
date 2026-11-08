@@ -31,6 +31,7 @@ use RuntimeException;
  * @property string $public_id
  * @property int $envelope_id
  * @property ArtifactKind $kind
+ * @property int $slot 0 for an envelope-level artifact; a set member's position for an `executed_document`
  * @property string $disk
  * @property string $path
  * @property string $sha256
@@ -51,6 +52,7 @@ class Artifact extends Model
     protected $fillable = [
         'envelope_id',
         'kind',
+        'slot',
         'disk',
         'path',
         'sha256',
@@ -70,6 +72,7 @@ class Artifact extends Model
             'assurance_level_reached' => AssuranceLevel::class,
             'validation_report' => 'array',
             'bytes' => 'integer',
+            'slot' => 'integer',
             'generation' => 'integer',
             'published_at' => 'immutable_datetime',
             'created_at' => 'immutable_datetime',
@@ -136,7 +139,8 @@ class Artifact extends Model
         return sprintf(
             '%s-%s-%s.%s',
             $slug,
-            str_replace('_', '-', $this->kind->value),
+            // A set's per-document copy names its position: executed-document-2.
+            str_replace('_', '-', $this->kind->value).($this->slot > 0 ? '-'.$this->slot : ''),
             substr($this->sha256, 0, 12),
             $this->kind->extension(),
         );

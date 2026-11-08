@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Editor;
 
+use App\Domain\Preparation\Documents\DocumentSetEntry;
+use App\Domain\Preparation\Documents\DocumentSetPages;
 use App\Domain\Preparation\Documents\Models\Document;
+use App\Domain\Preparation\Documents\Models\DocumentRevision;
 use App\Domain\Preparation\Templates\Models\TemplateVersion;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Editor\ShowFieldEditorRequest;
@@ -107,7 +110,13 @@ class FieldEditorController extends Controller
                 'read_only_reason' => $this->readOnlyReason($request, $version),
                 'field_schema' => $version->fieldSchemaDocument()->toArray(),
                 'field_schema_sha256' => (string) $version->field_schema_sha256,
-                'pages' => $this->pageGeometry($document),
+                // A document set's members in order, each with its view URL and the pages it
+                // occupies (issue #163); one entry for a single document. Pages are absolute
+                // across the set, as `pages` and every field are.
+                'documents' => $this->documents($version, $workspaceId),
+                'pages' => ($set = $version->documentSet()) !== null && $set->isMultiple()
+                    ? $this->geometryOf(DocumentSetPages::preflightPages($set))
+                    : $this->pageGeometry($document),
                 'variables' => $this->prefillVariables(),
             ],
         ]);
@@ -143,10 +152,48 @@ class FieldEditorController extends Controller
         $report = $document->preflight_report ?? [];
         $pages = $report['pages'] ?? [];
 
-        if (! is_array($pages)) {
+        return is_array($pages) ? $this->geometryOf($pages) : [];
+    }
+
+    /**
+     * The version's documents, each with a view URL under the administrative revision route and
+     * its page range across the set.
+     *
+     * @return list<array{position: int, title: string, first_page: int, page_count: int, url: string}>
+     */
+    private function documents(TemplateVersion $version, string $workspaceId): array
+    {
+        $set = $version->documentSet();
+
+        if ($set === null) {
             return [];
         }
 
+        $revisions = DocumentRevision::query()
+            ->with('document')
+            ->whereIn('id', array_map(static fn (DocumentSetEntry $entry): int => $entry->revisionId, $set->entries))
+            ->get()
+            ->keyBy('id');
+
+        return array_map(static fn (DocumentSetEntry $entry): array => [
+            'position' => $entry->position,
+            'title' => $entry->title,
+            'first_page' => $entry->firstPage,
+            'page_count' => $entry->pageCount,
+            'url' => route('documents.revisions.view', [
+                'workspace' => $workspaceId,
+                'document' => (string) $revisions->get($entry->revisionId)?->document?->public_id,
+                'revision' => (string) $revisions->get($entry->revisionId)?->public_id,
+            ]),
+        ], $set->entries);
+    }
+
+    /**
+     * @param  array<int, mixed>  $pages  Preflight page entries; a set's are numbered across it.
+     * @return list<array<string, mixed>>
+     */
+    private function geometryOf(array $pages): array
+    {
         $geometry = [];
 
         foreach ($pages as $page) {

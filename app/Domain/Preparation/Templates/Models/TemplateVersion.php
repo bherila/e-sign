@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Domain\Preparation\Templates\Models;
 
+use App\Domain\Preparation\Documents\DocumentSet;
+use App\Domain\Preparation\Documents\DocumentSetEntry;
 use App\Domain\Preparation\Documents\Models\DocumentRevision;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Templates\PublishedVersionIsImmutableException;
@@ -14,6 +16,7 @@ use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
 
 /**
@@ -181,6 +184,48 @@ class TemplateVersion extends Model
     }
 
     /**
+     * The members of a document set of two or more, in order (issue #163). Empty for a
+     * single-document version, whose set is {@see DocumentRevision()} alone.
+     *
+     * @return HasMany<TemplateVersionDocument, $this>
+     */
+    public function documents(): HasMany
+    {
+        return $this->hasMany(TemplateVersionDocument::class)->orderBy('position');
+    }
+
+    /**
+     * The version's documents as a set, or null for a draft with no document yet.
+     * See docs/preparation/document-sets.md.
+     */
+    public function documentSet(): ?DocumentSet
+    {
+        $rows = $this->documents()->get();
+
+        if ($rows->isNotEmpty()) {
+            return DocumentSet::of($rows->map(static fn (TemplateVersionDocument $row): array => [
+                'revision_id' => $row->document_revision_id,
+                'title' => $row->title,
+                'sha256' => $row->sha256,
+                'page_count' => $row->page_count,
+            ])->values()->all());
+        }
+
+        $revision = $this->documentRevision;
+
+        if ($revision === null) {
+            return null;
+        }
+
+        return DocumentSet::of([[
+            'revision_id' => (int) $revision->getKey(),
+            'title' => (string) ($revision->document?->title ?? ''),
+            'sha256' => $revision->sha256,
+            'page_count' => max(1, (int) $revision->page_count),
+        ]]);
+    }
+
+    /**
      * Everything sending copies into an envelope.
      *
      * The Signing module calls this instead of reading columns, so what a version means is
@@ -211,6 +256,8 @@ class TemplateVersion extends Model
      *     document_revision_public_id: string|null,
      *     document_revision_sha256: string|null,
      *     document_page_count: int|null,
+     *     additional_document_revision_ids?: list<int>,
+     *     document_set_sha256?: string,
      *     field_schema: array<string, mixed>,
      *     field_schema_sha256: string,
      *     recipients: list<array<string, mixed>>,
@@ -247,6 +294,16 @@ class TemplateVersion extends Model
             'document_revision_public_id' => $revision?->public_id,
             'document_revision_sha256' => $revision?->sha256,
             'document_page_count' => $revision?->page_count,
+            // A set of two or more (issue #163): the members after the first, in order, and the
+            // digest every acceptance binds. Absent for a single document, whose digest is the
+            // revision's own.
+            ...(($set = $this->documentSet()) !== null && $set->isMultiple() ? [
+                'additional_document_revision_ids' => array_map(
+                    static fn (DocumentSetEntry $entry): int => $entry->revisionId,
+                    array_slice($set->entries, 1),
+                ),
+                'document_set_sha256' => $set->digest(),
+            ] : []),
             'field_schema' => $document->toArray(),
             'field_schema_sha256' => $this->field_schema_sha256,
             'recipients' => $this->recipients,

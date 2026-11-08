@@ -7,6 +7,8 @@ namespace Tests\Feature\Preparation;
 use App\Domain\Identity\Audit\AuditEvent;
 use App\Domain\Identity\Enums\WorkspaceRole;
 use App\Domain\Identity\Models\Workspace;
+use App\Domain\Integration\Native\EnvelopeService;
+use App\Domain\Integration\Native\NewEnvelope;
 use App\Domain\Preparation\Documents\DocumentIntake;
 use App\Domain\Preparation\Documents\DocumentStatus;
 use App\Domain\Preparation\Documents\Models\Document;
@@ -674,6 +676,62 @@ class TemplateLifecycleTest extends TestCase
     }
 
     // ----------------------------------------------------------------- helpers
+
+    /**
+     * A template version may carry a document set (issue #163): its fields' pages count across
+     * the set, it is checked against every member's page geometry, and an envelope built from it
+     * copies the set and binds the same set digest (docs/preparation/document-sets.md).
+     */
+    public function test_a_template_version_with_a_document_set_is_copied_whole_into_its_envelopes(): void
+    {
+        $nda = $this->readyDocument();
+        $schedule = $this->readyDocument('single-page-letter');
+        $schema = FieldSchemaFixture::asArray();
+        $schema['fields'][] = [
+            'id' => 'schedule_initials',
+            'recipient_id' => $schema['recipients'][0]['id'],
+            'type' => 'initials',
+            'page' => 3,
+            'rect' => ['x' => 60, 'y' => 700, 'width' => 60, 'height' => 24],
+            'required' => true,
+        ];
+
+        $draft = $this->templates->createDraftVersion($this->newTemplate(), $this->sender, $nda, $schema, additionalDocuments: [$schedule]);
+        $set = $draft->documentSet();
+
+        $this->assertNotNull($set);
+        $this->assertSame(2, $set->count());
+        $this->assertSame([1, 3], array_map(static fn ($entry): int => $entry->firstPage, $set->entries));
+
+        $published = $this->templates->publish($draft, $this->sender);
+        $snapshot = $published->snapshotForEnvelope();
+        $this->assertSame($set->digest(), $snapshot['document_set_sha256']);
+        $this->assertSame([(int) $schedule->reviewRevision()?->getKey()], $snapshot['additional_document_revision_ids']);
+
+        $envelope = app(EnvelopeService::class)->create($this->workspace, new NewEnvelope(templateVersionId: $published->public_id));
+
+        $this->assertSame($set->digest(), $envelope->document_sha256);
+        $this->assertSame(
+            array_map(static fn ($entry): string => $entry->sha256, $set->entries),
+            array_map(static fn ($entry): string => $entry->sha256, $envelope->documentSet()->entries),
+        );
+    }
+
+    public function test_a_field_past_the_end_of_a_templates_document_set_is_refused(): void
+    {
+        $schema = FieldSchemaFixture::asArray();
+        $schema['fields'][0]['page'] = 4;
+
+        $this->expectException(InvalidFieldSchemaException::class);
+
+        $this->templates->createDraftVersion(
+            $this->newTemplate(),
+            $this->sender,
+            $this->readyDocument(),
+            $schema,
+            additionalDocuments: [$this->readyDocument('single-page-letter')],
+        );
+    }
 
     private function newTemplate(string $name = 'Mutual NDA'): Template
     {

@@ -38,6 +38,22 @@ final readonly class EnvelopeAnchorResolution implements AnchorResolution
             return AnchorResolutionOutcome::unchanged($schema);
         }
 
+        $set = $envelope->documentSet();
+
+        // A document set resolves across every member (issue #163). Its digest is the one the
+        // envelope froze, and each member's bytes are checked against its own when read.
+        if ($set->isMultiple()) {
+            if (! hash_equals((string) $envelope->document_sha256, $set->digest())) {
+                Log::error('An envelope\'s document set does not carry the digest the envelope was created against.', [
+                    'envelope_id' => $envelope->public_id,
+                ]);
+
+                throw AnchorDocumentUnavailable::readFailed((string) $envelope->public_id);
+            }
+
+            return $this->anchors->resolveSet($set, $schema);
+        }
+
         $revision = $envelope->documentRevision()->with('document')->first();
 
         if (! $revision instanceof DocumentRevision) {

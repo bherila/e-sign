@@ -53,6 +53,7 @@ class TemplateVersionController extends Controller
                 $request->fieldSchema() ?? [],
                 $request->consentPolicyVersion(),
                 $request->renderSettings(),
+                $request->additionalDocuments(),
             );
         } catch (InvalidFieldSchemaException $e) {
             return $this->invalidFieldSchemaResponse($e);

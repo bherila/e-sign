@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Domain\Evidence\Finalization;
 
+use App\Domain\Evidence\Finalization\Artifacts\ArtifactKind;
 use App\Domain\Evidence\Sealing\AssuranceLevel;
 use App\Domain\Evidence\Sealing\ValidationReport;
+use App\Domain\Preparation\Documents\DocumentSet;
 use App\Domain\Signing\Fields\CanonicalValue;
 
 /**
@@ -45,6 +47,8 @@ final readonly class EvidenceDocument
     /**
      * @param  array<string, string>  $artifactDigests  Artifact kind value => SHA-256 of its bytes.
      * @param  array<string, int>  $artifactSizes  Artifact kind value => byte count.
+     * @param  array<int, string|null>  $documentValidations  A set member's position => the level its
+     *                                                        own sealed copy was read back at.
      */
     public static function build(
         FinalizationInput $input,
@@ -60,14 +64,19 @@ final readonly class EvidenceDocument
         string $sealedAt,
         array $artifactDigests,
         array $artifactSizes,
+        array $documentValidations = [],
     ): string {
         $digestIndex = [
             [
                 'name' => 'document_sha256',
                 'algorithm' => 'sha256',
                 'value' => $input->documentSha256,
-                'covers' => 'The complete bytes of the reviewed document revision, as retained and as every '
-                    .'attestation binds it. Not the executed PDF.',
+                'covers' => $input->hasDocumentSet()
+                    ? 'The document set, as every attestation binds it: SHA-256 of the canonical JSON '
+                        .'{"encoding":"'.DocumentSet::ENCODING.'","documents":[{"position":n,"sha256":"<review digest>"},...]} '
+                        .'over every member\'s reviewed revision in order. See "document_set". Not the executed PDF.'
+                    : 'The complete bytes of the reviewed document revision, as retained and as every '
+                        .'attestation binds it. Not the executed PDF.',
             ],
             [
                 'name' => 'field_schema_sha256',
@@ -85,6 +94,16 @@ final readonly class EvidenceDocument
                     .'fields a signer\'s assent is bound to. Signer-specific values are excluded by design.',
             ],
         ];
+
+        foreach ($input->documents as $member) {
+            $digestIndex[] = [
+                'name' => 'document_sha256:'.$member['position'],
+                'algorithm' => 'sha256',
+                'value' => $member['sha256'],
+                'covers' => 'The complete bytes of document '.$member['position'].' of the set, its reviewed '
+                    .'revision as retained.',
+            ];
+        }
 
         foreach ($input->valueDigests as $value) {
             $digestIndex[] = [
@@ -129,12 +148,36 @@ final readonly class EvidenceDocument
                 'finalization_generation' => $generation,
             ],
 
-            'document' => [
+            // For a set, `document` keeps its meaning (one retained revision and that file's
+            // own digest) and names the first member; the set digest lives only under
+            // `document_set`, never beside a revision it is not the hash of.
+            'document' => $input->hasDocumentSet() ? [
+                'reviewed_revision' => $input->documents[0]['revision'],
+                'sha256' => $input->documents[0]['sha256'],
+                'covers' => 'The first document of the set: its reviewed revision as retained byte-for-byte. '
+                    .'Every document, and the digest an acceptance binds, are under "document_set".',
+            ] : [
                 'reviewed_revision' => $input->documentRevisionPublicId,
                 'sha256' => $input->documentSha256,
                 'covers' => 'The reviewed revision as retained byte-for-byte. The executed PDF is a new '
                     .'artifact built from it and is listed under "artifacts".',
             ],
+
+            ...($input->hasDocumentSet() ? ['document_set' => [
+                'encoding' => DocumentSet::ENCODING,
+                'sha256' => $input->documentSha256,
+                'covers' => 'The ordered set of reviewed revisions. A field\'s page counts across the whole set.',
+                'documents' => array_map(static fn (array $member): array => [
+                    'position' => $member['position'],
+                    'title' => $member['title'],
+                    'reviewed_revision' => $member['revision'],
+                    'sha256' => $member['sha256'],
+                    'first_page' => $member['first_page'],
+                    'page_count' => $member['page_count'],
+                    'executed_document_sha256' => $artifactDigests[ArtifactKind::ExecutedDocument->value.':'.$member['position']] ?? null,
+                    'executed_document_assurance_level_reached' => $documentValidations[$member['position']] ?? null,
+                ], $input->documents),
+            ]] : []),
 
             'field_schema' => [
                 'sha256' => $input->fieldSchemaSha256,

@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Compat\Firma;
 use App\Domain\Integration\Firma\SigningRequestDownloads;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Compat\Firma\FirmaRequest;
+use App\Http\Requests\Compat\Firma\ShowSigningRequestDocumentDownloadRequest;
 use App\Http\Requests\Compat\Firma\StreamSigningRequestDownloadRequest;
 use App\Http\Resources\Compat\Firma\SigningRequestDownloadResource;
 use Illuminate\Http\JsonResponse;
@@ -36,6 +37,17 @@ class SigningRequestDownloadController extends Controller
     {
         return response()->json(
             (new SigningRequestDownloadResource($request->signingRequest(), $this->downloads))->resolve($request),
+        );
+    }
+
+    /**
+     * `GET /signing-requests/{id}/documents/{document_id}/download` — one document of a set
+     * (issue #163), as a signed, expiring URL like every other download this facade hands out.
+     */
+    public function showDocument(ShowSigningRequestDocumentDownloadRequest $request): JsonResponse
+    {
+        return response()->json(
+            $this->downloads->describeMember($request->signingRequest(), $request->documentId(), $request->type()),
         );
     }
 

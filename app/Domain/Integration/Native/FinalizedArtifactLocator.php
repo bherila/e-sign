@@ -87,11 +87,27 @@ final readonly class FinalizedArtifactLocator implements ArtifactLocator
             ->where('envelope_id', $envelope->getKey())
             ->whereNotNull('published_at')
             ->where('kind', $kind->value)
-            // `artifacts` has a unique index on (envelope_id, kind), so there is at most one
-            // row today. Ordered anyway: if a re-finalization ever relaxes that, three
-            // callers of this method picking different rows on different reads would be a
-            // very quiet bug, and the sibling `published()` orders for the same reason.
+            // The envelope-level artifact of that kind. `artifacts` is unique on
+            // (envelope_id, kind, slot), and slot 0 is the envelope's own; a document set's
+            // per-document copies are reached through ofDocument().
+            ->where('slot', 0)
             ->orderBy('id')
+            ->first();
+
+        return $artifact instanceof Artifact ? $artifact : null;
+    }
+
+    /**
+     * One document of a set, sealed on its own (issue #163), by its position, or null — before
+     * completion, and for a single-document envelope, which publishes none.
+     */
+    public function ofDocument(Envelope $envelope, int $position): ?Artifact
+    {
+        $artifact = Artifact::query()
+            ->where('envelope_id', $envelope->getKey())
+            ->whereNotNull('published_at')
+            ->where('kind', ArtifactKind::ExecutedDocument->value)
+            ->where('slot', $position)
             ->first();
 
         return $artifact instanceof Artifact ? $artifact : null;
@@ -132,6 +148,7 @@ final readonly class FinalizedArtifactLocator implements ArtifactLocator
             bytes: $artifact->bytes,
             createdAt: $artifact->created_at,
             stream: static fn () => $store->readStream($disk, $path),
+            documentPosition: $artifact->slot > 0 ? $artifact->slot : null,
         );
     }
 }

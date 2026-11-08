@@ -230,6 +230,46 @@ final class SigningScenario
             ->firstOrFail();
     }
 
+    /**
+     * Another document in this workspace, with real bytes stored behind its review revision and
+     * a known page count — what a document set's members need (issue #163).
+     */
+    public function addDocument(string $bytes, int $pageCount, string $title = 'Synthetic schedule'): DocumentRevision
+    {
+        // A preflight page entry per page, as intake records them, so page geometry reads
+        // through the set exactly as it would for an uploaded document. US Letter, upright.
+        $pages = array_map(static fn (int $page): array => [
+            'page' => $page,
+            'crop_box' => [0.0, 0.0, 612.0, 792.0],
+            'rotation' => 0,
+            'user_unit' => 1.0,
+            'native_width' => 612.0,
+            'native_height' => 792.0,
+        ], range(1, $pageCount));
+
+        $document = Document::factory()->for($this->workspace)->create([
+            'title' => $title,
+            'page_count' => $pageCount,
+            'preflight_report' => ['accepted' => true, 'findings' => [], 'metrics' => [], 'pages' => $pages],
+        ]);
+        $sha256 = hash('sha256', $bytes);
+        $path = DocumentStorageKey::for($this->workspace->public_id, $document->public_id, RevisionKind::Review, $sha256)->value;
+
+        Storage::disk('documents')->put($path, $bytes);
+
+        return DocumentRevision::query()->create([
+            'document_id' => $document->getKey(),
+            'kind' => RevisionKind::Review,
+            'disk' => 'documents',
+            'path' => $path,
+            'sha256' => $sha256,
+            'bytes' => strlen($bytes),
+            'page_count' => $pageCount,
+            'normalization' => ['applied' => false],
+            'created_by' => $this->user->getKey(),
+        ]);
+    }
+
     private function createReviewRevision(?string $bytes): DocumentRevision
     {
         $sha256 = $bytes === null

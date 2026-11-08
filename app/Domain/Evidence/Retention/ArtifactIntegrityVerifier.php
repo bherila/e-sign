@@ -231,11 +231,14 @@ final readonly class ArtifactIntegrityVerifier
             return 'digest_mismatch';
         }
 
-        if ((string) $artifact->kind !== ArtifactKind::ExecutedPdf->value) {
+        $kind = ArtifactKind::tryFrom((string) $artifact->kind);
+
+        if ($kind === null || ! $kind->isSealed()) {
             return null;
         }
 
-        // Only the executed PDF carries a seal. Re-running the validator on it is the second
+        // Only the sealed PDFs carry a seal: the executed agreement, and each document of a set
+        // sealed on its own (issue #163). Re-running the validator on it is the second
         // half of the check: bytes that hash correctly and no longer validate would mean the
         // recorded digest and the seal disagree, which the digest comparison alone cannot see.
         try {

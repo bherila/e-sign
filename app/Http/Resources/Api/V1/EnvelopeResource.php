@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Resources\Api\V1;
 
+use App\Domain\Preparation\Documents\DocumentSetEntry;
 use App\Domain\Signing\Models\Envelope;
 use App\Domain\Signing\Models\EnvelopeRecipient;
 use Illuminate\Http\Request;
@@ -61,7 +62,18 @@ class EnvelopeResource extends JsonResource
             'consent_policy_version' => $envelope->consent_policy_version,
 
             'source_template_version_id' => $envelope->source_template_version_id,
+            // For a document set, the set digest; see `documents` (docs/preparation/document-sets.md).
             'document_sha256' => $envelope->document_sha256,
+            // The envelope's documents in order, each with the pages it occupies. One entry for a
+            // single document, whose `id` is null: it has no set row (issue #163).
+            'documents' => array_map(static fn (DocumentSetEntry $entry): array => [
+                'id' => $entry->publicId,
+                'position' => $entry->position,
+                'title' => $entry->title,
+                'sha256' => $entry->sha256,
+                'first_page' => $entry->firstPage,
+                'page_count' => $entry->pageCount,
+            ], $envelope->documentSet()->entries),
             'field_schema_sha256' => $envelope->field_schema_sha256,
 
             'expires_in_hours' => $envelope->expiration_hours,

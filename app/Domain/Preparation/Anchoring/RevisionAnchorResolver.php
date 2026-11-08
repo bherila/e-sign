@@ -6,6 +6,8 @@ namespace App\Domain\Preparation\Anchoring;
 
 use App\Domain\Preparation\Contracts\DocumentReadUnavailable;
 use App\Domain\Preparation\Contracts\PdfTextLocator;
+use App\Domain\Preparation\Documents\DocumentSet;
+use App\Domain\Preparation\Documents\DocumentSetPages;
 use App\Domain\Preparation\Documents\Models\DocumentRevision;
 use App\Domain\Preparation\Documents\PreflightPageSizes;
 use App\Domain\Preparation\Documents\RevisionBytes;
@@ -84,6 +86,62 @@ final readonly class RevisionAnchorResolver
             // unreadable one. The limit that stopped it goes to the log and never to the response.
             $this->log($revision, $exhausted);
 
+            throw new AnchorResolutionFailed($this->unreadableProblems($schema));
+        }
+    }
+
+    /**
+     * The same, over a document set (issue #163): every member's text, its pages renumbered across
+     * the set, matched against the schema once. A field's page is absolute in a set, so an anchor
+     * found on a member's page n is on page `firstPage + n - 1` of the set, and the receipt records
+     * the set digest the acceptances bind (docs/preparation/document-sets.md).
+     *
+     * Page sizes come only from the members' recorded preflight reports, renumbered by
+     * {@see DocumentSetPages}: a set whose sizes cannot all be read is refused as unreadable rather
+     * than resolved with some pages unmeasured. One budget covers reading the whole set.
+     *
+     * @throws AnchorResolutionFailed
+     */
+    public function resolveSet(DocumentSet $set, FieldSchemaDocument $schema, bool $omitAbsentFields = true): AnchorResolutionOutcome
+    {
+        if (! $this->hasAnchors($schema)) {
+            return AnchorResolutionOutcome::unchanged($schema);
+        }
+
+        $pageSizes = DocumentSetPages::pageSizes($set);
+
+        if (! $pageSizes instanceof PageSizes) {
+            throw new AnchorResolutionFailed($this->unreadableProblems($schema));
+        }
+
+        $budget = new PreflightBudget($this->limits);
+        $runs = [];
+
+        try {
+            foreach ($set->entries as $entry) {
+                $revision = DocumentRevision::query()->with('document')->findOrFail($entry->revisionId);
+
+                foreach ($this->text->extract($this->readBytes($revision), null, $budget) as $run) {
+                    $runs[] = new TextRun(
+                        page: $entry->firstPage + $run->page - 1,
+                        text: $run->text,
+                        rect: $run->rect,
+                        fontSize: $run->fontSize,
+                        fontResource: $run->fontResource,
+                        direction: $run->direction,
+                    );
+                }
+            }
+
+            return $this->resolver->resolve($schema, $runs, $set->digest(), $pageSizes, $omitAbsentFields, $budget);
+        } catch (PreflightBudgetException $exhausted) {
+            Log::warning('Anchor resolution over a document set crossed a preflight ceiling.', [
+                'documents' => $set->count(),
+                'limit' => $exhausted->getMessage(),
+            ]);
+
+            throw new AnchorResolutionFailed($this->unreadableProblems($schema));
+        } catch (TextExtractionException) {
             throw new AnchorResolutionFailed($this->unreadableProblems($schema));
         }
     }

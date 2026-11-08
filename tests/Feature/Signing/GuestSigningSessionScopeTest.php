@@ -4,12 +4,16 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Signing;
 
+use App\Domain\Preparation\Documents\DocumentSet;
 use App\Domain\Signing\Envelopes\EnvelopeStateMachine;
+use App\Domain\Signing\Sessions\InvitationIssuer;
 use App\Domain\Signing\Sessions\Models\SigningSession;
 use App\Domain\Signing\Sessions\SigningToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Support\GuestSigningScenario;
 use Tests\Support\InteractsWithSigningSession;
+use Tests\Support\PdfFixtures;
+use Tests\Support\SigningFixtures;
 use Tests\TestCase;
 
 /**
@@ -189,6 +193,46 @@ class GuestSigningSessionScopeTest extends TestCase
 
         $this->get(GuestSigningScenario::landingUrl($issued))->assertForbidden();
         $this->assertSame(0, SigningSession::query()->count());
+    }
+
+    /**
+     * A document set's signing page lists every document with its page range, and each is
+     * served by position under the same session (issue #163). A position the set does not have
+     * is a 404, never another document.
+     */
+    public function test_a_document_sets_page_lists_and_serves_each_document_by_position(): void
+    {
+        $scenario = GuestSigningScenario::sent();
+        $signing = $scenario->signing;
+        $second = $signing->addDocument(PdfFixtures::bytes('single-page-letter'), 1, 'Synthetic schedule A');
+        $first = $signing->addDocument(PdfFixtures::bytes('multi-page-mixed-size'), 3, 'Synthetic master agreement');
+        $set = DocumentSet::of([
+            ['revision_id' => (int) $first->getKey(), 'title' => 'Synthetic master agreement', 'sha256' => $first->sha256, 'page_count' => 3],
+            ['revision_id' => (int) $second->getKey(), 'title' => 'Synthetic schedule A', 'sha256' => $second->sha256, 'page_count' => 1],
+        ]);
+        $envelope = $signing->sent([
+            'document_revision_id' => $first->getKey(),
+            'document_sha256' => $set->digest(),
+            'additional_document_revision_ids' => [$second->getKey()],
+            'field_schema' => SigningFixtures::mutateField(SigningFixtures::sequentialTwoSigners(), 'seller_signature', ['page' => 4]),
+        ]);
+        $issued = app(InvitationIssuer::class)->issue($signing->recipient($envelope, 'buyer'));
+        $started = $this->post(GuestSigningScenario::startUrl($envelope, GuestSigningScenario::tokenOf($issued)))
+            ->assertRedirect(GuestSigningScenario::sessionUrl($envelope));
+        $cookie = $this->signingCookieValue($started);
+
+        $payload = $this->payloadFrom($this->asSigner($cookie)->get(GuestSigningScenario::sessionUrl($envelope))->assertOk()->getContent());
+
+        $this->assertSame([[1, 1, 3], [2, 4, 1]], array_map(
+            static fn (array $document): array => [$document['position'], $document['first_page'], $document['page_count']],
+            $payload['documents'],
+        ));
+        $this->assertSame([1, 2, 3, 4], array_column($payload['pages'], 'page'));
+
+        $this->asSigner($cookie)->get(GuestSigningScenario::sessionUrl($envelope, '/document/2'))
+            ->assertOk()
+            ->assertHeader('X-Document-Sha256', $second->sha256);
+        $this->asSigner($cookie)->get(GuestSigningScenario::sessionUrl($envelope, '/document/3'))->assertNotFound();
     }
 
     /**

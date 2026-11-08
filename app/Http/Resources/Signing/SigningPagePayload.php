@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Http\Resources\Signing;
 
+use App\Domain\Preparation\Documents\DocumentSetEntry;
+use App\Domain\Preparation\Documents\DocumentSetPages;
 use App\Domain\Preparation\Documents\Models\Document;
 use App\Domain\Preparation\Schema\FieldDefinition;
 use App\Domain\Preparation\Schema\RecipientDesignation;
@@ -63,6 +65,7 @@ final class SigningPagePayload
         $schema = $envelope->fieldSchema();
 
         $values = $envelope->fieldValues()->get();
+        $set = $envelope->documentSet();
         $consent = $this->consent->forRecordedVersion(
             $envelope->consent_policy_version,
             $recipient->designation === RecipientDesignation::Approver,
@@ -87,9 +90,18 @@ final class SigningPagePayload
             'parties' => $this->parties($envelope, $recipient),
             'document' => [
                 'title' => $document->title,
-                'page_count' => $document->page_count,
+                'page_count' => $set->isMultiple() ? $set->totalPages() : $document->page_count,
             ],
-            'pages' => $this->pageGeometry($document),
+            // A document set's members, in order, each with the page range it occupies; one entry
+            // for a single document (issue #163). Pages are absolute across the set.
+            'documents' => array_map(static fn (DocumentSetEntry $entry): array => [
+                'position' => $entry->position,
+                'title' => $entry->title,
+                'first_page' => $entry->firstPage,
+                'page_count' => $entry->pageCount,
+                'url' => route('signing.session.document.member', ['envelope' => $envelope->public_id, 'position' => $entry->position]),
+            ], $set->entries),
+            'pages' => $set->isMultiple() ? $this->geometryOf(DocumentSetPages::preflightPages($set)) : $this->pageGeometry($document),
             'field_schema' => $this->redactedSchema($envelope),
             'own_field_ids' => $this->ownFieldIds($schema->fieldsFor($recipient->schema_recipient_id)),
             'required_signature_field_ids' => $this->requiredSignatureFieldIds(
@@ -288,10 +300,15 @@ final class SigningPagePayload
         $report = $document->preflight_report ?? [];
         $pages = $report['pages'] ?? [];
 
-        if (! is_array($pages)) {
-            return [];
-        }
+        return is_array($pages) ? $this->geometryOf($pages) : [];
+    }
 
+    /**
+     * @param  array<int, mixed>  $pages  Preflight page entries; a set's are numbered across it.
+     * @return list<array<string, mixed>>
+     */
+    private function geometryOf(array $pages): array
+    {
         $geometry = [];
 
         foreach ($pages as $page) {

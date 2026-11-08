@@ -143,4 +143,10 @@ final class TemplateStateException extends RuntimeException
             sprintf('This template has no alias "%s".', $alias),
         );
     }
+
+    /** A document set that cannot be a template version's (issue #163). */
+    public static function documentSetInvalid(string $detail): self
+    {
+        return new self('document_set_invalid', 'The template version\'s document set is not valid: '.$detail);
+    }
 }

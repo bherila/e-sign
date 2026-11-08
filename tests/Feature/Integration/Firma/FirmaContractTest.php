@@ -46,6 +46,14 @@ class FirmaContractTest extends TestCase
      * release that introduced it — rather than the comparison being loosened. Anything else
      * extra or missing still fails.
      */
+    /**
+     * Top-level members of `GET /signing-requests/{id}` the reference added after the consumer
+     * fixtures were recorded. Named, so anything else extra or missing still fails.
+     */
+    private const DETAIL_ADDED_AFTER_RECORDING = [
+        'documents', // reference v1.39.0, issue #163
+    ];
+
     private const SETTINGS_ADDED_AFTER_RECORDING = [
         'allow_decline',        // reference v1.40.0, issue #165
         'show_save_for_later',  // reference v1.40.0, issue #165
@@ -78,8 +86,14 @@ class FirmaContractTest extends TestCase
         $body = $this->getJson($this->url($envelope), $headers)->assertOk()->json();
         $fixture = $this->fixture($workflow, 'request');
 
-        $this->assertSameKeys($fixture, $body, 'request.json');
+        $this->assertSameKeys($fixture + array_fill_keys(self::DETAIL_ADDED_AFTER_RECORDING, null), $body, 'request.json');
         $this->assertSameKeys($fixture['status'], $body['status'], 'request.json status');
+
+        // A single-document request answers its one document with `document_id` null, as the
+        // reference does for a set that has never been changed.
+        $this->assertCount(1, $body['documents']);
+        $this->assertNull($body['documents'][0]['document_id']);
+        $this->assertSame('stored', $body['documents'][0]['document_url_kind']);
         $this->assertSameKeys($fixture['timestamps'], $body['timestamps'], 'request.json timestamps');
         $this->assertSameKeys(
             $fixture['settings'] + array_fill_keys(self::SETTINGS_ADDED_AFTER_RECORDING, null),

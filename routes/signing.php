@@ -100,6 +100,12 @@ Route::middleware(['web', SigningSecurityHeaders::class])
             Route::get('/sign/{envelope}/session/document', [SigningDocumentController::class, 'view'])
                 ->name('session.document');
 
+            // One member of a document set (issue #163), by position. The same rules: the
+            // session's own envelope, inline only, bytes streamed through the application.
+            Route::get('/sign/{envelope}/session/document/{position}', [SigningDocumentController::class, 'view'])
+                ->whereNumber('position')
+                ->name('session.document.member');
+
             // Saving field values. Signs nothing.
             Route::post('/sign/{envelope}/session/values', [SigningValuesController::class, 'store'])
                 ->name('session.values');

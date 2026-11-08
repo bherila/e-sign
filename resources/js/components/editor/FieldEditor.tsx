@@ -228,7 +228,11 @@ function LoadedFieldEditor({ payload, initial, pages }: LoadedFieldEditorProps) 
     void (async () => {
       try {
         const { loadPdf } = await import("./pdfjs");
-        opened = await loadPdf(payload.urls.document_view);
+        const { loadPdfSet } = await import("./pdfSet");
+        // Every document of the version, in order, as one run of pages (issue #163).
+        const documents = payload.documents ?? [];
+        const urls = documents.length > 1 ? documents.map((document) => document.url) : [payload.urls.document_view];
+        opened = await loadPdfSet(urls, loadPdf);
 
         if (cancelled) {
           void opened.destroy();
@@ -250,7 +254,7 @@ function LoadedFieldEditor({ payload, initial, pages }: LoadedFieldEditorProps) 
       cancelled = true;
       void opened?.destroy();
     };
-  }, [payload.urls.document_view]);
+  }, [payload.urls.document_view, payload.documents]);
 
   // ------------------------------------------------------------------------------- zoom
 

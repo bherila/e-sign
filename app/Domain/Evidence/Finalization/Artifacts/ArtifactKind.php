@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Evidence\Finalization\Artifacts;
 
 /**
- * The three objects a finalization publishes.
+ * The objects a finalization publishes: three, and one more per document of a document set.
  *
  * They are separate artifacts rather than one bundle because they answer different
  * questions and are handed to different readers: the executed PDF is the agreement, the
@@ -32,6 +32,14 @@ enum ArtifactKind: string
     /** The canonical, versioned machine evidence document. Every digest and what it covers. */
     case EvidenceJson = 'evidence_json';
 
+    /**
+     * One document of a document set on its own (issue #163): its pages with its fields drawn,
+     * then the completion report, sealed under the service certificate. The artifact's `slot`
+     * is the document's position in the set. Never published for a single-document envelope,
+     * whose executed PDF already is the document on its own (docs/preparation/document-sets.md).
+     */
+    case ExecutedDocument = 'executed_document';
+
     /** The file extension the storage key ends in. */
     public function extension(): string
     {
@@ -53,7 +61,7 @@ enum ArtifactKind: string
     /** True when the bytes carry a PAdES seal, and so have a validation report. */
     public function isSealed(): bool
     {
-        return $this === self::ExecutedPdf;
+        return $this === self::ExecutedPdf || $this === self::ExecutedDocument;
     }
 
     /**

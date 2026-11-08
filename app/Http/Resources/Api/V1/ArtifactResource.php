@@ -42,6 +42,8 @@ class ArtifactResource extends JsonResource
         return [
             'id' => $artifact->id,
             'kind' => $artifact->kind,
+            // Which document of a set an `executed_document` is; null for every other kind.
+            'document_position' => $artifact->documentPosition,
             'filename' => $artifact->filename,
             'content_type' => $artifact->contentType,
             'sha256' => $artifact->sha256,

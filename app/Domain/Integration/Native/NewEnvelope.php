@@ -61,6 +61,8 @@ final readonly class NewEnvelope
         public ?bool $showSaveForLater = null,
         public bool $showSaveForLaterSpecified = false,
         public array $copies = [],
+        /** @var list<string> A document set's documents in order (issue #163); empty otherwise. */
+        public array $documentIds = [],
     ) {}
 
     /**
@@ -80,7 +82,9 @@ final readonly class NewEnvelope
 
         return new self(
             templateVersionId: self::nullableString($input, 'template_version_id'),
-            documentId: self::nullableString($input, 'document_id'),
+            documentId: self::nullableString($input, 'document_id')
+                ?? (is_array($input['document_ids'] ?? null) ? (string) ($input['document_ids'][0] ?? '') : null),
+            documentIds: is_array($input['document_ids'] ?? null) ? array_values(array_map('strval', $input['document_ids'])) : [],
             fieldSchema: is_array($input['field_schema'] ?? null) ? $input['field_schema'] : null,
             title: self::nullableString($input, 'title'),
             recipients: $recipients,

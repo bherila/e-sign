@@ -13,9 +13,12 @@ use App\Domain\Evidence\Finalization\Artifacts\ArtifactKind;
 use App\Domain\Evidence\Finalization\Artifacts\ArtifactStore;
 use App\Domain\Evidence\Finalization\Exceptions\FinalizationException;
 use App\Domain\Evidence\Finalization\Exceptions\PublicationSuperseded;
+use App\Domain\Evidence\Sealing\SealedArtifact;
 use App\Domain\Evidence\Sealing\SealRequest;
+use App\Domain\Evidence\Sealing\ValidationReport;
 use App\Domain\Preparation\Contracts\DocumentReadUnavailable;
 use App\Domain\Preparation\Documents\DocumentBlobStore;
+use App\Domain\Preparation\Documents\DocumentSet;
 use App\Domain\Preparation\Documents\Models\DocumentRevision;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Signing\Envelopes\EnvelopeState;
@@ -255,7 +258,8 @@ final readonly class EnvelopeFinalizer
                     $candidate->outputs ?? [],
                 ));
 
-                if (count($prepared) !== count(ArtifactKind::cases())) {
+                // The three envelope-level artifacts, and one more per document of a set.
+                if (count($prepared) !== 3 + count($input->documents)) {
                     continue;
                 }
 
@@ -284,7 +288,7 @@ final readonly class EnvelopeFinalizer
      */
     private function render(FinalizationInput $input, int $generation): array
     {
-        $reviewPdf = $this->reviewBytes($input);
+        $reviewPdfs = $this->reviewSet($input);
 
         $report = CompletionReport::build(
             $input,
@@ -294,37 +298,49 @@ final readonly class EnvelopeFinalizer
 
         $reportPdf = $this->completionReport->render($report);
 
-        $executed = $this->renderer->render(
-            $input,
-            $reviewPdf,
-            $reportPdf,
-            $this->schemaFor($input),
-        );
+        $schema = $this->schemaFor($input);
+        $documentPdfs = [];
 
-        // Fail closed on any sealing exception: the level requested is the level the bytes
-        // must reach, and a sealer that cannot reach it throws rather than downgrading.
-        $sealed = $this->sealer->seal(new SealRequest(
-            pdf: $executed,
-            level: $input->assuranceLevel,
-            reason: 'Executed agreement sealed by the service',
-            location: 'BWH eSign',
-        ));
+        if ($input->hasDocumentSet()) {
+            $rendered = $this->renderer->renderSet($input, $this->setOf($input), $reviewPdfs, $reportPdf, $schema);
+            $executed = $rendered['combined'];
+            $documentPdfs = $rendered['documents'];
+        } else {
+            $executed = $this->renderer->render($input, $reviewPdfs[1], $reportPdf, $schema);
+        }
+
+        [$sealed, $validation] = $this->sealAndVerify($executed, $input, 'Executed agreement sealed by the service');
 
         $sealedAt = CarbonImmutable::now()->utc()->toIso8601ZuluString();
 
-        // Re-read the produced bytes independently of the sealer's own check. "The backend
-        // was asked for profile X" is not evidence that the bytes reach profile X.
-        $validation = $this->validator->validate($sealed->pdf);
+        $validationArray = EvidenceDocument::validationReport($validation);
 
-        if (! $validation->isValid() || $validation->reachedLevel() !== $input->assuranceLevel) {
-            throw new FinalizationException(
-                'The sealed document did not validate at PAdES '.$input->assuranceLevel->value
-                .' when it was read back (reported '.($validation->reachedLevel()?->value ?? 'unsigned')
-                .'). Nothing is published.',
+        // Each document of a set on its own (issue #163). Sealed and read back exactly as the
+        // whole agreement is: a set of N publishes N + 1 sealed PDFs, or none.
+        $documentArtifacts = [];
+        $documentValidations = [];
+
+        foreach ($documentPdfs as $position => $pdf) {
+            [$documentSealed, $documentValidation] = $this->sealAndVerify(
+                $pdf,
+                $input,
+                'Document '.$position.' of the executed agreement, sealed by the service',
+            );
+
+            $documentValidations[$position] = $documentValidation;
+            $documentArtifacts[$position] = PreparedArtifact::of(
+                kind: ArtifactKind::ExecutedDocument,
+                bytes: $documentSealed->pdf,
+                disk: $this->disk,
+                workspacePublicId: $input->workspacePublicId,
+                envelopePublicId: $input->envelopePublicId,
+                sealKeyId: $documentSealed->keyId,
+                sealCertificateSha256: $this->sealIdentity->certificateFingerprint(),
+                assuranceLevelReached: $documentSealed->level,
+                validationReport: EvidenceDocument::validationReport($documentValidation),
+                slot: (int) $position,
             );
         }
-
-        $validationArray = EvidenceDocument::validationReport($validation);
 
         $executedArtifact = PreparedArtifact::of(
             kind: ArtifactKind::ExecutedPdf,
@@ -365,11 +381,23 @@ final readonly class EnvelopeFinalizer
             artifactDigests: [
                 ArtifactKind::ExecutedPdf->value => $executedArtifact->sha256,
                 ArtifactKind::CompletionReport->value => $reportArtifact->sha256,
+                ...array_combine(
+                    array_map(static fn (int $position): string => ArtifactKind::ExecutedDocument->value.':'.$position, array_keys($documentArtifacts)),
+                    array_map(static fn (PreparedArtifact $artifact): string => $artifact->sha256, array_values($documentArtifacts)),
+                ),
             ],
             artifactSizes: [
                 ArtifactKind::ExecutedPdf->value => $executedArtifact->byteCount,
                 ArtifactKind::CompletionReport->value => $reportArtifact->byteCount,
+                ...array_combine(
+                    array_map(static fn (int $position): string => ArtifactKind::ExecutedDocument->value.':'.$position, array_keys($documentArtifacts)),
+                    array_map(static fn (PreparedArtifact $artifact): int => $artifact->byteCount, array_values($documentArtifacts)),
+                ),
             ],
+            documentValidations: array_map(
+                static fn (ValidationReport $report): ?string => $report->reachedLevel()?->value,
+                $documentValidations,
+            ),
         );
 
         $evidenceArtifact = PreparedArtifact::of(
@@ -382,7 +410,87 @@ final readonly class EnvelopeFinalizer
             sealCertificateSha256: $this->sealIdentity->certificateFingerprint(),
         );
 
-        return [$executedArtifact, $reportArtifact, $evidenceArtifact];
+        return [$executedArtifact, $reportArtifact, $evidenceArtifact, ...array_values($documentArtifacts)];
+    }
+
+    /**
+     * Seal, then read the bytes back independently of the sealer's own check: "the backend was
+     * asked for profile X" is not evidence that the bytes reach profile X. Fails closed on any
+     * sealing exception, because the level requested is the level the bytes must reach and a
+     * sealer that cannot reach it throws rather than downgrading.
+     *
+     * @return array{0: SealedArtifact, 1: ValidationReport}
+     */
+    private function sealAndVerify(string $pdf, FinalizationInput $input, string $reason): array
+    {
+        $sealed = $this->sealer->seal(new SealRequest(
+            pdf: $pdf,
+            level: $input->assuranceLevel,
+            reason: $reason,
+            location: 'BWH eSign',
+        ));
+
+        $validation = $this->validator->validate($sealed->pdf);
+
+        if (! $validation->isValid() || $validation->reachedLevel() !== $input->assuranceLevel) {
+            throw new FinalizationException(
+                'The sealed document did not validate at PAdES '.$input->assuranceLevel->value
+                .' when it was read back (reported '.($validation->reachedLevel()?->value ?? 'unsigned')
+                .'). Nothing is published.',
+            );
+        }
+
+        return [$sealed, $validation];
+    }
+
+    /**
+     * Every member's review bytes, by position, each checked against the digest the set froze,
+     * and the set against the digest every acceptance binds.
+     *
+     * @return array<int, string>
+     */
+    private function reviewSet(FinalizationInput $input): array
+    {
+        if (! $input->hasDocumentSet()) {
+            return [1 => $this->reviewBytes($input)];
+        }
+
+        $set = $this->setOf($input);
+
+        if (! hash_equals($input->documentSha256, $set->digest())) {
+            throw new FinalizationException(
+                'The document set no longer hashes to the digest the envelope and every attestation are '
+                .'bound to. Nothing is published.',
+            );
+        }
+
+        $bytes = [];
+
+        foreach ($set->entries as $entry) {
+            $revision = DocumentRevision::query()->findOrFail($entry->revisionId);
+            $read = $this->documents->disk($revision->disk)->get($revision->path);
+
+            if (! is_string($read) || $read === '' || ! hash_equals($entry->sha256, hash('sha256', $read))) {
+                throw new FinalizationException(
+                    'Document '.$entry->position.' of the set could not be read, or no longer hashes to the digest '
+                    .'the set froze. Nothing is published.',
+                );
+            }
+
+            $bytes[$entry->position] = $read;
+        }
+
+        return $bytes;
+    }
+
+    private function setOf(FinalizationInput $input): DocumentSet
+    {
+        return DocumentSet::of(array_map(static fn (array $document): array => [
+            'revision_id' => $document['revision_id'],
+            'title' => $document['title'],
+            'sha256' => $document['sha256'],
+            'page_count' => $document['page_count'],
+        ], $input->documents));
     }
 
     /**

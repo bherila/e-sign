@@ -41,6 +41,8 @@ final readonly class LocatedArtifact
         public int $bytes,
         public ?CarbonImmutable $createdAt,
         private Closure $stream,
+        /** A document set member's position for an `executed_document`; null otherwise (issue #163). */
+        public ?int $documentPosition = null,
     ) {}
 
     /**
