@@ -66,6 +66,9 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix(FirmaProfile::BASE_PATH)
     ->name('compat.firma.')
+    // The 6 MiB body ceiling is not here: it must refuse before the framework's global
+    // middleware decodes the body, so FirmaRequestSizeLimit is registered globally
+    // (bootstrap/app.php) and scoped to this prefix there.
     ->middleware([FirmaErrorBoundary::class])
     ->group(function (): void {
 

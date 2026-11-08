@@ -61,6 +61,16 @@ enum FirmaErrorCode: string
      */
     case AlreadySent = 'already_sent';
 
+    /* ------------------------------------------------------------------------ 413 */
+
+    /**
+     * A request body over the documented 6 MiB ceiling.
+     *
+     * Upstream documents the code as `REQUEST_TOO_LARGE` in its structured error format;
+     * the token here follows this enum's lowercase vocabulary, as every other member does.
+     */
+    case RequestTooLarge = 'request_too_large';
+
     /* ------------------------------------------------------------------ 422 */
 
     /** A body that validated structurally and asks for something inconsistent. */
@@ -92,6 +102,7 @@ enum FirmaErrorCode: string
             self::Forbidden => Response::HTTP_FORBIDDEN,
             self::NotFound => Response::HTTP_NOT_FOUND,
             self::NoDocumentAvailable, self::InvalidState, self::AlreadySent => Response::HTTP_CONFLICT,
+            self::RequestTooLarge => Response::HTTP_REQUEST_ENTITY_TOO_LARGE,
             self::UnprocessableEntity, self::ValidationFailed => Response::HTTP_UNPROCESSABLE_ENTITY,
             self::Unsupported => Response::HTTP_NOT_IMPLEMENTED,
             self::InternalError => Response::HTTP_INTERNAL_SERVER_ERROR,

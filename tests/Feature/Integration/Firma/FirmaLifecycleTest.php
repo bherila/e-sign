@@ -6,7 +6,12 @@ namespace Tests\Feature\Integration\Firma;
 
 use App\Domain\Signing\Envelopes\EnvelopeState;
 use App\Domain\Signing\Models\Envelope;
+use App\Http\Middleware\Compat\FirmaRequestSizeLimit;
+use Illuminate\Contracts\Http\Kernel;
+use Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull;
+use Illuminate\Foundation\Http\Middleware\TrimStrings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Middleware\ValidatePostSize;
 use Tests\Support\FirmaFacadeScenario;
 use Tests\TestCase;
 
@@ -423,6 +428,88 @@ class FirmaLifecycleTest extends TestCase
             ->assertJsonPath('error', 'invalid_state')
             ->assertJsonPath('details.transition', 'send')
             ->assertJsonPath('details.from', 'cancelled');
+    }
+
+    /**
+     * A body over the documented 6 MiB ceiling is refused in this surface's envelope
+     * before anything is parsed or created.
+     */
+    public function test_a_body_over_the_size_limit_is_refused_before_anything_is_created(): void
+    {
+        $scenario = FirmaFacadeScenario::create();
+        $issued = $scenario->credential();
+        $before = Envelope::query()->count();
+
+        $this->postJson(self::BASE, [
+            'name' => 'Synthetic oversized',
+            'document' => str_repeat('A', 6_291_457),
+        ], FirmaFacadeScenario::headers($issued))
+            ->assertStatus(413)
+            ->assertJsonPath('error', 'request_too_large');
+
+        $this->assertSame($before, Envelope::query()->count());
+    }
+
+    /** A body under the ceiling is judged on its contents, never refused for its size. */
+    public function test_a_body_under_the_size_limit_is_not_refused_for_its_size(): void
+    {
+        $scenario = FirmaFacadeScenario::create();
+        $issued = $scenario->credential();
+
+        $response = $this->postJson(self::BASE, [
+            'name' => 'Synthetic under the ceiling',
+            'document' => str_repeat('A', 6_000_000),
+        ], FirmaFacadeScenario::headers($issued));
+
+        $this->assertNotSame(413, $response->getStatusCode());
+    }
+
+    /**
+     * The ceiling refuses before anything decodes the body.
+     *
+     * Route middleware is too late: the framework's global TrimStrings and
+     * ConvertEmptyStringsToNull decode and walk a JSON body before any route middleware
+     * runs, so the guard has to sit ahead of them in the global stack.
+     */
+    public function test_the_size_limit_runs_before_global_middleware_reads_the_body(): void
+    {
+        $global = $this->app->make(Kernel::class)->getGlobalMiddleware();
+        $guard = array_search(FirmaRequestSizeLimit::class, $global, true);
+
+        $this->assertIsInt($guard);
+
+        foreach ([ValidatePostSize::class, TrimStrings::class, ConvertEmptyStringsToNull::class] as $reader) {
+            $position = array_search($reader, $global, true);
+
+            $this->assertIsInt($position, $reader.' is expected in the global stack.');
+            $this->assertLessThan($position, $guard, 'The size limit must run before '.$reader.'.');
+        }
+    }
+
+    /** The refusal still carries the headers every response carries. */
+    public function test_the_size_refusal_carries_the_global_security_headers(): void
+    {
+        $scenario = FirmaFacadeScenario::create();
+        $issued = $scenario->credential();
+
+        $this->postJson(self::BASE, [
+            'name' => 'Synthetic oversized',
+            'document' => str_repeat('A', 6_291_457),
+        ], FirmaFacadeScenario::headers($issued))
+            ->assertStatus(413)
+            ->assertHeader('X-Frame-Options', 'DENY')
+            ->assertHeader('X-Content-Type-Options', 'nosniff')
+            ->assertHeader('Referrer-Policy', 'no-referrer');
+    }
+
+    /** The ceiling is this surface's: a large body elsewhere is not refused by it. */
+    public function test_the_size_limit_does_not_apply_outside_the_facade(): void
+    {
+        $response = $this->postJson('/api/v1/envelopes', [
+            'document' => str_repeat('A', 6_291_457),
+        ]);
+
+        $this->assertNotSame(413, $response->getStatusCode());
     }
 
     /**
