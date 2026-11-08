@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Invitation email</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1a1a1a}a:hover{color:#000}
+</style>
+</helmet>
+<div style="width: 390px; height: 760px; box-sizing: border-box; background: #f4f4f5; font-family: 'Instrument Sans', system-ui, sans-serif; color: #1a1a1a; padding: 24px 16px; display: flex; flex-direction: column; gap: 12px">
+  <div style="display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: #52525b">
+    <p style="margin: 0"><strong style="color: #1a1a1a">From:</strong> BWH eSign</p>
+    <p style="margin: 0"><strong style="color: #1a1a1a">Subject:</strong> Please review and sign: Synthetic Mutual NDA</p>
+  </div>
+  <div style="background: #ffffff; border-radius: 8px; padding: 28px 24px; display: flex; flex-direction: column; gap: 16px; font-size: 15px; line-height: 1.55">
+    <h1 style="margin: 0; font-size: 20px; font-weight: 600">Dana Buyer,</h1>
+    <p style="margin: 0">Acme Synthetic Ltd has asked you to review and sign <strong>Synthetic Mutual NDA</strong>.</p>
+    <a href="SignLanding.dc.html" style="align-self: center; display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 28px; border-radius: 6px; background: #1a1a1a; color: #fcfcfc; font-weight: 500; text-decoration: none">Review and sign</a>
+    <p style="margin: 0">This link stops working on 15 Nov 2026, 17:00 UTC. If it has expired by the time you get to it, ask Acme Synthetic Ltd to send a new one.</p>
+    <p style="margin: 0">Opening the link shows you the document. Nothing is signed until you say so on that page.</p>
+    <p style="margin: 0; color: #52525b">If you were not expecting this, you can ignore it — no signature is applied by doing nothing.</p>
+    <p style="margin: 0">Thanks,<br>BWH eSign</p>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

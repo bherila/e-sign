@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Link cannot be used</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="width: 390px; height: 760px; box-sizing: border-box; background: #fcfcfc; font-family: 'Instrument Sans', system-ui, sans-serif; color: #1a1a1a; display: flex; flex-direction: column">
+  <header style="border-bottom: 1px solid rgba(0,0,0,0.1); padding: 12px 16px">
+    <p style="margin: 0; font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: #71717a">BWH eSign</p>
+  </header>
+  <main style="flex-grow: 1; padding: 24px 16px; display: flex; flex-direction: column">
+    <h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.01em">This link cannot be used</h1>
+    <p style="margin: 8px 0 0; font-size: 14px; color: #71717a">Synthetic Mutual NDA</p>
+    <p style="margin: 24px 0 0; font-size: 14px; line-height: 1.55">The link may have expired, already been used, or been replaced by a newer one. It is also possible this agreement is no longer open for signature.</p>
+    <p style="margin: 16px 0 0; font-size: 14px; line-height: 1.55">Ask whoever sent it to send you a new link. Nothing has been signed, and doing nothing applies no signature.</p>
+  </main>
+  <footer style="border-top: 1px solid rgba(0,0,0,0.1); padding: 24px 16px; text-align: center; font-size: 12px; color: #71717a">
+    <p style="margin: 0">Electronic signature service. People sign; the finished PDF is sealed with this service's own certificate.</p>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

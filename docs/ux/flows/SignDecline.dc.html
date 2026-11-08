@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Signing page, declining</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1a1a1a}a:hover{color:#000}
+</style>
+</helmet>
+<div style="width: 390px; height: 900px; box-sizing: border-box; background: #fcfcfc; font-family: 'Instrument Sans', system-ui, sans-serif; color: #1a1a1a; display: flex; flex-direction: column">
+  <main style="flex-grow: 1; padding: 24px 16px; display: flex; flex-direction: column">
+    <p style="margin: 0; font-size: 12px; color: #71717a">… bottom of the signing page, below “Sign this agreement”</p>
+    <a href="SignComplete.dc.html" style="margin-top: 16px; display: flex; align-items: center; justify-content: center; min-height: 48px; border-radius: 6px; background: #1a1a1a; color: #fcfcfc; font-size: 16px; font-weight: 500; text-decoration: none; opacity: 0.5">Sign this agreement</a>
+    <div style="margin-top: 40px; border-top: 1px solid rgba(0,0,0,0.1); padding-top: 24px; display: flex; flex-direction: column; gap: 16px">
+      <label for="reason" style="font-size: 14px; font-weight: 500">Why are you declining? (optional)</label>
+      <textarea id="reason" rows="3" maxlength="500" style="box-sizing: border-box; width: 100%; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; padding: 12px; font-size: 16px; font-family: inherit; background: transparent">The named signatory has left.</textarea>
+      <div style="display: flex; align-items: flex-start; gap: 12px">
+        <input id="confirm" type="checkbox" checked style="width: 24px; height: 24px; margin: 2px 0 0; flex-shrink: 0">
+        <label for="confirm" style="font-size: 14px; line-height: 1.6">I understand declining stops this agreement for everybody, and that it cannot be reopened.</label>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 12px">
+        <a href="SignDeclined.dc.html" style="display: flex; align-items: center; justify-content: center; min-height: 44px; border-radius: 6px; border: 1px solid rgba(220,38,38,0.5); color: #dc2626; font-size: 16px; font-weight: 500; text-decoration: none">Decline this agreement</a>
+        <a href="SignSession.dc.html" style="display: flex; align-items: center; justify-content: center; min-height: 44px; border-radius: 6px; border: 1px solid rgba(0,0,0,0.2); font-size: 16px; text-decoration: none">Cancel</a>
+      </div>
+    </div>
+    <div style="margin-top: 40px; border: 1px dashed #a1a1aa; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 8px">
+      <p style="margin: 0; font-size: 13px; font-weight: 600">When the sender turned Decline off (#165)</p>
+      <p style="margin: 0; font-size: 13px; line-height: 1.5; color: #52525b">This whole block is not rendered. The service also refuses a decline posted anyway, and shows “This agreement cannot be declined here”.</p>
+    </div>
+  </main>
+  <footer style="border-top: 1px solid rgba(0,0,0,0.1); padding: 24px 16px; text-align: center; font-size: 12px; color: #71717a">
+    <p style="margin: 0">Electronic signature service. People sign; the finished PDF is sealed with this service's own certificate.</p>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Signing page</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1a1a1a}a:hover{color:#000}
+</style>
+</helmet>
+<div style="width: 390px; height: 2040px; box-sizing: border-box; background: #fcfcfc; font-family: 'Instrument Sans', system-ui, sans-serif; color: #1a1a1a; display: flex; flex-direction: column">
+  <header style="border-bottom: 1px solid rgba(0,0,0,0.1); padding: 12px 16px">
+    <p style="margin: 0; font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: #71717a">BWH eSign</p>
+  </header>
+  <main style="flex-grow: 1; padding: 24px 16px; display: flex; flex-direction: column">
+    <h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.01em">Synthetic Mutual NDA</h1>
+    <p style="margin: 4px 0 0; font-size: 14px; color: #71717a">Sent by Acme Synthetic Ltd. You are signing as Dana Buyer.</p>
+    <ul style="margin: 12px 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: #71717a">
+      <li>Dana Buyer (Buyer) — you · active</li>
+      <li>Sam Seller (Seller) · pending</li>
+    </ul>
+
+    <section aria-label="The agreement" style="margin-top: 32px; display: flex; flex-direction: column; gap: 8px">
+      <div style="display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: #71717a">
+        <span>Page 1 of 2</span>
+        <span style="display: flex; gap: 8px">
+          <button type="button" aria-label="Previous page" style="min-width: 44px; min-height: 44px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; background: transparent; font-family: inherit">‹</button>
+          <button type="button" aria-label="Next page" style="min-width: 44px; min-height: 44px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; background: transparent; font-family: inherit">›</button>
+        </span>
+      </div>
+      <div style="position: relative; height: 470px; background: #ffffff; border: 1px solid rgba(0,0,0,0.12); box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 28px 24px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px">
+        <p style="margin: 0; font-size: 11px; font-weight: 600">Mutual Non-Disclosure Agreement</p>
+        <div style="height: 6px; width: 92%; background: #e4e4e7; border-radius: 2px"></div>
+        <div style="height: 6px; width: 86%; background: #e4e4e7; border-radius: 2px"></div>
+        <div style="height: 6px; width: 90%; background: #e4e4e7; border-radius: 2px"></div>
+        <div style="height: 6px; width: 70%; background: #e4e4e7; border-radius: 2px"></div>
+        <div style="height: 6px; width: 88%; background: #e4e4e7; border-radius: 2px; margin-top: 10px"></div>
+        <div style="height: 6px; width: 80%; background: #e4e4e7; border-radius: 2px"></div>
+        <div style="height: 6px; width: 84%; background: #e4e4e7; border-radius: 2px"></div>
+        <div style="margin-top: auto; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+          <div style="display: flex; flex-direction: column; gap: 4px">
+            <span style="font-size: 9px; color: #52525b">Signature:</span>
+            <span style="height: 34px; border: 2px solid #2563eb; background: rgba(37,99,235,0.08); border-radius: 3px; font-size: 10px; color: #1d4ed8; display: flex; align-items: center; justify-content: center">Your signature</span>
+            <span style="font-size: 9px; color: #52525b">Printed name:</span>
+            <span style="height: 22px; border: 2px solid #2563eb; background: rgba(37,99,235,0.08); border-radius: 3px"></span>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 4px">
+            <span style="font-size: 9px; color: #52525b">Signature:</span>
+            <span style="height: 34px; border: 1px dashed #a1a1aa; border-radius: 3px; font-size: 10px; color: #71717a; display: flex; align-items: center; justify-content: center">Sam Seller</span>
+            <span style="font-size: 9px; color: #52525b">Date signed:</span>
+            <span style="height: 22px; border: 1px dashed #a1a1aa; border-radius: 3px"></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section aria-label="What you need to complete" style="margin-top: 40px; display: flex; flex-direction: column">
+      <h2 style="margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em">What you need to complete</h2>
+      <div style="margin-top: 16px; display: flex; flex-direction: column; gap: 24px">
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <label for="printed" style="font-size: 14px; font-weight: 500">Printed name <span style="color: #71717a; font-weight: 400">(required)</span></label>
+          <input id="printed" type="text" value="Dana Buyer" style="box-sizing: border-box; width: 100%; min-height: 44px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; padding: 0 12px; font-size: 16px; font-family: inherit; background: transparent">
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <span style="font-size: 14px; font-weight: 500">Signature <span style="color: #71717a; font-weight: 400">(required)</span></span>
+          <div role="tablist" aria-label="How to sign" style="display: flex; gap: 8px">
+            <button type="button" role="tab" aria-selected="true" style="flex-grow: 1; min-height: 44px; border-radius: 6px; border: 1px solid #1a1a1a; background: #1a1a1a; color: #fcfcfc; font-size: 15px; font-family: inherit">Draw</button>
+            <button type="button" role="tab" aria-selected="false" style="flex-grow: 1; min-height: 44px; border-radius: 6px; border: 1px solid rgba(0,0,0,0.2); background: transparent; font-size: 15px; font-family: inherit">Type</button>
+          </div>
+          <div style="height: 120px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; background: #ffffff; display: flex; align-items: center; justify-content: center; font-size: 13px; color: #71717a">Draw your signature here</div>
+          <button type="button" style="align-self: flex-start; min-height: 44px; padding: 0 16px; border-radius: 6px; border: 1px solid rgba(0,0,0,0.2); background: transparent; font-size: 15px; font-family: inherit">Clear</button>
+        </div>
+      </div>
+      <p style="margin: 16px 0 0; font-size: 12px; line-height: 1.5; color: #71717a">The date you signed is recorded by the service from its own clock when you agree, and is not something you or the sender can type.</p>
+      <div style="margin-top: 24px; display: flex; flex-direction: column; gap: 12px">
+        <button type="button" style="min-height: 44px; border-radius: 6px; border: 1px solid rgba(0,0,0,0.2); background: transparent; font-size: 16px; font-weight: 500; font-family: inherit">Save what I have filled in</button>
+        <button type="button" style="min-height: 44px; border-radius: 6px; border: 1px solid rgba(0,0,0,0.2); background: transparent; font-size: 16px; font-weight: 500; font-family: inherit">Save and finish later</button>
+        <p aria-live="polite" style="margin: 0; font-size: 14px; color: #71717a">1 unsaved change.</p>
+      </div>
+    </section>
+
+    <section style="margin-top: 40px; border-top: 1px solid rgba(0,0,0,0.1); padding-top: 32px; display: flex; flex-direction: column">
+      <h2 style="margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em">Before you sign</h2>
+      <div style="margin-top: 16px; font-size: 14px; line-height: 1.55; display: flex; flex-direction: column; gap: 8px">
+        <p style="margin: 0; font-weight: 600">Signing this agreement electronically</p>
+        <p style="margin: 0">You are about to sign this agreement electronically instead of on paper. Please read this short notice first.</p>
+        <p style="margin: 0; font-weight: 600">What your signature is</p>
+        <p style="margin: 0">When you tick the box and choose <strong>I agree</strong>, you are placing your electronic signature on this document. The mark you draw or type is displayed on the agreement, but it is not what makes the signature — your deliberate act of agreeing is.</p>
+        <p style="margin: 0; color: #71717a">… the rest of the notice …</p>
+      </div>
+      <p style="margin: 8px 0 0; font-size: 12px; color: #71717a">Consent notice version [CONSENT VERSION]. This version is recorded with your signature.</p>
+      <div style="margin-top: 24px; display: flex; flex-direction: column; gap: 16px">
+        <div style="display: flex; align-items: flex-start; gap: 12px">
+          <input id="consent" type="checkbox" style="width: 24px; height: 24px; margin: 2px 0 0; flex-shrink: 0">
+          <label for="consent" style="font-size: 14px; line-height: 1.6">I have read the notice above and agree to sign this agreement electronically.</label>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px">
+          <input id="intent" type="checkbox" style="width: 24px; height: 24px; margin: 2px 0 0; flex-shrink: 0">
+          <label for="intent" style="font-size: 14px; line-height: 1.6">I intend this to be my signature on <strong>Synthetic Mutual NDA</strong>, and I agree to be bound by it.</label>
+        </div>
+        <p style="margin: 0; font-size: 14px; color: #71717a">Save your changes before signing, so what you sign is what you filled in.</p>
+        <a href="SignComplete.dc.html" style="display: flex; align-items: center; justify-content: center; min-height: 48px; border-radius: 6px; background: #1a1a1a; color: #fcfcfc; font-size: 16px; font-weight: 500; text-decoration: none">Sign this agreement</a>
+      </div>
+      <div style="margin-top: 40px; border-top: 1px solid rgba(0,0,0,0.1); padding-top: 24px">
+        <a href="SignDecline.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: 6px; border: 1px solid rgba(0,0,0,0.2); font-size: 16px; text-decoration: none">I do not want to sign this</a>
+      </div>
+    </section>
+  </main>
+  <footer style="border-top: 1px solid rgba(0,0,0,0.1); padding: 24px 16px; text-align: center; font-size: 12px; color: #71717a">
+    <p style="margin: 0">Electronic signature service. People sign; the finished PDF is sealed with this service's own certificate.</p>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":2040}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

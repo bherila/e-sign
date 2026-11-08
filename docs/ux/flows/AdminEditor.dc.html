@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Template field editor</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1a1a1a}a:hover{color:#000}
+</style>
+</helmet>
+<div style="min-height: 980px; box-sizing: border-box; background: #fcfcfc; font-family: 'Instrument Sans', system-ui, sans-serif; color: #1a1a1a; display: flex; flex-direction: column">
+  <nav aria-label="Main" style="border-bottom: 1px solid rgba(0,0,0,0.1)">
+    <div style="max-width: 1360px; margin: 0 auto; padding: 12px 24px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px">
+      <a href="#" style="text-decoration: none; font-size: 18px; font-weight: 600; letter-spacing: -0.01em">Application</a>
+      <ul style="margin: 0; padding: 0; list-style: none; display: flex; gap: 20px; font-size: 14px">
+        <li><a href="#" style="text-decoration: none">Home</a></li>
+        <li><a href="AdminDashboard.dc.html" style="text-decoration: none">Workspaces</a></li>
+      </ul>
+    </div>
+  </nav>
+  <main style="flex-grow: 1; padding: 24px">
+    <div style="max-width: 1360px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px">
+      <div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px">
+        <h1 style="margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em">[Template name, version]</h1>
+      </div>
+
+      <div role="toolbar" aria-label="Field editor tools" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border: 1px solid rgba(0,0,0,0.1); border-radius: 8px; background: #ffffff; padding: 8px">
+        <button type="button" aria-label="Previous page" style="min-width: 36px; min-height: 36px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; background: #ffffff">‹</button>
+        <label style="display: flex; align-items: center; gap: 6px; font-size: 13px">Page <input type="number" value="1" style="width: 56px; min-height: 34px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; padding: 0 6px; font-family: inherit"></label>
+        <button type="button" aria-label="Next page" style="min-width: 36px; min-height: 36px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; background: #ffffff">›</button>
+        <span style="width: 1px; height: 24px; background: rgba(0,0,0,0.1)"></span>
+        <button type="button" aria-label="Zoom out" style="min-width: 36px; min-height: 36px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; background: #ffffff">−</button>
+        <label style="display: flex; align-items: center; gap: 6px; font-size: 13px">Zoom % <input type="number" value="100" style="width: 64px; min-height: 34px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; padding: 0 6px; font-family: inherit"></label>
+        <button type="button" aria-label="Zoom in" style="min-width: 36px; min-height: 36px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; background: #ffffff">+</button>
+        <button type="button" aria-pressed="false" style="min-height: 36px; padding: 0 12px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; background: #ffffff; font-family: inherit; font-size: 13px">Fit width</button>
+        <span style="width: 1px; height: 24px; background: rgba(0,0,0,0.1)"></span>
+        <button type="button" aria-label="Undo" style="min-width: 36px; min-height: 36px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; background: #ffffff">↶</button>
+        <button type="button" aria-label="Redo" style="min-width: 36px; min-height: 36px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; background: #ffffff">↷</button>
+        <span style="width: 1px; height: 24px; background: rgba(0,0,0,0.1)"></span>
+        <label style="display: flex; align-items: center; gap: 6px; font-size: 13px">New field type
+          <select style="min-height: 34px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; padding: 0 6px; font-family: inherit; background: #ffffff"><option>signature</option><option>initials</option><option>agreement_date</option><option>signing_date</option></select></label>
+        <label style="display: flex; align-items: center; gap: 6px; font-size: 13px">For recipient
+          <select style="min-height: 34px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; padding: 0 6px; font-family: inherit; background: #ffffff"><option>Dana Buyer</option><option>Sam Seller</option></select></label>
+        <button type="button" style="min-height: 36px; padding: 0 12px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; background: #ffffff; font-family: inherit; font-size: 13px">Add field</button>
+        <button type="button" style="margin-left: auto; min-height: 36px; padding: 0 16px; border: 0; border-radius: 6px; background: #1a1a1a; color: #fcfcfc; font-family: inherit; font-size: 13px; font-weight: 500">Save</button>
+      </div>
+
+      <div style="display: flex; flex-wrap: wrap; gap: 16px">
+        <div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 16px">
+          <div style="position: relative; height: 620px; background: #e4e4e7; border-radius: 8px; padding: 24px; box-sizing: border-box; display: flex; justify-content: center">
+            <div style="position: relative; width: 460px; height: 100%; background: #ffffff; box-shadow: 0 1px 4px rgba(0,0,0,0.15); padding: 36px 32px; box-sizing: border-box; display: flex; flex-direction: column; gap: 9px">
+              <p style="margin: 0; font-size: 12px; font-weight: 600">Mutual Non-Disclosure Agreement</p>
+              <div style="height: 6px; width: 92%; background: #e4e4e7"></div>
+              <div style="height: 6px; width: 85%; background: #e4e4e7"></div>
+              <div style="height: 6px; width: 90%; background: #e4e4e7"></div>
+              <div style="height: 6px; width: 74%; background: #e4e4e7"></div>
+              <div style="height: 6px; width: 88%; background: #e4e4e7; margin-top: 12px"></div>
+              <div style="height: 6px; width: 82%; background: #e4e4e7"></div>
+              <div style="margin-top: auto; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px">
+                <div style="display: flex; flex-direction: column; gap: 6px">
+                  <span style="height: 40px; border: 2px solid #2563eb; background: rgba(37,99,235,0.1); border-radius: 3px; font-size: 11px; color: #1d4ed8; display: flex; align-items: center; justify-content: center">signature · Dana</span>
+                  <span style="height: 24px; border: 2px solid #2563eb; background: rgba(37,99,235,0.1); border-radius: 3px; font-size: 11px; color: #1d4ed8; display: flex; align-items: center; padding: 0 6px">text · Dana</span>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 6px">
+                  <span style="height: 40px; border: 2px solid #c2410c; background: rgba(194,65,12,0.1); border-radius: 3px; font-size: 11px; color: #9a3412; display: flex; align-items: center; justify-content: center; outline: 2px solid #1a1a1a; outline-offset: 2px">signature · Sam</span>
+                  <span style="height: 24px; border: 2px solid #c2410c; background: rgba(194,65,12,0.1); border-radius: 3px; font-size: 11px; color: #9a3412; display: flex; align-items: center; padding: 0 6px">signing_date · Sam</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <section aria-label="Fields table" style="border: 1px solid rgba(0,0,0,0.1); border-radius: 8px; background: #ffffff; overflow-x: auto">
+            <table style="width: 100%; border-collapse: collapse; font-size: 13px">
+              <thead><tr style="text-align: left; color: #71717a; border-bottom: 1px solid rgba(0,0,0,0.1)"><th scope="col" style="padding: 8px 12px; font-weight: 500">Field</th><th scope="col" style="padding: 8px 12px; font-weight: 500">Type</th><th scope="col" style="padding: 8px 12px; font-weight: 500">Recipient</th><th scope="col" style="padding: 8px 12px; font-weight: 500">Page</th><th scope="col" style="padding: 8px 12px; font-weight: 500">Required</th></tr></thead>
+              <tbody>
+                <tr style="border-bottom: 1px solid rgba(0,0,0,0.06)"><td style="padding: 8px 12px">buyer_signature</td><td style="padding: 8px 12px">signature</td><td style="padding: 8px 12px">Dana Buyer</td><td style="padding: 8px 12px">1</td><td style="padding: 8px 12px">Yes</td></tr>
+                <tr style="background: #f4f4f5"><td style="padding: 8px 12px">seller_signature</td><td style="padding: 8px 12px">signature</td><td style="padding: 8px 12px">Sam Seller</td><td style="padding: 8px 12px">1</td><td style="padding: 8px 12px">Yes</td></tr>
+              </tbody>
+            </table>
+          </section>
+        </div>
+
+        <aside style="flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 16px">
+          <section aria-labelledby="editor-inspector" style="border: 1px solid rgba(0,0,0,0.1); border-radius: 8px; background: #ffffff; padding: 16px; display: flex; flex-direction: column; gap: 10px">
+            <h2 id="editor-inspector" style="margin: 0; font-size: 14px; font-weight: 600">Field</h2>
+            <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px">Label <input type="text" value="Seller signature" style="min-height: 34px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; padding: 0 8px; font-family: inherit"></label>
+            <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px">Type <select style="min-height: 34px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; padding: 0 6px; font-family: inherit; background: #ffffff"><option>signature</option></select></label>
+            <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px">Recipient <select style="min-height: 34px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; padding: 0 6px; font-family: inherit; background: #ffffff"><option>Sam Seller</option></select></label>
+            <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+              <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px">Width <input type="number" value="180" style="min-height: 34px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; padding: 0 8px; font-family: inherit"></label>
+              <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px">Height <input type="number" value="36" style="min-height: 34px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; padding: 0 8px; font-family: inherit"></label>
+            </div>
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 13px"><input type="checkbox" checked> Required</label>
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 13px"><input type="checkbox"> Read-only</label>
+            <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px">Prefill variable <input type="text" placeholder="recipient.name" style="min-height: 34px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; padding: 0 8px; font-family: inherit"></label>
+            <p style="margin: 0; font-size: 12px; color: #71717a">Anchor placement: off</p>
+          </section>
+          <section aria-labelledby="editor-recipients" style="border: 1px solid rgba(0,0,0,0.1); border-radius: 8px; background: #ffffff; padding: 16px; display: flex; flex-direction: column; gap: 8px">
+            <h2 id="editor-recipients" style="margin: 0; font-size: 14px; font-weight: 600">Recipients</h2>
+            <p style="margin: 0; font-size: 13px; display: flex; align-items: center; gap: 8px"><span style="width: 12px; height: 12px; border-radius: 3px; background: #2563eb"></span> Dana Buyer · Buyer · stage 1</p>
+            <p style="margin: 0; font-size: 13px; display: flex; align-items: center; gap: 8px"><span style="width: 12px; height: 12px; border-radius: 3px; background: #c2410c"></span> Sam Seller · Seller · stage 2</p>
+          </section>
+          <section aria-labelledby="editor-validation" style="border: 1px solid rgba(0,0,0,0.1); border-radius: 8px; background: #ffffff; padding: 16px; display: flex; flex-direction: column; gap: 8px">
+            <h2 id="editor-validation" style="margin: 0; font-size: 14px; font-weight: 600">Validation</h2>
+            <p style="margin: 0; font-size: 13px; color: #71717a">[Validation messages, each with a “go to field” action]</p>
+          </section>
+          <section aria-labelledby="editor-import-export" style="border: 1px solid rgba(0,0,0,0.1); border-radius: 8px; background: #ffffff; padding: 16px; display: flex; flex-direction: column; gap: 8px">
+            <h2 id="editor-import-export" style="margin: 0; font-size: 14px; font-weight: 600">JSON</h2>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px">
+              <button type="button" style="min-height: 34px; padding: 0 12px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; background: #ffffff; font-family: inherit; font-size: 13px">Export canonical JSON</button>
+              <button type="button" style="min-height: 34px; padding: 0 12px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; background: #ffffff; font-family: inherit; font-size: 13px">[Import a JSON file]</button>
+            </div>
+          </section>
+        </aside>
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":980}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>
