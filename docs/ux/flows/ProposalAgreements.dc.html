@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agreements (proposal)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1a1a1a}a:hover{color:#000}
+</style>
+</helmet>
+<div style="min-height: 900px; box-sizing: border-box; background: #fcfcfc; font-family: 'Instrument Sans', system-ui, sans-serif; color: #1a1a1a; display: flex; flex-direction: column">
+  <nav aria-label="Main" style="border-bottom: 1px solid rgba(0,0,0,0.1)">
+    <div style="max-width: 1120px; margin: 0 auto; padding: 12px 24px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px">
+      <a href="#" style="text-decoration: none; font-size: 18px; font-weight: 600; letter-spacing: -0.01em">BWH eSign</a>
+      <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 20px; font-size: 14px">
+        <li><a href="ProposalAgreements.dc.html" aria-current="page" style="text-decoration: underline; text-underline-offset: 4px; font-weight: 500">Agreements</a></li>
+        <li><a href="AdminEditor.dc.html" style="text-decoration: none">Templates</a></li>
+        <li><a href="AdminMembers.dc.html" style="text-decoration: none">Members</a></li>
+        <li><a href="AdminDashboard.dc.html" style="text-decoration: none">Workspaces</a></li>
+      </ul>
+    </div>
+  </nav>
+  <main style="flex-grow: 1; padding: 32px 24px">
+    <div style="max-width: 1072px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px">
+      <p style="margin: 0; align-self: flex-start; padding: 4px 10px; border-radius: 999px; background: #f3e8ff; color: #6b21a8; font-size: 12px; font-weight: 600">Proposal — not built</p>
+      <div style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px">
+        <div style="display: flex; flex-direction: column; gap: 4px">
+          <h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.01em">Agreements</h1>
+          <p style="margin: 0; font-size: 14px; color: #71717a">Acme Synthetic Ltd</p>
+        </div>
+        <a href="ProposalNewAgreement.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 20px; border-radius: 6px; background: #1a1a1a; color: #fcfcfc; font-size: 15px; font-weight: 500; text-decoration: none">New agreement</a>
+      </div>
+
+      <div role="group" aria-label="Filter by status" style="display: flex; flex-wrap: wrap; gap: 8px">
+        <button type="button" aria-pressed="true" style="min-height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid #1a1a1a; background: #1a1a1a; color: #fcfcfc; font-family: inherit; font-size: 13px">Needs attention · 2</button>
+        <button type="button" aria-pressed="false" style="min-height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid rgba(0,0,0,0.2); background: #ffffff; font-family: inherit; font-size: 13px">Out for signature · 5</button>
+        <button type="button" aria-pressed="false" style="min-height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid rgba(0,0,0,0.2); background: #ffffff; font-family: inherit; font-size: 13px">Drafts · 1</button>
+        <button type="button" aria-pressed="false" style="min-height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid rgba(0,0,0,0.2); background: #ffffff; font-family: inherit; font-size: 13px">Completed · 42</button>
+        <button type="button" aria-pressed="false" style="min-height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid rgba(0,0,0,0.2); background: #ffffff; font-family: inherit; font-size: 13px">Closed · 3</button>
+        <label style="margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 13px">
+          <span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Search agreements</span>
+          <input type="search" placeholder="Search title or signer" style="min-height: 36px; width: 240px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; padding: 0 10px; font-family: inherit; font-size: 13px; background: #ffffff">
+        </label>
+      </div>
+
+      <div style="overflow-x: auto; border: 1px solid rgba(0,0,0,0.1); border-radius: 8px; background: #ffffff">
+        <table style="width: 100%; min-width: 760px; border-collapse: collapse; font-size: 14px">
+          <thead>
+            <tr style="border-bottom: 1px solid rgba(0,0,0,0.1); text-align: left; color: #71717a">
+              <th scope="col" style="padding: 12px 16px; font-weight: 500">Agreement</th>
+              <th scope="col" style="padding: 12px 16px; font-weight: 500">Status</th>
+              <th scope="col" style="padding: 12px 16px; font-weight: 500">Signers</th>
+              <th scope="col" style="padding: 12px 16px; font-weight: 500">Sent</th>
+              <th scope="col" style="padding: 12px 16px; font-weight: 500">Closes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom: 1px solid rgba(0,0,0,0.06)">
+              <td style="padding: 12px 16px"><a href="ProposalAgreementDetail.dc.html" style="font-weight: 500">Synthetic Mutual NDA</a><div style="font-size: 12px; color: #71717a">from template “Mutual NDA” v3</div></td>
+              <td style="padding: 12px 16px"><span style="display: inline-block; padding: 2px 10px; border-radius: 999px; background: #dbeafe; color: #1e40af; font-size: 12px; font-weight: 500">In progress</span></td>
+              <td style="padding: 12px 16px">1 of 2 signed<div style="font-size: 12px; color: #71717a">Waiting for Sam Seller</div></td>
+              <td style="padding: 12px 16px; color: #52525b">8 Nov 2026</td>
+              <td style="padding: 12px 16px; color: #52525b">15 Nov 2026</td>
+            </tr>
+            <tr style="border-bottom: 1px solid rgba(0,0,0,0.06)">
+              <td style="padding: 12px 16px"><a href="ProposalAgreementDetail.dc.html" style="font-weight: 500">Synthetic Order Form 0042</a><div style="font-size: 12px; color: #71717a">uploaded PDF</div></td>
+              <td style="padding: 12px 16px"><span style="display: inline-block; padding: 2px 10px; border-radius: 999px; background: #fee2e2; color: #991b1b; font-size: 12px; font-weight: 500">Declined</span></td>
+              <td style="padding: 12px 16px">Declined by Jordan Client<div style="font-size: 12px; color: #71717a">“Pricing needs another look.”</div></td>
+              <td style="padding: 12px 16px; color: #52525b">6 Nov 2026</td>
+              <td style="padding: 12px 16px; color: #52525b">—</td>
+            </tr>
+            <tr style="border-bottom: 1px solid rgba(0,0,0,0.06)">
+              <td style="padding: 12px 16px"><a href="ProposalAgreementDetail.dc.html" style="font-weight: 500">Synthetic Data Destruction Certificate</a><div style="font-size: 12px; color: #71717a">from template “Data destruction” v1</div></td>
+              <td style="padding: 12px 16px"><span style="display: inline-block; padding: 2px 10px; border-radius: 999px; background: #fef3c7; color: #92400e; font-size: 12px; font-weight: 500">Finalization failed</span></td>
+              <td style="padding: 12px 16px">All signed<div style="font-size: 12px; color: #71717a">The sealed PDF could not be produced</div></td>
+              <td style="padding: 12px 16px; color: #52525b">5 Nov 2026</td>
+              <td style="padding: 12px 16px; color: #52525b">—</td>
+            </tr>
+            <tr>
+              <td style="padding: 12px 16px"><a href="ProposalAgreementDetail.dc.html" style="font-weight: 500">Synthetic Practice NDA</a><div style="font-size: 12px; color: #71717a">from template “Practice NDA” v2</div></td>
+              <td style="padding: 12px 16px"><span style="display: inline-block; padding: 2px 10px; border-radius: 999px; background: #f4f4f5; color: #3f3f46; font-size: 12px; font-weight: 500">Draft</span></td>
+              <td style="padding: 12px 16px">Not sent<div style="font-size: 12px; color: #71717a">1 prefill missing</div></td>
+              <td style="padding: 12px 16px; color: #52525b">—</td>
+              <td style="padding: 12px 16px; color: #52525b">—</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="margin: 0; font-size: 13px; color: #52525b">“Needs attention” = declined, expired, or finalization failed, plus drafts that cannot be sent yet. Statuses map 1:1 to the envelope states (draft, sent, in progress, finalizing, completed, cancelled, declined, expired, finalization failed).</p>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

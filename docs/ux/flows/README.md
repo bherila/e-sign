@@ -10,6 +10,7 @@ application.
 | Signer: invitation to signature (phone width) | `Main` (invitation email) → `SignLanding` → `SignCode` → `SignSession` → `SignDecline` → `SignComplete` / `SignDeclined` |
 | Signer: interruptions and refusals | `SignStale`, `SignNoSession`, `SignUnavailable`, `SignRateLimited`, `SignDeclineUnavailable`, `SignLegacy` |
 | Sender and workspace admin (desktop) | `AdminSignIn`, `AdminDashboard`, `AdminMembers`, `AdminInvitation`, `AdminEditor` |
+| Proposal: sender agreements UI (not built, #174) | `ProposalAgreements` → `ProposalAgreementDetail`, `ProposalNewAgreement` |
 
 Review questions, known gaps (there is no sender UI for agreements) and small findings are
 sticky notes in `canvas.json` under `notes`.

@@ -150,6 +150,33 @@
       "h": 980,
       "title": "Template field editor",
       "expand": "fill"
+    },
+    "ProposalAgreements.dc.html": {
+      "x": 0,
+      "y": 6310,
+      "w": 1280,
+      "h": 900,
+      "title": "Proposal · Agreements list",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "ProposalAgreementDetail.dc.html": {
+      "x": 1360,
+      "y": 6310,
+      "w": 1280,
+      "h": 1120,
+      "title": "Proposal · Agreement detail",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "ProposalNewAgreement.dc.html": {
+      "x": 2720,
+      "y": 6310,
+      "w": 1280,
+      "h": 1120,
+      "title": "Proposal · New agreement",
+      "expand": "fill",
+      "is_interactive": true
     }
   },
   "order": [
@@ -170,7 +197,10 @@
     "AdminDashboard.dc.html",
     "AdminMembers.dc.html",
     "AdminInvitation.dc.html",
-    "AdminEditor.dc.html"
+    "AdminEditor.dc.html",
+    "ProposalAgreements.dc.html",
+    "ProposalAgreementDetail.dc.html",
+    "ProposalNewAgreement.dc.html"
   ],
   "notes": {
     "rowSigner": {
@@ -241,6 +271,29 @@
       "text": "Findings from this pass (each is a small fix)\n\n• Consent notice says “choose I agree”, but the button reads “Sign this agreement”.\n• Sender navbar brand reads “Application”, not BWH eSign.\n• “Accept invitation” is ~36px tall (py-2 text-sm); signing pages use 44px targets.\n• Editor field-type picker shows raw values (agreement_date, signing_date) as labels.\n• Destructive colour token (hsl 0 84% 60%) is ~3.7:1 for small error text; these mock-ups use #dc2626 (~4.7:1).",
       "fill": "gray",
       "size": "m"
+    },
+    "rowProposal": {
+      "x": 0,
+      "y": 6010,
+      "text": "Proposal: sender agreements UI",
+      "kind": "title1",
+      "maxW": 4000
+    },
+    "rowProposalSticky": {
+      "x": 4080,
+      "y": 6310,
+      "w": 520,
+      "fill": "purple",
+      "size": "m",
+      "text": "Proposal, not built. Every action maps to a native API operation that exists today, except where marked:\n\n• List: needs a new GET /api/v1/envelopes (there is no list endpoint yet), filtered by state.\n• Detail: GET envelope, /recipients, /events, /artifacts, /evidence-bundle; POST /send, /cancel.\n• New: POST /api/v1/envelopes from a published template version, or from an uploaded document plus the field editor.\n• Not offered: “Remind now” — reminders run on the service's schedule (esign:signing:remind); no per-envelope trigger exists.\n\nRoles: Sender (createEnvelopes) creates and sends; Auditor (readAudit) sees the timeline read-only."
+    },
+    "rowProposalQuestions": {
+      "x": 4080,
+      "y": 7100,
+      "w": 520,
+      "fill": "orange",
+      "size": "m",
+      "text": "Questions for review\n\n• Is a draft editable after creation (recipients, prefills), or is New → Review → Send one pass?\n• Should “Cancel” ask for a reason (the API accepts one)?\n• Show the evidence bundle download to every Sender, or Auditors only?"
     }
   },
   "designSystems": []

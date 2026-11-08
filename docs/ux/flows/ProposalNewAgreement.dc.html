@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>New agreement (proposal)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1a1a1a}a:hover{color:#000}
+</style>
+</helmet>
+<div style="min-height: 1120px; box-sizing: border-box; background: #fcfcfc; font-family: 'Instrument Sans', system-ui, sans-serif; color: #1a1a1a; display: flex; flex-direction: column">
+  <nav aria-label="Main" style="border-bottom: 1px solid rgba(0,0,0,0.1)">
+    <div style="max-width: 1120px; margin: 0 auto; padding: 12px 24px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px">
+      <a href="#" style="text-decoration: none; font-size: 18px; font-weight: 600; letter-spacing: -0.01em">BWH eSign</a>
+      <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 20px; font-size: 14px">
+        <li><a href="ProposalAgreements.dc.html" style="text-decoration: underline; text-underline-offset: 4px; font-weight: 500">Agreements</a></li>
+        <li><a href="AdminEditor.dc.html" style="text-decoration: none">Templates</a></li>
+        <li><a href="AdminMembers.dc.html" style="text-decoration: none">Members</a></li>
+        <li><a href="AdminDashboard.dc.html" style="text-decoration: none">Workspaces</a></li>
+      </ul>
+    </div>
+  </nav>
+  <main style="flex-grow: 1; padding: 32px 24px">
+    <div style="max-width: 1072px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px">
+      <p style="margin: 0; align-self: flex-start; padding: 4px 10px; border-radius: 999px; background: #f3e8ff; color: #6b21a8; font-size: 12px; font-weight: 600">Proposal — not built</p>
+      <h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.01em">New agreement</h1>
+      <ol aria-label="Steps" style="margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 8px; font-size: 13px">
+        <li style="padding: 6px 12px; border-radius: 999px; background: #1a1a1a; color: #fcfcfc">1 · Document</li>
+        <li style="padding: 6px 12px; border-radius: 999px; border: 1px solid rgba(0,0,0,0.2)">2 · Signers</li>
+        <li style="padding: 6px 12px; border-radius: 999px; border: 1px solid rgba(0,0,0,0.2)">3 · Settings</li>
+        <li style="padding: 6px 12px; border-radius: 999px; border: 1px solid rgba(0,0,0,0.2)">4 · Review and send</li>
+      </ol>
+
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px">
+        <section aria-labelledby="step1" style="border: 1px solid rgba(0,0,0,0.1); border-radius: 8px; background: #ffffff; padding: 20px; display: flex; flex-direction: column; gap: 12px">
+          <h2 id="step1" style="margin: 0; font-size: 16px; font-weight: 600">1 · Document</h2>
+          <fieldset style="margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 10px">
+            <legend style="font-size: 14px; font-weight: 500; margin-bottom: 8px">Start from</legend>
+            <label style="display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 2px solid #1a1a1a; border-radius: 8px; font-size: 14px"><input type="radio" name="source" checked style="margin-top: 3px"> <span><strong>A published template</strong><br><span style="color: #71717a">Fields and signing order are already placed.</span></span></label>
+            <label style="display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid rgba(0,0,0,0.2); border-radius: 8px; font-size: 14px"><input type="radio" name="source" style="margin-top: 3px"> <span><strong>Upload a PDF</strong><br><span style="color: #71717a">Checked on upload; then place fields in the editor.</span></span></label>
+          </fieldset>
+          <label style="display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 500">Template
+            <select style="min-height: 40px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; padding: 0 8px; font-family: inherit; font-size: 14px; font-weight: 400; background: #ffffff"><option>Mutual NDA — v3 (published)</option><option>Practice NDA — v2 (published)</option></select></label>
+          <label style="display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 500">Title
+            <input type="text" value="Synthetic Mutual NDA" style="min-height: 40px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; padding: 0 10px; font-family: inherit; font-size: 14px; font-weight: 400"></label>
+        </section>
+
+        <section aria-labelledby="step2" style="border: 1px solid rgba(0,0,0,0.1); border-radius: 8px; background: #ffffff; padding: 20px; display: flex; flex-direction: column; gap: 12px">
+          <h2 id="step2" style="margin: 0; font-size: 16px; font-weight: 600">2 · Signers</h2>
+          <p style="margin: 0; font-size: 13px; color: #71717a">One row per party the template defines, in signing order. Fields belong to the party, never to an address.</p>
+          <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 12px; border-radius: 8px; background: #f4f4f5">
+            <p style="margin: 0; grid-column: span 2; font-size: 13px; font-weight: 600">1 · Buyer</p>
+            <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px">Name <input type="text" value="Dana Buyer" style="min-height: 36px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; padding: 0 8px; font-family: inherit"></label>
+            <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px">Email <input type="email" value="dana@buyer.example.test" style="min-height: 36px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; padding: 0 8px; font-family: inherit"></label>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 12px; border-radius: 8px; background: #f4f4f5">
+            <p style="margin: 0; grid-column: span 2; font-size: 13px; font-weight: 600">2 · Seller</p>
+            <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px">Name <input type="text" value="Sam Seller" style="min-height: 36px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; padding: 0 8px; font-family: inherit"></label>
+            <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px">Email <input type="email" value="sam@seller.example.test" style="min-height: 36px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; padding: 0 8px; font-family: inherit"></label>
+          </div>
+          <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 500">Prefill · Agreement date <input type="date" value="2026-11-08" style="min-height: 36px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; padding: 0 8px; font-family: inherit; font-weight: 400"></label>
+        </section>
+
+        <section aria-labelledby="step3" style="border: 1px solid rgba(0,0,0,0.1); border-radius: 8px; background: #ffffff; padding: 20px; display: flex; flex-direction: column; gap: 12px; font-size: 14px">
+          <h2 id="step3" style="margin: 0; font-size: 16px; font-weight: 600">3 · Settings</h2>
+          <label style="display: flex; flex-direction: column; gap: 4px; font-weight: 500">Closes after
+            <select style="min-height: 40px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; padding: 0 8px; font-family: inherit; font-size: 14px; font-weight: 400; background: #ffffff"><option>7 days (default)</option><option>14 days</option><option>30 days</option><option>Never</option></select></label>
+          <label style="display: flex; flex-direction: column; gap: 4px; font-weight: 500">Signing order
+            <select style="min-height: 40px; border: 1px solid rgba(0,0,0,0.2); border-radius: 6px; padding: 0 8px; font-family: inherit; font-size: 14px; font-weight: 400; background: #ffffff"><option>In order (as the template defines)</option><option>Everyone at once</option></select></label>
+          <label style="display: flex; align-items: center; gap: 10px"><input type="checkbox" checked style="width: 20px; height: 20px"> Ask for a code sent by email</label>
+          <label style="display: flex; align-items: center; gap: 10px"><input type="checkbox" checked style="width: 20px; height: 20px"> Signers may decline</label>
+          <label style="display: flex; align-items: center; gap: 10px"><input type="checkbox" checked style="width: 20px; height: 20px"> Show “Save and finish later”</label>
+          <p style="margin: 0; font-size: 12px; color: #71717a">Unticked here means “off for this agreement”; leaving the workspace default is the starting state.</p>
+        </section>
+
+        <section aria-labelledby="step4" style="border: 1px solid rgba(0,0,0,0.1); border-radius: 8px; background: #ffffff; padding: 20px; display: flex; flex-direction: column; gap: 12px; font-size: 14px">
+          <h2 id="step4" style="margin: 0; font-size: 16px; font-weight: 600">4 · Review and send</h2>
+          <p style="margin: 0; padding: 12px; border-radius: 6px; border: 1px solid rgba(220,38,38,0.4); color: #b91c1c; font-size: 13px; line-height: 1.5" role="alert">Cannot send yet: Seller has a required field “Company” with no prefill. Every problem is listed at once, as the send gate reports them.</p>
+          <p style="margin: 0; line-height: 1.5">Sending freezes the document and its fields. A correction after this is a new agreement, and everyone signs again.</p>
+          <div style="display: flex; flex-wrap: wrap; gap: 8px">
+            <a href="ProposalAgreementDetail.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 20px; border-radius: 6px; background: #1a1a1a; color: #fcfcfc; font-weight: 500; text-decoration: none">Send for signature</a>
+            <a href="ProposalAgreements.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: 6px; border: 1px solid rgba(0,0,0,0.2); text-decoration: none">Save as draft</a>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":1120}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>
