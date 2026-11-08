@@ -48,9 +48,16 @@ final class FinalizationScenario
      * @param  array<string, mixed>|null  $fieldSchema  Another schema, and the recipients who
      *                                                  sign it in order; null for the buyer and seller.
      * @param  list<string>  $signers
+     * @param  (\Closure(Envelope, SigningScenario): void)|null  $beforeSend  Runs against the prepared
+     *                                                                        draft, before it is sent.
      */
-    private function __construct(AssuranceLevel $level, bool $reset, ?array $fieldSchema = null, array $signers = ['buyer', 'seller'])
-    {
+    private function __construct(
+        AssuranceLevel $level,
+        bool $reset,
+        ?array $fieldSchema = null,
+        array $signers = ['buyer', 'seller'],
+        ?\Closure $beforeSend = null,
+    ) {
         // `Storage::fake()` *clears* the disk, and `configureSeal()` puts the active key back
         // to fixture key A. Both are what a single-scenario test wants and both are wrong for
         // the second envelope of the rotation drill, which has to keep the first envelope's
@@ -65,10 +72,16 @@ final class FinalizationScenario
             revisionBytes: PdfFixtures::bytes(self::DOCUMENT_FIXTURE),
         )->bind();
 
-        $envelope = $this->signing->sent(array_filter([
+        $envelope = $this->signing->preparedDraft(array_filter([
             'assurance_level' => $level->value,
             'field_schema' => $fieldSchema,
         ], static fn (mixed $value): bool => $value !== null));
+
+        if ($beforeSend !== null) {
+            $beforeSend($envelope, $this->signing);
+        }
+
+        $this->signing->machine()->send($envelope->refresh());
 
         foreach ($signers as $signer) {
             $this->signing->signAs($envelope->refresh(), $this->signing->recipient($envelope, $signer), 'session-'.$signer);
@@ -96,12 +109,16 @@ final class FinalizationScenario
     /**
      * The same, for another field schema, accepted by `$actors` in that order.
      *
+     * `$beforeSend` reshapes the draft first: an upgrade test puts rows back the way an earlier
+     * release wrote them and proves the current code sends and completes them correctly.
+     *
      * @param  array<string, mixed>  $fieldSchema
      * @param  list<string>  $actors
+     * @param  (\Closure(Envelope, SigningScenario): void)|null  $beforeSend
      */
-    public static function signedWith(array $fieldSchema, array $actors): self
+    public static function signedWith(array $fieldSchema, array $actors, ?\Closure $beforeSend = null): self
     {
-        return new self(AssuranceLevel::PadesBB, true, $fieldSchema, $actors);
+        return new self(AssuranceLevel::PadesBB, true, $fieldSchema, $actors, $beforeSend);
     }
 
     /**

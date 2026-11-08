@@ -2,6 +2,11 @@
 const config = {
   testEnvironment: 'jsdom',
   testMatch: ['<rootDir>/resources/js/**/*.test.ts?(x)', '<rootDir>/tests-ts/**/*.test.ts?(x)'],
+  // Composer's tree is not ours to test. A source install of a PHP package can ship `.snap`
+  // files (Pest snapshots), which Jest's snapshot sweep otherwise reports as obsolete and fails
+  // the run on, however green the suite is.
+  modulePathIgnorePatterns: ['<rootDir>/vendor/'],
+  testPathIgnorePatterns: ['/node_modules/', '<rootDir>/vendor/'],
   setupFilesAfterEnv: ['<rootDir>/tests-ts/jest.setup.ts'],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/resources/js/$1',
