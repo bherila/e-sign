@@ -2208,6 +2208,15 @@
             ],
             "description": "A document with a review revision. Requires `field_schema`."
           },
+          "document_ids": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 20,
+            "items": {
+              "type": "string"
+            },
+            "description": "A document set (issue #163): the documents, in order, in place of `document_id`. At most 20 documents and 100 MB. `field_schema` pages count across the whole set: the first document's pages are 1..n, the second's start at n+1. Every acceptance binds the set digest (`document_sha256`), and finalization seals the whole agreement and each document on its own. See docs/preparation/document-sets.md."
+          },
           "field_schema": {
             "type": [
               "object",
@@ -2391,7 +2400,37 @@
           },
           "document_sha256": {
             "type": "string",
-            "description": "What every attestation binds. Published so a caller can prove which document this envelope is."
+            "description": "What every attestation binds. Published so a caller can prove which document this envelope is. For a document set, the set digest: SHA-256 of the canonical JSON {\"encoding\":\"esign.document_set.v1\",\"documents\":[{\"position\":n,\"sha256\":\"<review digest>\"},...]}."
+          },
+          "documents": {
+            "type": "array",
+            "description": "The envelope's documents in order, each with the pages it occupies (issue #163). One entry for a single document, whose `id` is null.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "position": {
+                  "type": "integer"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "sha256": {
+                  "type": "string"
+                },
+                "first_page": {
+                  "type": "integer"
+                },
+                "page_count": {
+                  "type": "integer"
+                }
+              }
+            }
           },
           "field_schema_sha256": {
             "type": "string"
@@ -2696,6 +2735,13 @@
             "examples": [
               "sealed_pdf"
             ]
+          },
+          "document_position": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "For an `executed_document`, the position of the document of the set it is, sealed on its own. Null for every other kind."
           },
           "filename": {
             "type": "string"

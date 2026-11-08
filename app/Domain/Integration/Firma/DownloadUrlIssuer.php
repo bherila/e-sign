@@ -72,8 +72,33 @@ final class DownloadUrlIssuer
      */
     public const REPORT = 'report';
 
-    /** Every kind a token may name. */
+    /** Every kind a token may name, besides a document set member's ({@see member()}). */
     public const KINDS = [self::EXECUTED, self::REVIEW, self::REPORT];
+
+    /**
+     * One document of a set (issue #163): `original` is its reviewed revision as retained,
+     * `document` its own sealed copy. Upstream's `type` values for
+     * `GET /signing-requests/{id}/documents/{document_id}/download`.
+     */
+    public const MEMBER_TYPES = ['original', 'document'];
+
+    /** The token kind naming document `$position`'s `$type` file. */
+    public static function member(int $position, string $type): string
+    {
+        return 'member-'.$type.'-'.$position;
+    }
+
+    /**
+     * @return array{position: int, type: string}|null Null for a kind that names no set member.
+     */
+    public static function parseMember(string $kind): ?array
+    {
+        if (preg_match('/^member-(original|document)-([1-9][0-9]?)$/D', $kind, $matches) !== 1) {
+            return null;
+        }
+
+        return ['position' => (int) $matches[2], 'type' => $matches[1]];
+    }
 
     /** Route name of the streaming endpoint. */
     public const ROUTE = 'compat.firma.downloads.show';
@@ -127,7 +152,7 @@ final class DownloadUrlIssuer
         if (count($parts) !== 3
             || $parts[0] !== self::VERSION
             || $parts[1] === ''
-            || ! in_array($parts[2], self::KINDS, true)) {
+            || (! in_array($parts[2], self::KINDS, true) && self::parseMember($parts[2]) === null)) {
             // The signature has already been checked by the time this runs, so a token that
             // does not parse means this service issued it under a different format. Same
             // answer as a link to something that no longer exists.

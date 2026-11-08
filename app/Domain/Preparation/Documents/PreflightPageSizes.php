@@ -30,7 +30,18 @@ final readonly class PreflightPageSizes
         $report = $document?->preflight_report;
         $pages = is_array($report) ? ($report['pages'] ?? null) : null;
 
-        if (! is_array($pages) || $pages === []) {
+        return is_array($pages) ? self::ofPages($pages) : null;
+    }
+
+    /**
+     * The same, for preflight page entries already in hand — a document set's, renumbered
+     * across the set by {@see DocumentSetPages}.
+     *
+     * @param  array<int, mixed>  $pages
+     */
+    public static function ofPages(array $pages): ?PageSizes
+    {
+        if ($pages === []) {
             return null;
         }
 

@@ -7,6 +7,7 @@ namespace App\Domain\Signing\Models;
 use App\Domain\Evidence\Retention\LegalHold;
 use App\Domain\Evidence\Sealing\AssuranceLevel;
 use App\Domain\Identity\Models\Workspace;
+use App\Domain\Preparation\Documents\DocumentSet;
 use App\Domain\Preparation\Documents\Models\DocumentRevision;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Signing\Envelopes\EnvelopeState;
@@ -228,6 +229,46 @@ class Envelope extends Model
     public function documentRevision(): BelongsTo
     {
         return $this->belongsTo(DocumentRevision::class);
+    }
+
+    /**
+     * The members of a document set of two or more, in order (issue #163). Empty for a
+     * single-document envelope, whose set is {@see DocumentRevision()} alone.
+     *
+     * @return HasMany<EnvelopeDocument, $this>
+     */
+    public function documents(): HasMany
+    {
+        return $this->hasMany(EnvelopeDocument::class)->orderBy('position');
+    }
+
+    /**
+     * The envelope's documents as a set: its rows when it has some, otherwise a set of one built
+     * from its own revision — which is every envelope created before sets existed. See
+     * docs/preparation/document-sets.md.
+     */
+    public function documentSet(): DocumentSet
+    {
+        $rows = $this->documents()->get();
+
+        if ($rows->isNotEmpty()) {
+            return DocumentSet::of($rows->map(static fn (EnvelopeDocument $row): array => [
+                'revision_id' => $row->document_revision_id,
+                'title' => $row->title,
+                'sha256' => $row->sha256,
+                'page_count' => $row->page_count,
+                'public_id' => $row->public_id,
+            ])->values()->all());
+        }
+
+        $revision = $this->documentRevision()->with('document')->firstOrFail();
+
+        return DocumentSet::of([[
+            'revision_id' => (int) $revision->getKey(),
+            'title' => (string) ($revision->document?->title ?? $this->title),
+            'sha256' => $revision->sha256,
+            'page_count' => max(1, (int) $revision->page_count),
+        ]]);
     }
 
     /** @return BelongsTo<User, $this> */

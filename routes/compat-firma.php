@@ -128,6 +128,10 @@ Route::prefix(FirmaProfile::BASE_PATH)
                     Route::get('/{id}/users', [SigningRequestUserController::class, 'index'])->name('users');
                     Route::get('/{id}/fields', [SigningRequestFieldController::class, 'index'])->name('fields');
                     Route::get('/{id}/download', [SigningRequestDownloadController::class, 'show'])->name('download');
+                    // One document of a set (issue #163). The rest of `/documents*` — adding,
+                    // replacing, renaming, reordering and removing — still answers the 501 below.
+                    Route::get('/{id}/documents/{document_id}/download', [SigningRequestDownloadController::class, 'showDocument'])
+                        ->name('documents.download');
                 });
             });
 

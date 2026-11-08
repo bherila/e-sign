@@ -64,6 +64,7 @@ class HarmlessGetTest extends TestCase
             'signing.landing',
             'signing.legacy.show',
             'signing.session.document',
+            'signing.session.document.member',
             'signing.session.show',
         ], $gets);
     }
@@ -85,6 +86,7 @@ class HarmlessGetTest extends TestCase
             $landing,
             GuestSigningScenario::sessionUrl($scenario->envelope),
             GuestSigningScenario::sessionUrl($scenario->envelope, '/document'),
+            GuestSigningScenario::sessionUrl($scenario->envelope, '/document/1'),
             '/signing/'.$recipient->public_id,
             // The refusal paths are GETs too, and a 403 that consumed something would be
             // worse than one that did not.

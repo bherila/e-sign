@@ -12,6 +12,7 @@ use App\Domain\Preparation\Assembly\OverlayText;
 use App\Domain\Preparation\Assembly\PageOverlay;
 use App\Domain\Preparation\Contracts\DocumentReadUnavailable;
 use App\Domain\Preparation\Contracts\PdfAssembler;
+use App\Domain\Preparation\Documents\DocumentSet;
 use App\Domain\Preparation\Geometry\NativeRect;
 use App\Domain\Preparation\Schema\FieldDefinition;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
@@ -79,6 +80,60 @@ final readonly class ExecutedDocumentRenderer
      */
     public function render(FinalizationInput $input, string $reviewPdf, string $completionReportPdf, FieldSchemaDocument $schema): string
     {
+        return $this->assemble($reviewPdf, $this->overlays($input, $schema), [$completionReportPdf]);
+    }
+
+    /**
+     * A document set's executed outputs (issue #163, docs/preparation/document-sets.md).
+     *
+     * `combined` is the whole agreement: the first document with every other member appended in
+     * order, then the completion report. A field's page is absolute across the set, and the
+     * assembler numbers appended pages on from the source's, so every overlay lands where it was
+     * placed without being moved. The other members are sender documents rather than generated
+     * ones, and each passed intake preflight under the upload ceilings before it joined the set.
+     *
+     * `documents[position]` is each member on its own: its pages with only its fields, moved to
+     * the document's own page numbers, then the same completion report.
+     *
+     * @param  array<int, string>  $reviewPdfs  Position => the member's review bytes, as retained.
+     * @return array{combined: string, documents: array<int, string>}
+     *
+     * @throws FinalizationException|DocumentReadUnavailable
+     */
+    public function renderSet(FinalizationInput $input, DocumentSet $set, array $reviewPdfs, string $completionReportPdf, FieldSchemaDocument $schema): array
+    {
+        $overlays = $this->overlays($input, $schema);
+        $ordered = [];
+
+        foreach ($set->entries as $entry) {
+            $ordered[] = $reviewPdfs[$entry->position] ?? throw new FinalizationException(
+                'Document '.$entry->position.' of the set has no review bytes, so nothing is published.',
+            );
+        }
+
+        $combined = $this->assemble(array_shift($ordered), $overlays, [...$ordered, $completionReportPdf]);
+        $documents = [];
+
+        foreach ($set->entries as $entry) {
+            $own = [];
+
+            foreach ($overlays as $overlay) {
+                if ($entry->contains($overlay->pageNumber())) {
+                    $own[] = self::onPage($overlay, $entry->localPage($overlay->pageNumber()));
+                }
+            }
+
+            $documents[$entry->position] = $this->assemble($reviewPdfs[$entry->position], $own, [$completionReportPdf]);
+        }
+
+        return ['combined' => $combined, 'documents' => $documents];
+    }
+
+    /**
+     * @return list<PageOverlay>
+     */
+    private function overlays(FinalizationInput $input, FieldSchemaDocument $schema): array
+    {
         $overlays = [];
 
         foreach ($schema->fields as $field) {
@@ -87,8 +142,17 @@ final readonly class ExecutedDocumentRenderer
             }
         }
 
+        return $overlays;
+    }
+
+    /**
+     * @param  list<PageOverlay>  $overlays
+     * @param  list<string>  $appended
+     */
+    private function assemble(string $source, array $overlays, array $appended): string
+    {
         try {
-            $assembled = $this->assembler->assemble($reviewPdf, $overlays, [$completionReportPdf]);
+            $assembled = $this->assembler->assemble($source, $overlays, $appended);
         } catch (AssemblyException $exception) {
             throw new FinalizationException(
                 'The executed document could not be assembled: '.$exception->getMessage(),
@@ -101,6 +165,17 @@ final readonly class ExecutedDocumentRenderer
         }
 
         return $assembled->bytes;
+    }
+
+    /** The same mark on another page number: a set member's own numbering. */
+    private static function onPage(PageOverlay $overlay, int $page): PageOverlay
+    {
+        return match (true) {
+            $overlay instanceof OverlayText => new OverlayText($page, $overlay->rect, $overlay->text, $overlay->fontSize, $overlay->baselineOffset, $overlay->fillRgb),
+            $overlay instanceof OverlayImage => new OverlayImage($page, $overlay->rect, $overlay->bytes),
+            $overlay instanceof OverlayRectangle => new OverlayRectangle($page, $overlay->rect, $overlay->strokeRgb, $overlay->lineWidth, $overlay->label),
+            default => throw new FinalizationException('An overlay of an unknown kind cannot be moved to a document of the set.'),
+        };
     }
 
     /**

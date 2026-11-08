@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace App\Domain\Signing\Envelopes;
 
 use App\Domain\Identity\Models\Workspace;
+use App\Domain\Preparation\Documents\DocumentSet;
 use App\Domain\Preparation\Documents\Models\DocumentRevision;
 use App\Domain\Preparation\Schema\Recipient as SchemaRecipient;
 use App\Domain\Preparation\Schema\RecipientDesignation;
 use App\Domain\Signing\Contracts\EnvelopeEventSink;
 use App\Domain\Signing\Exceptions\InvalidEnvelopeSnapshot;
 use App\Domain\Signing\Models\Envelope;
+use App\Domain\Signing\Models\EnvelopeDocument;
 use App\Domain\Signing\Models\EnvelopeRecipient;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -61,8 +63,23 @@ final readonly class EnvelopeFactory
             throw InvalidEnvelopeSnapshot::documentNotInWorkspace($snapshot->documentRevisionId);
         }
 
-        if ($revision->sha256 !== $snapshot->documentSha256) {
-            throw InvalidEnvelopeSnapshot::digestMismatch($snapshot->documentSha256, $revision->sha256);
+        $set = $this->documentSet($workspace, $revision, $snapshot);
+
+        // What every acceptance will bind: the revision's own digest for one document, the set
+        // digest for a set (docs/preparation/document-sets.md). Checked, never trusted.
+        if ($set->digest() !== $snapshot->documentSha256) {
+            throw InvalidEnvelopeSnapshot::digestMismatch($snapshot->documentSha256, $set->digest());
+        }
+
+        $pages = $set->totalPages();
+
+        foreach ($snapshot->fieldSchema->fields as $field) {
+            if ($set->isMultiple() && $field->page > $pages) {
+                throw InvalidEnvelopeSnapshot::invalidProperty(
+                    'field_schema',
+                    'field "'.$field->id.'" is on page '.$field->page.' and the document set has '.$pages.' pages.',
+                );
+            }
         }
 
         $stages = count($snapshot->fieldSchema->signingOrder);
@@ -71,7 +88,7 @@ final readonly class EnvelopeFactory
             throw InvalidEnvelopeSnapshot::parallelWithMultipleStages($stages);
         }
 
-        return DB::transaction(function () use ($workspace, $snapshot, $createdBy): Envelope {
+        return DB::transaction(function () use ($workspace, $snapshot, $createdBy, $set): Envelope {
             $envelope = new Envelope([
                 'workspace_id' => $workspace->getKey(),
                 'title' => $snapshot->title,
@@ -92,6 +109,21 @@ final readonly class EnvelopeFactory
 
             $envelope->save();
 
+            // A single document keeps no rows: its set is the revision above (expand-only).
+            if ($set->isMultiple()) {
+                foreach ($set->entries as $entry) {
+                    EnvelopeDocument::query()->create([
+                        'envelope_id' => $envelope->getKey(),
+                        'position' => $entry->position,
+                        'document_revision_id' => $entry->revisionId,
+                        'title' => $entry->title,
+                        'sha256' => $entry->sha256,
+                        'page_count' => $entry->pageCount,
+                        'first_page' => $entry->firstPage,
+                    ]);
+                }
+            }
+
             foreach ($snapshot->fieldSchema->recipients as $recipient) {
                 $this->createRecipient($envelope, $snapshot, $recipient);
             }
@@ -101,6 +133,7 @@ final readonly class EnvelopeFactory
                 'signing_mode' => $envelope->signing_mode->value,
                 'assurance_level' => $envelope->assurance_level->value,
                 'document_sha256' => $envelope->document_sha256,
+                'documents' => $set->count(),
                 'field_schema_sha256' => $envelope->field_schema_sha256,
                 'recipients' => count($snapshot->fieldSchema->recipients),
             ]);
@@ -120,6 +153,69 @@ final readonly class EnvelopeFactory
     public function fromArray(Workspace $workspace, array $snapshot, ?User $createdBy = null): Envelope
     {
         return $this->fromSnapshot($workspace, EnvelopeSourceSnapshot::fromArray($snapshot), $createdBy);
+    }
+
+    /**
+     * The snapshot's documents as a set, each member checked as the first one always was: it
+     * exists, it is this workspace's, and it has a known page count. Within the set's limits.
+     *
+     * @throws InvalidEnvelopeSnapshot
+     */
+    private function documentSet(Workspace $workspace, DocumentRevision $first, EnvelopeSourceSnapshot $snapshot): DocumentSet
+    {
+        $revisions = [$first];
+
+        foreach ($snapshot->additionalDocumentRevisionIds as $id) {
+            $revision = DocumentRevision::query()->with('document')->find($id);
+
+            if ($revision === null) {
+                throw InvalidEnvelopeSnapshot::unknownDocumentRevision($id);
+            }
+
+            if ($revision->document?->workspace_id !== $workspace->getKey()) {
+                throw InvalidEnvelopeSnapshot::documentNotInWorkspace($id);
+            }
+
+            $revisions[] = $revision;
+        }
+
+        if (count($revisions) === 1) {
+            return DocumentSet::of([[
+                'revision_id' => (int) $first->getKey(),
+                'title' => (string) ($first->document?->title ?? $snapshot->title),
+                'sha256' => $first->sha256,
+                'page_count' => max(1, (int) $first->page_count),
+            ]]);
+        }
+
+        $bytes = 0;
+        $members = [];
+
+        foreach ($revisions as $revision) {
+            if ($revision->page_count === null || $revision->page_count < 1) {
+                throw InvalidEnvelopeSnapshot::invalidProperty(
+                    'additional_document_revision_ids',
+                    'document revision '.$revision->getKey().' has no known page count, so its fields cannot be placed in a set.',
+                );
+            }
+
+            $bytes += (int) $revision->bytes;
+            $members[] = [
+                'revision_id' => (int) $revision->getKey(),
+                'title' => (string) ($revision->document?->title ?? ''),
+                'sha256' => $revision->sha256,
+                'page_count' => (int) $revision->page_count,
+            ];
+        }
+
+        if ($bytes > DocumentSet::MAX_TOTAL_BYTES) {
+            throw InvalidEnvelopeSnapshot::invalidProperty(
+                'additional_document_revision_ids',
+                'a document set is at most '.intdiv(DocumentSet::MAX_TOTAL_BYTES, 1024 * 1024).' MB, and this one is larger.',
+            );
+        }
+
+        return DocumentSet::of($members);
     }
 
     private function createRecipient(

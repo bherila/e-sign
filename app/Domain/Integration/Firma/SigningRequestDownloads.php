@@ -9,6 +9,7 @@ use App\Domain\Evidence\Finalization\Artifacts\Artifact;
 use App\Domain\Evidence\Finalization\Artifacts\ArtifactKind;
 use App\Domain\Integration\Native\FinalizedArtifactLocator;
 use App\Domain\Preparation\Documents\DocumentBlobStore;
+use App\Domain\Preparation\Documents\DocumentSetEntry;
 use App\Domain\Preparation\Documents\Models\DocumentRevision;
 use App\Domain\Signing\Envelopes\EnvelopeState;
 use App\Domain\Signing\Models\Envelope;
@@ -218,6 +219,12 @@ final readonly class SigningRequestDownloads
      */
     public function stream(Envelope $envelope, string $kind): StreamedResponse
     {
+        $member = DownloadUrlIssuer::parseMember($kind);
+
+        if ($member !== null) {
+            return $this->streamMember($envelope, $member['position'], $member['type']);
+        }
+
         return match ($kind) {
             DownloadUrlIssuer::EXECUTED => $this->downloader->stream($this->published($envelope, ArtifactKind::ExecutedPdf)),
             DownloadUrlIssuer::REPORT => $this->downloader->stream($this->published($envelope, ArtifactKind::CompletionReport)),
@@ -263,8 +270,139 @@ final readonly class SigningRequestDownloads
     /**
      * @throws FirmaException
      */
+    /**
+     * `GET /signing-requests/{id}/documents/{document_id}/download` (issue #163): one document of
+     * the set, by its public id, as a signed URL that expires with the others.
+     *
+     * @return array{download_url: string, type: string, expires_at: string}
+     *
+     * @throws FirmaException
+     */
+    public function describeMember(Envelope $envelope, string $documentId, string $type, ?CarbonImmutable $now = null): array
+    {
+        $entry = $this->memberById($envelope, $documentId);
+
+        if ($type === 'document') {
+            $this->memberArtifact($envelope, $entry->position);
+        }
+
+        $expiresAt = $this->urls->expiresAt($now);
+
+        return [
+            'download_url' => $this->urls->urlFor($envelope, DownloadUrlIssuer::member($entry->position, $type), $expiresAt),
+            'type' => $type,
+            'expires_at' => $expiresAt->toIso8601String(),
+        ];
+    }
+
+    /**
+     * Upstream's `documents[]` (`DocumentSummary`), in position order (issue #163).
+     *
+     * A single document answers its one document with `document_id` null, as upstream's does for
+     * a set that has never been changed. `document_url` names the member's own sealed copy once it
+     * is published (`signed`), and its reviewed revision before that (`stored`).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function documentSummaries(Envelope $envelope, CarbonImmutable $expiresAt): array
+    {
+        $set = $envelope->documentSet();
+        $summaries = [];
+
+        foreach ($set->entries as $entry) {
+            $sealed = $set->isMultiple() && $envelope->state === EnvelopeState::Completed
+                ? $this->artifacts->ofDocument($envelope, $entry->position)
+                : null;
+
+            $url = match (true) {
+                ! $set->isMultiple() => $this->documentUrl($envelope, $expiresAt),
+                $sealed instanceof Artifact => $this->urls->urlFor($envelope, DownloadUrlIssuer::member($entry->position, 'document'), $expiresAt),
+                default => $this->urls->urlFor($envelope, DownloadUrlIssuer::member($entry->position, 'original'), $expiresAt),
+            };
+
+            $summaries[] = [
+                'document_id' => $entry->publicId,
+                'position' => $entry->position,
+                'label' => $entry->title === '' ? null : $entry->title,
+                'original_filename' => null,
+                'page_count' => $entry->pageCount,
+                'document_url' => $url,
+                'document_url_kind' => $sealed instanceof Artifact ? 'signed' : 'stored',
+                'document_only_hash' => $sealed?->sha256,
+            ];
+        }
+
+        return $summaries;
+    }
+
+    /** @throws FirmaException */
+    private function memberById(Envelope $envelope, string $documentId): DocumentSetEntry
+    {
+        foreach ($envelope->documentSet()->entries as $entry) {
+            if ($entry->publicId !== null && hash_equals($entry->publicId, $documentId)) {
+                return $entry;
+            }
+        }
+
+        throw FirmaException::notFound('document');
+    }
+
+    /** @throws FirmaException */
+    private function streamMember(Envelope $envelope, int $position, string $type): StreamedResponse
+    {
+        $entry = $envelope->documentSet()->entryAt($position);
+
+        if ($entry === null || $entry->publicId === null) {
+            throw FirmaException::notFound('download');
+        }
+
+        if ($type === 'document') {
+            return $this->downloader->stream($this->memberArtifact($envelope, $position));
+        }
+
+        $revision = DocumentRevision::query()->with('document')->find($entry->revisionId);
+
+        if (! $revision instanceof DocumentRevision) {
+            throw FirmaException::of(FirmaErrorCode::NoDocumentAvailable, 'That document of the set is no longer available.');
+        }
+
+        return $this->streamRevision($envelope, $revision);
+    }
+
+    /**
+     * A member's own sealed copy. Upstream answers `404 DOCUMENT_SIGNED_NOT_AVAILABLE` before
+     * completion; this surface's vocabulary for the same fact is `no_document_available`.
+     *
+     * @throws FirmaException
+     */
+    private function memberArtifact(Envelope $envelope, int $position): Artifact
+    {
+        $artifact = $envelope->state === EnvelopeState::Completed ? $this->artifacts->ofDocument($envelope, $position) : null;
+
+        if (! $artifact instanceof Artifact) {
+            throw FirmaException::of(
+                FirmaErrorCode::NoDocumentAvailable,
+                'Document '.$position.' of this signing request is sealed on its own only once everyone has signed and '
+                .'the executed agreement is published.',
+            );
+        }
+
+        return $artifact;
+    }
+
     private function reviewRevision(Envelope $envelope): DocumentRevision
     {
+        // A document set's review copy is not one file: each member is downloaded on its own
+        // (`/documents/{document_id}/download?type=original`). Returning the first member here
+        // would hand a caller one document of several as if it were the agreement.
+        if ($envelope->documentSet()->isMultiple()) {
+            throw FirmaException::of(
+                FirmaErrorCode::NoDocumentAvailable,
+                'This signing request has several documents. Download each with '
+                .'GET /signing-requests/{id}/documents/{document_id}/download.',
+            );
+        }
+
         $revision = $envelope->relationLoaded('documentRevision')
             ? $envelope->documentRevision
             : $envelope->documentRevision()->with('document')->first();

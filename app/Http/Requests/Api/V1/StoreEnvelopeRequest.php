@@ -6,6 +6,7 @@ namespace App\Http\Requests\Api\V1;
 
 use App\Domain\Evidence\Sealing\AssuranceLevel;
 use App\Domain\Integration\Native\NewEnvelope;
+use App\Domain\Preparation\Documents\DocumentSet;
 use App\Domain\Signing\Envelopes\SigningMode;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
@@ -37,6 +38,10 @@ class StoreEnvelopeRequest extends ApiRequest
         return [
             'template_version_id' => ['nullable', 'string', 'max:64'],
             'document_id' => ['nullable', 'string', 'max:64'],
+            // A document set (issue #163): the documents in order. Pages in `field_schema` count
+            // across the whole set (docs/preparation/document-sets.md).
+            'document_ids' => ['sometimes', 'array', 'min:2', 'max:'.DocumentSet::MAX_DOCUMENTS],
+            'document_ids.*' => ['required', 'string', 'max:64', 'distinct'],
             'field_schema' => ['nullable', 'array'],
 
             'title' => ['nullable', 'string', 'max:255'],
@@ -66,12 +71,13 @@ class StoreEnvelopeRequest extends ApiRequest
     {
         $validator->after(function (Validator $validator): void {
             $fromTemplate = $this->filled('template_version_id');
-            $fromDocument = $this->filled('document_id');
+            $fromSet = $this->filled('document_ids');
+            $fromDocument = $this->filled('document_id') || $fromSet;
 
-            if ($fromTemplate === $fromDocument) {
+            if ($fromTemplate === $fromDocument || ($fromSet && $this->filled('document_id'))) {
                 $validator->errors()->add(
                     'template_version_id',
-                    'Provide exactly one of template_version_id or document_id.',
+                    'Provide exactly one of template_version_id, document_id or document_ids.',
                 );
             }
 

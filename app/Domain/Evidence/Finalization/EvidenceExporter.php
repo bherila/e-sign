@@ -65,8 +65,10 @@ final readonly class EvidenceExporter
         $artifacts = Artifact::query()
             ->where('envelope_id', $envelope->getKey())
             ->whereNotNull('published_at')
+            ->orderBy('slot')
             ->get()
-            ->keyBy(static fn (Artifact $artifact): string => $artifact->kind->value);
+            // Kind and slot: a document set has one `executed_document` per member (issue #163).
+            ->keyBy(static fn (Artifact $artifact): string => $artifact->kind->value.':'.$artifact->slot);
 
         if ($artifacts->isEmpty()) {
             throw new FinalizationException(
@@ -78,17 +80,13 @@ final readonly class EvidenceExporter
         $members = [];
 
         foreach (ArtifactKind::cases() as $kind) {
-            $artifact = $artifacts->get($kind->value);
-
-            if (! $artifact instanceof Artifact) {
-                continue;
+            foreach ($artifacts->filter(static fn (Artifact $artifact): bool => $artifact->kind === $kind) as $artifact) {
+                $members[$this->memberName($kind, $artifact->slot)] = [
+                    'bytes' => $this->store->get($artifact->disk, $artifact->path),
+                    'recorded_sha256' => $artifact->sha256,
+                    'covers' => $this->coversFor($kind, $artifact->slot),
+                ];
             }
-
-            $members[$this->memberName($kind)] = [
-                'bytes' => $this->store->get($artifact->disk, $artifact->path),
-                'recorded_sha256' => $artifact->sha256,
-                'covers' => $this->coversFor($kind),
-            ];
         }
 
         foreach ($this->documentRevisions($envelope) as $name => $revision) {
@@ -104,7 +102,7 @@ final readonly class EvidenceExporter
             $members[$name] = [
                 'bytes' => $bytes,
                 'recorded_sha256' => $revision->sha256,
-                'covers' => $name === 'original-upload.pdf'
+                'covers' => str_ends_with($name, 'original-upload.pdf')
                     ? 'The uploaded document exactly as received, never re-rendered or re-sealed.'
                     : 'The reviewed revision every acceptance is bound to.',
             ];
@@ -122,7 +120,7 @@ final readonly class EvidenceExporter
             ];
         }
 
-        $executed = $artifacts->get(ArtifactKind::ExecutedPdf->value);
+        $executed = $artifacts->get(ArtifactKind::ExecutedPdf->value.':0');
 
         if ($executed instanceof Artifact && $executed->validation_report !== null) {
             $members['validation-report.json'] = [
@@ -133,7 +131,7 @@ final readonly class EvidenceExporter
             ];
         }
 
-        return $this->write($envelope, $members, $artifacts->get(ArtifactKind::ExecutedPdf->value));
+        return $this->write($envelope, $members, $executed);
     }
 
     /**
@@ -221,7 +219,33 @@ final readonly class EvidenceExporter
      */
     private function documentRevisions(Envelope $envelope): array
     {
-        $review = DocumentRevision::query()->find($envelope->document_revision_id);
+        $set = $envelope->documentSet();
+
+        // A document set (issue #163): every member's original and reviewed revision, numbered
+        // by position so a reader can match each to `document_set` in the evidence.
+        if ($set->isMultiple()) {
+            $found = [];
+
+            foreach ($set->entries as $entry) {
+                foreach ($this->revisionPair($entry->revisionId) as $label => $revision) {
+                    $found['document-'.$entry->position.'-'.$label] = $revision;
+                }
+            }
+
+            return $found;
+        }
+
+        return $this->revisionPair((int) $envelope->document_revision_id);
+    }
+
+    /**
+     * The reviewed revision and, when it is a different file, the upload it came from.
+     *
+     * @return array<string, DocumentRevision>
+     */
+    private function revisionPair(int $reviewId): array
+    {
+        $review = DocumentRevision::query()->find($reviewId);
 
         if ($review === null) {
             return [];
@@ -257,18 +281,21 @@ final readonly class EvidenceExporter
         }
     }
 
-    private function memberName(ArtifactKind $kind): string
+    private function memberName(ArtifactKind $kind, int $slot = 0): string
     {
         return match ($kind) {
             ArtifactKind::ExecutedPdf => 'executed-agreement.pdf',
             ArtifactKind::CompletionReport => 'completion-report.pdf',
             ArtifactKind::EvidenceJson => 'evidence.json',
+            ArtifactKind::ExecutedDocument => 'executed-document-'.$slot.'.pdf',
         };
     }
 
-    private function coversFor(ArtifactKind $kind): string
+    private function coversFor(ArtifactKind $kind, int $slot = 0): string
     {
         return match ($kind) {
+            ArtifactKind::ExecutedDocument => 'Document '.$slot.' of the set on its own: its pages with its field '
+                .'values drawn and the completion report appended, sealed under the service certificate.',
             ArtifactKind::ExecutedPdf => 'The executed agreement: the reviewed revision with every field '
                 .'value drawn on it and the completion report appended, sealed under the service '
                 .'certificate.',

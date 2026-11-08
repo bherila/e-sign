@@ -166,6 +166,37 @@ describe("adding a field", () => {
   });
 });
 
+describe("a document set", () => {
+  /**
+   * A version over two documents (issue #163): both are loaded, in order, and every page of the
+   * set is drawn from its own document, numbered across the set.
+   */
+  it("loads every document of the set and draws each page from its own document", async () => {
+    const { loadPdf } = jest.requireMock<{ loadPdf: jest.Mock }>("./pdfjs");
+    loadPdf.mockClear();
+
+    const fourPages = [1, 2, 3, 4].map((page) => ({ ...PAGES[0]!, page }));
+
+    render(
+      <FieldEditor
+        payload={payload({
+          pages: fourPages,
+          documents: [
+            { position: 1, title: "Synthetic NDA", first_page: 1, page_count: 2, url: "/doc/1" },
+            { position: 2, title: "Synthetic schedule", first_page: 3, page_count: 2, url: "/doc/2" },
+          ],
+        })}
+      />,
+    );
+
+    await waitFor(() => expect(renderPage).toHaveBeenCalledTimes(4));
+
+    expect(loadPdf.mock.calls.map((call) => call[0])).toEqual(["/doc/1", "/doc/2"]);
+    // Each member is a two-page mock, so the set's pages 3 and 4 are its second document's 1 and 2.
+    expect(renderPage.mock.calls.map((call) => call[0]).sort((a, b) => Number(a) - Number(b))).toEqual([1, 1, 2, 2]);
+  });
+});
+
 describe("keyboard placement", () => {
   it("nudges a field by one point, and by ten with shift", () => {
     render(<FieldEditor payload={payload()} />);

@@ -8,7 +8,9 @@ use App\Domain\Identity\Audit\AuditActor;
 use App\Domain\Identity\Audit\AuditRecorder;
 use App\Domain\Identity\Credentials\ServiceCredential;
 use App\Domain\Identity\Models\Workspace;
+use App\Domain\Preparation\Documents\DocumentSet;
 use App\Domain\Preparation\Documents\Models\Document;
+use App\Domain\Preparation\Documents\Models\DocumentRevision;
 use App\Domain\Preparation\Schema\RecipientDesignation;
 use App\Domain\Preparation\Schema\SchemaVersion;
 use App\Domain\Preparation\Templates\Models\Template;
@@ -279,11 +281,22 @@ final readonly class EnvelopeService
         }
 
         $schema = $this->withRecipientContacts($input->fieldSchema ?? [], $input->recipients);
+        $additional = $this->additionalSetMembers($workspace, $input, $revision);
 
         return EnvelopeSourceSnapshot::fromArray(array_replace([
             'title' => $document->title,
             'document_revision_id' => $revision->getKey(),
-            'document_sha256' => $revision->sha256,
+            // A set's acceptances bind the set digest (docs/preparation/document-sets.md).
+            'document_sha256' => $additional === [] ? $revision->sha256 : DocumentSet::of(array_map(
+                static fn (DocumentRevision $member): array => [
+                    'revision_id' => (int) $member->getKey(),
+                    'title' => '',
+                    'sha256' => $member->sha256,
+                    'page_count' => max(1, (int) $member->page_count),
+                ],
+                [$revision, ...$additional],
+            ))->digest(),
+            'additional_document_revision_ids' => array_map(static fn (DocumentRevision $member): int => (int) $member->getKey(), $additional),
             'field_schema' => $schema,
             'consent_policy_version' => $input->consentPolicyVersion
                 ?? (string) config('esign.templates.default_consent_policy_version'),
@@ -343,6 +356,53 @@ final readonly class EnvelopeService
      *
      * @throws ApiException
      */
+    /**
+     * The review revisions of a document set's members after the first (issue #163), in the
+     * order the caller listed them. Each is held to what the first is: a document of this
+     * workspace — another tenant's is absent, not forbidden — that has finished preflight.
+     *
+     * @return list<DocumentRevision>
+     *
+     * @throws ApiException
+     */
+    private function additionalSetMembers(Workspace $workspace, NewEnvelope $input, DocumentRevision $first): array
+    {
+        if (count($input->documentIds) < 2) {
+            return [];
+        }
+
+        $members = [];
+
+        foreach (array_slice($input->documentIds, 1) as $documentId) {
+            $document = Document::query()->inWorkspace($workspace)->where('public_id', $documentId)->first();
+
+            if (! $document instanceof Document) {
+                throw ApiException::notFound('document');
+            }
+
+            $revision = $document->reviewRevision();
+
+            if ($revision === null || $revision->page_count === null) {
+                throw ApiException::of(
+                    ErrorCode::TemplateState,
+                    'Document '.$document->public_id.' has no review revision with a known page count yet, so it '
+                    .'cannot join a document set. Upload has to finish preflight first.',
+                );
+            }
+
+            $members[] = $revision;
+        }
+
+        if ($first->page_count === null) {
+            throw ApiException::of(
+                ErrorCode::TemplateState,
+                'The first document has no known page count yet, so the set\'s pages cannot be numbered.',
+            );
+        }
+
+        return $members;
+    }
+
     /**
      * Add cc recipients to a template's parties (issue #169).
      *

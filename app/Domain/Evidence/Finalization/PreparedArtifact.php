@@ -37,6 +37,8 @@ final readonly class PreparedArtifact
         public string $sealCertificateSha256 = '',
         public ?AssuranceLevel $assuranceLevelReached = null,
         public ?array $validationReport = null,
+        /** 0 for an envelope-level artifact; a document's position for an `executed_document`. */
+        public int $slot = 0,
     ) {}
 
     /**
@@ -52,6 +54,7 @@ final readonly class PreparedArtifact
         string $sealCertificateSha256 = '',
         ?AssuranceLevel $assuranceLevelReached = null,
         ?array $validationReport = null,
+        int $slot = 0,
     ): self {
         $sha256 = hash('sha256', $bytes);
 
@@ -66,6 +69,7 @@ final readonly class PreparedArtifact
             sealCertificateSha256: $sealCertificateSha256,
             assuranceLevelReached: $assuranceLevelReached,
             validationReport: $validationReport,
+            slot: $slot,
         );
     }
 
@@ -105,6 +109,8 @@ final readonly class PreparedArtifact
             sealCertificateSha256: (string) ($output['seal_certificate_sha256'] ?? ''),
             assuranceLevelReached: is_string($level) ? AssuranceLevel::from($level) : null,
             validationReport: is_array($report) ? $report : null,
+            // Absent on a run recorded before document sets existed, which had only slot 0.
+            slot: (int) ($output['slot'] ?? 0),
         );
     }
 
@@ -117,6 +123,7 @@ final readonly class PreparedArtifact
     {
         return [
             'kind' => $this->kind->value,
+            'slot' => $this->slot,
             'disk' => $this->disk,
             'path' => $this->key->value,
             'sha256' => $this->sha256,
@@ -138,6 +145,7 @@ final readonly class PreparedArtifact
         return [
             'envelope_id' => $envelopeId,
             'kind' => $this->kind->value,
+            'slot' => $this->slot,
             'disk' => $this->disk,
             'path' => $this->key->value,
             'sha256' => $this->sha256,

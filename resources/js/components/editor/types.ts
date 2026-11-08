@@ -20,6 +20,14 @@ export interface EditorUrls {
   template: string;
 }
 
+export interface EditorDocument {
+  position: number;
+  title: string;
+  first_page: number;
+  page_count: number;
+  url: string;
+}
+
 export interface EditorPayload {
   workspace: { id: string; name: string };
   template: { id: string; name: string };
@@ -44,6 +52,12 @@ export interface EditorPayload {
   /** The version's field set, already canonical. Parsed through `parseFieldSchema` on mount. */
   field_schema: unknown;
   field_schema_sha256: string;
+  /**
+   * The version's documents in order, each with its view URL and the pages it occupies
+   * (issue #163). Optional so an older payload still opens: absent means the one document
+   * at `urls.document_view`. Pages are absolute across the set, as `pages` and every field are.
+   */
+  documents?: EditorDocument[];
   pages: PageGeometryPayload[];
   /**
    * Prefill variables the sending context can resolve. Empty means "not known here", which

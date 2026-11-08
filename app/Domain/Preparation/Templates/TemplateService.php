@@ -12,6 +12,8 @@ use App\Domain\Preparation\Anchoring\AnchorResolutionDefect;
 use App\Domain\Preparation\Anchoring\AnchorResolutionFailed;
 use App\Domain\Preparation\Anchoring\AnchorResolutionOutcome;
 use App\Domain\Preparation\Anchoring\RevisionAnchorResolver;
+use App\Domain\Preparation\Documents\DocumentSet;
+use App\Domain\Preparation\Documents\DocumentSetPages;
 use App\Domain\Preparation\Documents\Models\Document;
 use App\Domain\Preparation\Documents\Models\DocumentRevision;
 use App\Domain\Preparation\Documents\PreflightPageSizes;
@@ -23,6 +25,7 @@ use App\Domain\Preparation\Schema\Recipient;
 use App\Domain\Preparation\Templates\Models\Template;
 use App\Domain\Preparation\Templates\Models\TemplateAlias;
 use App\Domain\Preparation\Templates\Models\TemplateVersion;
+use App\Domain\Preparation\Templates\Models\TemplateVersionDocument;
 use App\Models\User;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -189,6 +192,7 @@ final readonly class TemplateService
      *
      * @param  array<string, mixed>  $fieldSchema  A native field schema document (version 1.0).
      * @param  array<string, mixed>|null  $renderSettings  Null takes {@see RenderSettings::defaults()}.
+     * @param  list<Document>  $additionalDocuments  A document set's further members, in order (issue #163).
      *
      * @throws TemplateStateException When the template is retired, the document belongs to
      *                                another workspace, or the document has no review
@@ -203,13 +207,15 @@ final readonly class TemplateService
         array $fieldSchema,
         ?string $consentPolicyVersion = null,
         ?array $renderSettings = null,
+        array $additionalDocuments = [],
     ): TemplateVersion {
         if ($template->isRetired()) {
             throw TemplateStateException::templateRetired($template);
         }
 
         $revision = $this->reviewRevisionOf($template, $document);
-        $schema = $this->importSchema($fieldSchema, $document);
+        $set = $this->documentSetOf($template, $document, $revision, $additionalDocuments);
+        $schema = $this->importSchemaFor($fieldSchema, $set);
         $settings = $renderSettings === null ? RenderSettings::defaults() : RenderSettings::fromArray($renderSettings);
         $consent = $this->consentPolicyVersion($consentPolicyVersion);
         $canonical = $schema->canonicalJson();
@@ -219,6 +225,7 @@ final readonly class TemplateService
             $actor,
             $document,
             $revision,
+            $set,
             $schema,
             $settings,
             $consent,
@@ -244,6 +251,22 @@ final readonly class TemplateService
                 'created_by' => $actor->getKey(),
             ]);
 
+            // A document set (issue #163). A single document keeps no rows: its set is the
+            // revision above, exactly as before.
+            if ($set->isMultiple()) {
+                foreach ($set->entries as $entry) {
+                    TemplateVersionDocument::query()->create([
+                        'template_version_id' => $version->getKey(),
+                        'position' => $entry->position,
+                        'document_revision_id' => $entry->revisionId,
+                        'title' => $entry->title,
+                        'sha256' => $entry->sha256,
+                        'page_count' => $entry->pageCount,
+                        'first_page' => $entry->firstPage,
+                    ]);
+                }
+            }
+
             $this->audit->record(
                 AuditActor::user($actor),
                 'preparation.template_version_drafted',
@@ -256,6 +279,8 @@ final readonly class TemplateService
                     'document_id' => $document->public_id,
                     'document_revision_id' => $revision->public_id,
                     'document_revision_sha256' => $revision->sha256,
+                    'documents' => $set->count(),
+                    'document_set_sha256' => $set->digest(),
                     'field_schema_sha256' => $version->field_schema_sha256,
                     'consent_policy_version' => $consent,
                 ],
@@ -293,7 +318,10 @@ final readonly class TemplateService
         $schema = null;
 
         if ($fieldSchema !== null) {
-            $schema = $this->importSchema($fieldSchema, $version->documentRevision?->document);
+            $set = $version->documentSet();
+            $schema = $set === null
+                ? $this->importSchema($fieldSchema, null)
+                : $this->importSchemaFor($fieldSchema, $set);
         }
 
         $settings = $renderSettings === null ? null : RenderSettings::fromArray($renderSettings);
@@ -638,13 +666,83 @@ final readonly class TemplateService
      */
     private function importSchema(array $fieldSchema, ?Document $document): FieldSchemaDocument
     {
-        $result = $this->validator->validate($fieldSchema, $this->pageSizesFor($document));
+        return $this->importSchemaWith($fieldSchema, $this->pageSizesFor($document));
+    }
+
+    /**
+     * The same, against a document set's pages, numbered across the set (issue #163). A set of
+     * one is the single document's own report, so nothing changes for one.
+     *
+     * @param  array<string, mixed>  $fieldSchema
+     *
+     * @throws InvalidFieldSchemaException
+     */
+    private function importSchemaFor(array $fieldSchema, DocumentSet $set): FieldSchemaDocument
+    {
+        return $this->importSchemaWith($fieldSchema, DocumentSetPages::pageSizes($set));
+    }
+
+    /**
+     * @param  array<string, mixed>  $fieldSchema
+     *
+     * @throws InvalidFieldSchemaException
+     */
+    private function importSchemaWith(array $fieldSchema, ?PageSizes $pageSizes): FieldSchemaDocument
+    {
+        $result = $this->validator->validate($fieldSchema, $pageSizes);
 
         if ($result->hasErrors()) {
             throw new InvalidFieldSchemaException($result);
         }
 
         return FieldSchemaDocument::fromArray($fieldSchema);
+    }
+
+    /**
+     * The version's documents as a set: the first, then every further one in order, each held
+     * to what the first is (this workspace's, ready, with a review revision). Within the set's
+     * limits. See docs/preparation/document-sets.md.
+     *
+     * @param  list<Document>  $additional
+     *
+     * @throws TemplateStateException
+     */
+    private function documentSetOf(Template $template, Document $first, DocumentRevision $revision, array $additional): DocumentSet
+    {
+        $members = [[$first, $revision]];
+        $seen = [(int) $first->getKey() => true];
+
+        foreach ($additional as $document) {
+            if (isset($seen[(int) $document->getKey()])) {
+                throw TemplateStateException::documentSetInvalid('a document appears in the set more than once.');
+            }
+
+            $seen[(int) $document->getKey()] = true;
+            $members[] = [$document, $this->reviewRevisionOf($template, $document)];
+        }
+
+        if (count($members) > DocumentSet::MAX_DOCUMENTS) {
+            throw TemplateStateException::documentSetInvalid('a document set holds at most '.DocumentSet::MAX_DOCUMENTS.' documents.');
+        }
+
+        $bytes = array_sum(array_map(static fn (array $member): int => (int) $member[1]->bytes, $members));
+
+        if (count($members) > 1 && $bytes > DocumentSet::MAX_TOTAL_BYTES) {
+            throw TemplateStateException::documentSetInvalid('a document set is at most '.intdiv(DocumentSet::MAX_TOTAL_BYTES, 1024 * 1024).' MB.');
+        }
+
+        foreach ($members as [$document, $memberRevision]) {
+            if (count($members) > 1 && ($memberRevision->page_count === null || $memberRevision->page_count < 1)) {
+                throw TemplateStateException::documentSetInvalid('document '.$document->public_id.' has no known page count.');
+            }
+        }
+
+        return DocumentSet::of(array_map(static fn (array $member): array => [
+            'revision_id' => (int) $member[1]->getKey(),
+            'title' => (string) $member[0]->title,
+            'sha256' => $member[1]->sha256,
+            'page_count' => max(1, (int) $member[1]->page_count),
+        ], $members));
     }
 
     /**
@@ -691,8 +789,13 @@ final readonly class TemplateService
             return AnchorResolutionOutcome::unchanged($schema);
         }
 
+        $set = $version->documentSet();
+
         try {
-            return $this->anchors->resolve($revision, $schema, omitAbsentFields: false);
+            // A document set resolves across every member, on absolute pages (issue #163).
+            return $set !== null && $set->isMultiple()
+                ? $this->anchors->resolveSet($set, $schema, omitAbsentFields: false)
+                : $this->anchors->resolve($revision, $schema, omitAbsentFields: false);
         } catch (AnchorResolutionFailed $failed) {
             throw new InvalidFieldSchemaException($failed->toValidationResult());
         }

@@ -11,6 +11,7 @@ use App\Domain\Identity\Credentials\Scope;
 use App\Domain\Identity\Credentials\ServiceCredentialIssuer;
 use App\Domain\Preparation\Anchoring\AnchorDocumentUnavailable;
 use App\Domain\Preparation\Anchoring\AnchorResolutionOutcome;
+use App\Domain\Preparation\Documents\DocumentSet;
 use App\Domain\Preparation\Schema\AnchorPlacementMode;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\ValidationCode;
@@ -87,6 +88,47 @@ final class EnvelopeAnchorResolutionTest extends TestCase
             hash('sha256', FieldSchemaDocument::fromArray($envelope->field_schema)->canonicalJson()),
             $envelope->field_schema_sha256,
         );
+    }
+
+    /**
+     * In a document set an anchor is found across every member, and lands on its absolute page
+     * (issue #163): "Counterparty signature:" is on page 2 of the NDA, which is page 3 of a set
+     * whose first member is a one-page letter. The receipt records the set digest.
+     */
+    public function test_an_anchor_in_a_later_document_of_a_set_lands_on_its_absolute_page(): void
+    {
+        $cover = $this->scenario->addDocument(PdfFixtures::bytes('single-page-letter'), 1, 'Synthetic cover letter');
+        $nda = $this->scenario->addDocument(PdfFixtures::bytes('nda-two-signers'), 2, 'Synthetic NDA');
+        $set = DocumentSet::of([
+            ['revision_id' => (int) $cover->getKey(), 'title' => 'Synthetic cover letter', 'sha256' => $cover->sha256, 'page_count' => 1],
+            ['revision_id' => (int) $nda->getKey(), 'title' => 'Synthetic NDA', 'sha256' => $nda->sha256, 'page_count' => 2],
+        ]);
+
+        $schema = SigningFixtures::mutateField(SigningFixtures::sequentialTwoSigners(), 'seller_signature', [
+            'page' => 3,
+            'anchor' => [
+                'text' => 'Counterparty signature:',
+                'occurrence' => 'sole',
+                'placement' => AnchorPlacementMode::Replace->value,
+                'origin' => 'bottom_left',
+                'offset' => ['dx' => 0, 'dy' => 12.5],
+            ],
+        ]);
+
+        $envelope = $this->scenario->preparedDraft([
+            'document_revision_id' => $cover->getKey(),
+            'document_sha256' => $set->digest(),
+            'additional_document_revision_ids' => [$nda->getKey()],
+            'field_schema' => $schema,
+        ]);
+
+        $this->scenario->machine()->send($envelope);
+
+        $field = $envelope->refresh()->fieldSchema()->field('seller_signature');
+        $this->assertSame(3, $field?->page);
+        $this->assertSame(['x' => 330, 'y' => 646.9, 'width' => 170, 'height' => 36], $field->rect->toArray());
+        $this->assertSame(3, $field->anchor?->resolved?->page);
+        $this->assertSame($set->digest(), $field->anchor?->resolved?->documentSha256);
     }
 
     public function test_a_hand_placed_field_is_untouched_by_a_send_that_resolves_another_one(): void

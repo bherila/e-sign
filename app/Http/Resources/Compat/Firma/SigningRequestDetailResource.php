@@ -66,6 +66,8 @@ class SigningRequestDetailResource extends JsonResource
 
         $revision = $envelope->documentRevision;
         $expiresAt = app(DownloadUrlIssuer::class)->expiresAt();
+        $set = $envelope->documentSet();
+        $isSet = $set->isMultiple();
 
         return [
             'id' => $envelope->public_id,
@@ -77,9 +79,12 @@ class SigningRequestDetailResource extends JsonResource
             // Never a storage URL. The reviewed revision — the bytes the parties were shown —
             // behind a short-lived app-issued link, on the same terms as every other download
             // this facade hands out.
-            'document_url' => $this->downloads->documentUrl($envelope, $expiresAt),
+            // A document set has no single review file (issue #163): each member is in
+            // `documents[]`, and this is null rather than one member passed off as all of them.
+            'document_url' => $isSet ? null : $this->downloads->documentUrl($envelope, $expiresAt),
             'document_url_expires_at' => $expiresAt->toIso8601String(),
-            'document_page_count' => $revision?->page_count,
+            'document_page_count' => $isSet ? $set->totalPages() : $revision?->page_count,
+            'documents' => $this->downloads->documentSummaries($envelope, $expiresAt),
         ]
             + $this->settings->deprecatedIntegers($envelope)
             + [

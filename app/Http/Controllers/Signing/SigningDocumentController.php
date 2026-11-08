@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Signing;
 
 use App\Domain\Preparation\Documents\DocumentBlobStore;
 use App\Domain\Preparation\Documents\DocumentStorageException;
+use App\Domain\Preparation\Documents\Models\DocumentRevision;
 use App\Domain\Signing\Sessions\GuestSigningContext;
 use App\Http\Controllers\Controller;
 use Symfony\Component\HttpFoundation\HeaderUtils;
@@ -39,9 +40,22 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 class SigningDocumentController extends Controller
 {
-    public function view(GuestSigningContext $context, DocumentBlobStore $blobs): StreamedResponse
+    /**
+     * `$envelope` is the route's own binding, named so the router does not pass it in as the
+     * position. The envelope this serves is always `$context->envelope`, the one the signing
+     * session belongs to, and never a lookup of its own.
+     */
+    public function view(GuestSigningContext $context, DocumentBlobStore $blobs, mixed $envelope = null, ?string $position = null): StreamedResponse
     {
-        $revision = $context->envelope->documentRevision()->with('document')->first();
+        // A document set's member by position (issue #163); with no position, the first — which
+        // for a single-document envelope is the document.
+        $entry = $context->envelope->documentSet()->entryAt($position === null ? 1 : (int) $position);
+
+        if ($entry === null) {
+            abort(404);
+        }
+
+        $revision = DocumentRevision::query()->with('document')->find($entry->revisionId);
         $document = $revision?->document;
 
         if ($revision === null || $document === null) {
@@ -76,8 +90,9 @@ class SigningDocumentController extends Controller
                     $filename,
                 ),
                 // The digest of what is being sent, so the reviewed bytes can be checked
-                // against `envelopes.document_sha256` without a second request. It is the
-                // same value the attestation binds.
+                // without a second request: against `envelopes.document_sha256` for a single
+                // document, which the attestation binds; for a set, against this member's
+                // digest, which the set digest covers (docs/preparation/document-sets.md).
                 'X-Document-Sha256' => $revision->sha256,
             ],
         );

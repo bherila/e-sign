@@ -88,11 +88,24 @@ export interface SignerButtons {
   show_save_for_later: boolean;
 }
 
+export interface SigningDocument {
+  position: number;
+  title: string;
+  first_page: number;
+  page_count: number;
+  url: string;
+}
+
 export interface SigningPayload {
   envelope: SigningEnvelope;
   recipient: SigningRecipient;
   parties: SigningParty[];
   document: { title: string; page_count: number | null };
+  /**
+   * The envelope's documents in order, each with the pages it occupies (issue #163). One entry
+   * for a single document. Pages are absolute across the set, as `pages` and every field are.
+   */
+  documents: SigningDocument[];
   pages: PageGeometryPayload[];
   /** The envelope's copied field schema. Parsed through `parseFieldSchema` on mount. */
   field_schema: unknown;

@@ -8,7 +8,7 @@ import {
 import type { LoadedPdf } from "@/components/editor/pdfjs";
 import type { FieldDefinition } from "@/schema/fieldSchema";
 
-import type { FieldValue, SigningPayload } from "./types";
+import type { FieldValue, SigningDocument, SigningPayload } from "./types";
 
 /**
  * The document, rendered locally, with every field drawn where it actually sits.
@@ -97,7 +97,10 @@ export function DocumentReview({
     void (async () => {
       try {
         const { loadPdf } = await import("@/components/editor/pdfjs");
-        loaded = await loadPdf(payload.urls.document);
+        const { loadPdfSet } = await import("@/components/editor/pdfSet");
+        // Every document of the envelope, in order, read as one run of pages (issue #163).
+        const urls = payload.documents.length > 0 ? payload.documents.map((document) => document.url) : [payload.urls.document];
+        loaded = await loadPdfSet(urls, loadPdf);
 
         if (cancelled) {
           await loaded.destroy();
@@ -119,7 +122,7 @@ export function DocumentReview({
       cancelled = true;
       void loaded?.destroy();
     };
-  }, [payload.urls.document]);
+  }, [payload.urls.document, payload.documents]);
 
   if (error !== null) {
     return (
@@ -150,6 +153,7 @@ export function DocumentReview({
           values={values}
           ownFieldIds={ownFieldIds}
           onFocusField={onFocusField}
+          caption={pageCaption(payload.documents, geometry.page)}
         />
       ))}
     </div>
@@ -164,6 +168,23 @@ interface ReviewPageProps {
   values: Readonly<Record<string, FieldValue>>;
   ownFieldIds: readonly string[];
   onFocusField: (fieldId: string) => void;
+  caption: string;
+}
+
+/**
+ * "Page n" for a single document; for a set, the document the page belongs to and the page's
+ * number within it, so a signer always knows which document they are reading (issue #163).
+ */
+function pageCaption(documents: readonly SigningDocument[], page: number): string {
+  if (documents.length < 2) {
+    return `Page ${page}`;
+  }
+
+  const owner = documents.find((document) => page >= document.first_page && page < document.first_page + document.page_count);
+
+  return owner === undefined
+    ? `Page ${page}`
+    : `${owner.title} — page ${page - owner.first_page + 1} of ${owner.page_count} (document ${owner.position} of ${documents.length})`;
 }
 
 function ReviewPage({
@@ -174,6 +195,7 @@ function ReviewPage({
   values,
   ownFieldIds,
   onFocusField,
+  caption,
 }: ReviewPageProps) {
   const canvas = useRef<HTMLCanvasElement | null>(null);
 
@@ -272,7 +294,7 @@ function ReviewPage({
       </div>
 
       <figcaption className="text-muted-foreground mt-1 text-center text-xs tabular-nums">
-        Page {geometry.page}
+        {caption}
       </figcaption>
     </figure>
   );

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\Templates;
 
+use App\Domain\Preparation\Documents\DocumentSet;
 use App\Domain\Preparation\Documents\Models\Document;
 
 /**
@@ -31,6 +32,9 @@ class StoreTemplateVersionRequest extends TemplateVersionContentRequest
     {
         return [
             'document_id' => ['required', 'string', 'ulid'],
+            // A document set's further members, in order, after `document_id` (issue #163).
+            'additional_document_ids' => ['sometimes', 'array', 'max:'.(DocumentSet::MAX_DOCUMENTS - 1)],
+            'additional_document_ids.*' => ['required', 'string', 'ulid', 'distinct'],
             'field_schema' => ['required', 'array'],
             ...$this->contentRules(),
         ];
@@ -49,6 +53,25 @@ class StoreTemplateVersionRequest extends TemplateVersionContentRequest
     }
 
     /** Scoped to the resolved workspace: a foreign document id is a 404. */
+    /**
+     * The set's further members, in the order given. Another workspace's document is absent.
+     *
+     * @return list<Document>
+     */
+    public function additionalDocuments(): array
+    {
+        $documents = [];
+
+        foreach ((array) $this->input('additional_document_ids', []) as $id) {
+            $documents[] = Document::query()
+                ->inWorkspace($this->workspace())
+                ->where('public_id', (string) $id)
+                ->firstOrFail();
+        }
+
+        return $documents;
+    }
+
     public function document(): Document
     {
         return $this->document ??= Document::query()

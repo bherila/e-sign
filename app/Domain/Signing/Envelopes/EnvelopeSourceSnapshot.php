@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Signing\Envelopes;
 
 use App\Domain\Evidence\Sealing\AssuranceLevel;
+use App\Domain\Preparation\Documents\DocumentSet;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\InvalidFieldSchemaException;
 use App\Domain\Signing\Exceptions\InvalidEnvelopeSnapshot;
@@ -28,7 +29,8 @@ use App\Domain\Signing\Exceptions\InvalidEnvelopeSnapshot;
  * |---|---|---|
  * | `title` | yes | non-empty, at most 255 characters (the profile's own `name` limit) |
  * | `document_revision_id` | yes | an immutable `document_revisions` row; the review revision |
- * | `document_sha256` | yes | must equal that revision's digest, checked by the factory |
+ * | `document_sha256` | yes | must equal that revision's digest — or, for a set, the set digest — checked by the factory |
+ * | `additional_document_revision_ids` | no | review revisions after the first, in order, for a document set (issue #163); at most 19 |
  * | `field_schema` | yes | a native field schema 1.0 document, re-validated on the way in |
  * | `consent_policy_version` | yes | the version of the consent text that will be displayed, at most 64 characters |
  * | `assurance_level` | no, default `pades-b-b` | `pades-b-b` or `pades-b-t` |
@@ -89,6 +91,8 @@ final readonly class EnvelopeSourceSnapshot
         public array $renderSettings = [],
         public ?string $sourceTemplateVersionId = null,
         public ?int $expirationHours = self::DEFAULT_EXPIRATION_HOURS,
+        /** @var list<int> The set's members after the first (issue #163); empty for one document. */
+        public array $additionalDocumentRevisionIds = [],
     ) {}
 
     /**
@@ -156,7 +160,42 @@ final readonly class EnvelopeSourceSnapshot
                 self::MAX_SOURCE_TEMPLATE_VERSION_ID_LENGTH,
             ),
             expirationHours: self::expirationHours($snapshot),
+            additionalDocumentRevisionIds: self::additionalDocumentRevisionIds($snapshot, $revisionId),
         );
+    }
+
+    /**
+     * @param  array<string, mixed>  $snapshot
+     * @return list<int>
+     *
+     * @throws InvalidEnvelopeSnapshot
+     */
+    private static function additionalDocumentRevisionIds(array $snapshot, int $first): array
+    {
+        $ids = $snapshot['additional_document_revision_ids'] ?? [];
+
+        if (! is_array($ids) || ! array_is_list($ids)) {
+            throw InvalidEnvelopeSnapshot::invalidProperty('additional_document_revision_ids', 'expected a list of document revision ids.');
+        }
+
+        foreach ($ids as $id) {
+            if (! is_int($id) || $id < 1) {
+                throw InvalidEnvelopeSnapshot::invalidProperty('additional_document_revision_ids', 'expected the ids of existing document revisions.');
+            }
+        }
+
+        if (count(array_unique([$first, ...$ids])) !== count($ids) + 1) {
+            throw InvalidEnvelopeSnapshot::invalidProperty('additional_document_revision_ids', 'a document appears in the set more than once.');
+        }
+
+        if (count($ids) + 1 > DocumentSet::MAX_DOCUMENTS) {
+            throw InvalidEnvelopeSnapshot::invalidProperty(
+                'additional_document_revision_ids',
+                'a document set holds at most '.DocumentSet::MAX_DOCUMENTS.' documents.',
+            );
+        }
+
+        return array_values($ids);
     }
 
     /**
@@ -185,7 +224,9 @@ final readonly class EnvelopeSourceSnapshot
             'title' => $templateSnapshot['template_name'] ?? null,
             'source_template_version_id' => $templateSnapshot['template_version_id'] ?? null,
             'document_revision_id' => $templateSnapshot['document_revision_id'] ?? null,
-            'document_sha256' => $templateSnapshot['document_revision_sha256'] ?? null,
+            // A set's acceptances bind the set digest, not its first member's (issue #163).
+            'document_sha256' => $templateSnapshot['document_set_sha256'] ?? $templateSnapshot['document_revision_sha256'] ?? null,
+            'additional_document_revision_ids' => $templateSnapshot['additional_document_revision_ids'] ?? [],
             'field_schema' => $templateSnapshot['field_schema'] ?? null,
             'consent_policy_version' => $templateSnapshot['consent_policy_version'] ?? null,
             'render_settings' => $templateSnapshot['render_settings'] ?? [],

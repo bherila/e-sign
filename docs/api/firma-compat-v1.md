@@ -82,7 +82,7 @@ Two gates, and a caller passes both.
 | Scope | What it grants |
 |---|---|
 | `compat:firma-v1` | **Admission to this surface.** Required on every route here. Grants no resource authority of its own. |
-| `envelopes:read` | `GET /signing-requests/{id}`, `/users`, `/fields`, `/download` |
+| `envelopes:read` | `GET /signing-requests/{id}`, `/users`, `/fields`, `/download`, `/documents/{document_id}/download` |
 | `envelopes:write` | `POST /signing-requests`, `/create-and-send`, `PATCH`, `/send`, `/cancel` |
 | `templates:read` | additionally required by **any create that supplies `template_id`**, on either create route |
 
@@ -311,6 +311,7 @@ Here there is one unit — the profile's own, percentages of the page.
 | `GET` | `/signing-requests/{id}/users` | `envelopes:read` | `{results: […]}` |
 | `GET` | `/signing-requests/{id}/fields` | `envelopes:read` | `{results: […]}`, `?include=images` |
 | `GET` | `/signing-requests/{id}/download` | `envelopes:read` | JSON with a short-lived `download_url` |
+| `GET` | `/signing-requests/{id}/documents/{document_id}/download` | `envelopes:read` | One document of a set: JSON with a short-lived `download_url`; `type=original` (default) or `document` (its own sealed copy, after completion) |
 | `GET` | `/downloads/{token}` | — | The bytes. Signed URL, no API key |
 
 ### Three status representations, and why none is collapsed
@@ -636,6 +637,14 @@ you asked us to withdraw. A request already cancelled, finished, declined or exp
 ---
 
 ## Downloads
+
+**Document sets** (issue #163). `GET /signing-requests/{id}` lists `documents[]` in position
+order (upstream's `DocumentSummary`); a single document is listed once with `document_id` null.
+For a set, the top-level `document_url` is null: download each member with
+`GET /signing-requests/{id}/documents/{document_id}/download`, `type=original` for the reviewed
+document or `type=document` for its own sealed copy once the agreement is complete. A member's
+sealed copy ends with the completion report. Creating or editing a set through this surface is a
+follow-up and answers `501`; a set can be created through the native API.
 
 `GET /signing-requests/{id}/download` returns JSON, not bytes:
 

@@ -100,7 +100,7 @@ External signers are recipients, not application administrators. Support scoped 
 
 A useful initial schema includes workspaces, users/identity bindings, memberships, API credentials, documents, document revisions, templates/template versions, envelopes, recipients, field definitions, submitted values, signing sessions, recipient attestations, artifacts, audit events, outbox events, webhook endpoints/deliveries, and idempotency records. Native IDs and imported-provider aliases are separate fields.
 
-Each envelope initially carries one PDF; the schema may support document associations without promising multi-document envelope support in the first API release. A template version snapshots the PDF revision, recipients/roles, field definitions, consent policy, and relevant rendering settings. Sending copies the selected version into the envelope. Later template changes never mutate existing requests.
+An envelope, or a template version, carries one PDF or an ordered **document set** of up to 20 (amended by issue #163; the design is `docs/preparation/document-sets.md`). Field pages are absolute across the set. Every acceptance binds the set digest, which covers each member's reviewed revision in order. Finalization publishes the whole agreement sealed and each document sealed on its own, every one validated before anything is published. A single-document envelope is unchanged in every respect. A template version snapshots the PDF revision, recipients/roles, field definitions, consent policy, and relevant rendering settings. Sending copies the selected version into the envelope. Later template changes never mutate existing requests.
 
 Suggested native lifecycle:
 
