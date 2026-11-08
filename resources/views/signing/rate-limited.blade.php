@@ -5,6 +5,7 @@
     per-address or the per-client limit tells it how to spread the next attempt; telling a
     signer the same thing tells them nothing they can act on.
 --}}
+@php($signingEvent ??= ['type' => 'signing.error', 'code' => 'rate_limited'])
 @extends('layouts.signing')
 
 @section('content')

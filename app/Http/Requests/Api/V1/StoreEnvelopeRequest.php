@@ -48,6 +48,11 @@ class StoreEnvelopeRequest extends ApiRequest
             // the key (which takes the seven-day default).
             'expires_in_hours' => ['nullable', 'integer', 'min:1', 'max:87600'],
 
+            // The signer's Decline and Finish later buttons (issue #165). Null means the
+            // workspace decides; omitting the key copies the template's value.
+            'allow_decline' => ['sometimes', 'nullable', 'boolean'],
+            'show_save_for_later' => ['sometimes', 'nullable', 'boolean'],
+
             'recipients' => ['sometimes', 'array'],
             'recipients.*.id' => ['required', 'string', 'max:128'],
             'recipients.*.name' => ['nullable', 'string', 'max:255'],

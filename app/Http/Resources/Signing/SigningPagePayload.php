@@ -8,6 +8,7 @@ use App\Domain\Preparation\Documents\Models\Document;
 use App\Domain\Preparation\Schema\FieldDefinition;
 use App\Domain\Signing\Capture\ConsentPolicy;
 use App\Domain\Signing\Capture\SignatureImage;
+use App\Domain\Signing\Envelopes\SignerButtons;
 use App\Domain\Signing\Fields\FieldMateriality;
 use App\Domain\Signing\Fields\MaterialValues;
 use App\Domain\Signing\Models\Envelope;
@@ -48,6 +49,7 @@ final class SigningPagePayload
     public function __construct(
         private readonly ConsentPolicy $consent,
         private readonly SignatureImage $images,
+        private readonly SignerButtons $buttons,
     ) {}
 
     /**
@@ -113,6 +115,12 @@ final class SigningPagePayload
                 'accept' => route('signing.session.accept', ['envelope' => $envelope->public_id]),
                 'decline' => route('signing.session.decline', ['envelope' => $envelope->public_id]),
                 'reload' => route('signing.session.show', ['envelope' => $envelope->public_id]),
+            ],
+            // Which decision buttons this signer is offered (issue #165). A rendering hint:
+            // with allow_decline false the state machine refuses a decline whatever is posted.
+            'buttons' => [
+                'allow_decline' => $this->buttons->allowDecline($envelope),
+                'show_save_for_later' => $this->buttons->showSaveForLater($envelope),
             ],
             'csrf_token' => $csrfToken,
         ];

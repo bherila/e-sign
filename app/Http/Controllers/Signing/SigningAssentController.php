@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Signing;
 use App\Domain\Signing\Envelopes\AcceptanceRequest;
 use App\Domain\Signing\Envelopes\EnvelopeStateMachine;
 use App\Domain\Signing\Exceptions\ConsentMismatch;
+use App\Domain\Signing\Exceptions\DeclineNotAllowed;
 use App\Domain\Signing\Exceptions\IllegalTransition;
 use App\Domain\Signing\Exceptions\RecipientNotEligible;
 use App\Domain\Signing\Exceptions\RequiredFieldsMissing;
@@ -80,6 +81,7 @@ class SigningAssentController extends Controller
             reviewedEnvelopeVersion: (int) $request->validated('reviewed_envelope_version'),
             verificationMethod: $context->session->verification_method->attested(),
             clientEvidence: $fingerprint->asClientEvidence($request, 'guest_signing_page'),
+            otpChallengeRef: $context->session->otp_challenge_ref,
         );
 
         try {
@@ -106,6 +108,11 @@ class SigningAssentController extends Controller
 
         try {
             $this->machine->decline($context->recipient, $request->reason());
+        } catch (DeclineNotAllowed) {
+            return response()->view('signing.decline-unavailable', [
+                'title' => $context->envelope->title,
+                'sessionUrl' => route('signing.session.show', ['envelope' => $context->envelope->public_id]),
+            ], 409);
         } catch (RecipientNotEligible|IllegalTransition|StaleEnvelope) {
             return $this->notOpen($context);
         }

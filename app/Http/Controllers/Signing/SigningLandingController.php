@@ -117,6 +117,7 @@ class SigningLandingController extends Controller
             $this->assertSignable($envelope, $recipient);
 
             $verification = SigningVerification::Link;
+            $otpChallenge = null;
 
             if ($this->otpRequirement->for($envelope)) {
                 $answered = $this->settleOtp($request, $envelope, $recipient, $token);
@@ -126,6 +127,9 @@ class SigningLandingController extends Controller
                 }
 
                 $verification = SigningVerification::LinkOtp;
+                // The code just answered — or answered moments ago, on a resubmission — is the
+                // record this session cites, and through it every acceptance made in it.
+                $otpChallenge = $this->otp->recentVerification($recipient, OtpPurpose::SessionStart);
             }
 
             $started = $this->sessions->start(
@@ -134,6 +138,7 @@ class SigningLandingController extends Controller
                 $verification,
                 $this->invitations,
                 $this->returnUrls->sanitize($request->returnCandidate()),
+                $otpChallenge,
             );
         } catch (GuestRateLimited $limited) {
             return $this->tooManyAttempts($limited, $envelope->title);

@@ -102,6 +102,12 @@ final readonly class CompletionReport
                 'style' => self::STYLE_BODY,
                 'text' => '   verification              '.$attestation['verification_method'],
             ];
+            if (($attestation['otp_challenge'] ?? null) !== null) {
+                $lines[] = [
+                    'style' => self::STYLE_BODY,
+                    'text' => '   one-time code (email)     '.$attestation['otp_challenge'],
+                ];
+            }
             $lines[] = [
                 'style' => self::STYLE_BODY,
                 'text' => '   attestation SHA-256       '.$attestation['attestation_sha256'],

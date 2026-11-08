@@ -27,6 +27,7 @@ use Mockery;
 use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
 use Tests\Support\FirmaFacadeScenario;
+use Tests\Support\MalformedPagePdfs;
 use Tests\Support\PdfFixtures;
 use Tests\TestCase;
 
@@ -794,6 +795,33 @@ class FirmaCreateAndSendTest extends TestCase
         // only evidence of what was uploaded — but no signing request exists.
         $this->assertSame(0, Envelope::query()->count());
         $this->assertSame(1, $this->ingestedCount());
+    }
+
+    /**
+     * A page with no valid content is upstream's `MALFORMED_PDF`, with the damaged pages named
+     * (issue #167), and nothing is created.
+     */
+    public function test_a_document_with_a_damaged_page_is_refused_as_malformed(): void
+    {
+        [, $issued] = $this->scenario();
+
+        $this->postJson(self::BASE.'/create-and-send', [
+            'name' => 'Synthetic damaged agreement',
+            'document' => base64_encode(MalformedPagePdfs::contentsPointAtAnotherPage()),
+            'recipients' => [['first_name' => 'Dana', 'email' => 'dana@buyer.example.test', 'order' => 1]],
+            'fields' => [[
+                'type' => 'signature',
+                'page_number' => 1,
+                'position' => ['x' => 10.0, 'y' => 80.0, 'width' => 25.0, 'height' => 4.0],
+            ]],
+        ], FirmaFacadeScenario::headers($issued))
+            ->assertStatus(400)
+            ->assertJsonPath('error', 'malformed_pdf')
+            ->assertJsonPath('details.malformed_pages', [2])
+            ->assertJsonPath('details.document_position', 1)
+            ->assertJsonPath('details.findings.0.code', 'malformed_page');
+
+        $this->assertSame(0, Envelope::query()->count());
     }
 
     /**

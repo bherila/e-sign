@@ -257,6 +257,7 @@ An acceptance writes one `recipient_attestations` row, and that row *is* the acc
 |---|---|---|
 | `session_ref` | `signing_sessions.public_id` | Also the idempotency key. |
 | `verification_method` | the session | `email_link` or `email_otp`. Not a claim about identity. |
+| `otp_challenge_ref` | `signing_sessions.otp_challenge_ref` | The public id of the one-time code that admitted the session, or null when none was asked for (issue #166). Beside the digest, not in it: `session_ref` is already bound by `esign.attestation.v1`, and the session names the same code, so existing digests stay recomputable. A public id rather than a foreign key, because retention can purge the challenge row and the citation must outlive it. |
 | `consent_policy_version` | the envelope's snapshot, echoed by the form and checked | A mismatch is `ConsentMismatch`, never a silent acceptance of current text. |
 | `material_values_sha256` | echoed from what the page rendered | Refused if it has moved — `StaleReview`, a 409, and a page asking the person to read it again. |
 | `accepted_at` | the server clock, UTC | Never a client timestamp. |
@@ -412,3 +413,22 @@ input instead.
 | **#36 delivery binding** | Nothing here mails anything. `App\Domain\Delivery\Events\SigningUrlMinter` is the port the Delivery module calls for an invitation's one link, `PlaceholderSigningUrlMinter` refuses loudly until something is bound to it, and `InvitationIssuer::issue()` is what that binding will return — an absolute, credential-bearing URL with no query string. Binding the two is #36's, and deliberately not done here: it changes when live credentials start being minted, which is a decision the module that sends mail should make visibly. |
 | **Reminders** | `MailKind::Reminder` exists and `ReminderScheduler` schedules it. A reminder that re-sends the *same* link cannot work here, because the original invitation is one-shot: whoever wires #36 has to reissue on reminder, which revokes the earlier credential. That is correct behaviour and worth stating out loud, because it means an old reminder in a mailbox stops working. |
 | **#28 finalization** | The confirmation page promises a sealed copy once everyone signs. Producing, validating, storing, and delivering it is the finalizer's. |
+
+## One-time-code evidence
+
+When a deployment or envelope requires a code (issue #166), the verification is recorded where
+a reviewer looks for it, at three points:
+
+1. **At verification.** The audit row `signing.otp.verified` has the challenge as its subject and
+   carries `channel: "email"`, `otp_challenge` (the challenge's public id), `envelope` and
+   `recipient`. The code itself never reaches the audit trail.
+2. **At session start.** The session records `otp_challenge_ref`, and `signing.session.started`
+   names the same `otp_challenge`.
+3. **At acceptance.** The attestation copies the session's `otp_challenge_ref`. The finalization
+   input carries it as `otp_challenge` on each acceptance, so it appears in the evidence
+   document's `attestation_chain` and as a `one-time code (email)` line under that party on the
+   completion report.
+
+A code shows continued access to the mailbox the invitation went to. It is not a second factor
+and is not graded as one (`docs/assurance.md`).
+

@@ -112,6 +112,13 @@ final readonly class SigningRequestSettings
             // (docs/HANDOFF.md section 2).
             'identity_editable_fields' => null,
             'notify_identity_change_email' => false,
+
+            // Modelled (reference v1.40.0, issue #165), and echoed as stored — `true`, `false`,
+            // or `null` for "the workspace decides" — which is what upstream returns here. The
+            // value a signer actually gets is resolved by SignerButtons; with allow_decline
+            // false the state machine also refuses a decline.
+            'allow_decline' => $envelope->allow_decline,
+            'show_save_for_later' => $envelope->show_save_for_later,
         ];
     }
 

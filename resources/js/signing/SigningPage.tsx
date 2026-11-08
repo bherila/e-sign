@@ -1,10 +1,11 @@
-import { useCallback, useMemo, useReducer, useRef } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import { type FieldDefinition, type FieldSchemaDocument, parseFieldSchema } from "@/schema/fieldSchema";
 
 import { saveValues, SigningApiError } from "./api";
 import { ConsentPanel } from "./ConsentPanel";
 import { DocumentReview } from "./DocumentReview";
+import { postSigningEvent } from "./embedEvents";
 import { FieldEntry } from "./FieldEntry";
 import {
   fieldEntryReducer,
@@ -68,6 +69,28 @@ export function SigningPage({ payload }: SigningPageProps) {
     [schema, payload.own_field_ids],
   );
 
+  const [finishingLater, setFinishingLater] = useState(false);
+  const announcedStart = useRef(false);
+
+  // The embedding contract (docs/signing/embedded-events.md): a no-op unless the deployment
+  // allowlisted an origin. Ids and a count only — never an address or a value.
+  const announce = useCallback(
+    (detail: Omit<Parameters<typeof postSigningEvent>[0], "envelope_id" | "recipient_id">): void => {
+      postSigningEvent({ ...detail, envelope_id: payload.envelope.id, recipient_id: payload.recipient.id });
+    },
+    [payload.envelope.id, payload.recipient.id],
+  );
+
+  const announcedLoad = useRef(false);
+
+  useEffect(() => {
+    // Once per page load, including under StrictMode's double-invoked effects.
+    if (!announcedLoad.current) {
+      announcedLoad.current = true;
+      announce({ type: "signing.loaded", total_fields: ownFields.length });
+    }
+  }, [announce, ownFields.length]);
+
   const requiredFieldIds = useMemo<string[]>(
     () => ownFields.filter((field) => field.required).map((field) => field.id),
     [ownFields],
@@ -86,6 +109,7 @@ export function SigningPage({ payload }: SigningPageProps) {
       const result = await saveValues(payload.urls.values, payload.csrf_token, pending);
       dispatch({ type: "save_succeeded", fieldIds: result.field_ids, reviewed: result.reviewed });
     } catch (cause) {
+      announce({ type: "signing.error", code: "save_failed" });
       dispatch({
         type: "save_failed",
         message:
@@ -94,7 +118,7 @@ export function SigningPage({ payload }: SigningPageProps) {
             : "Your changes could not be saved. Nothing has been lost — try again.",
       });
     }
-  }, [payload.urls.values, payload.csrf_token, state]);
+  }, [payload.urls.values, payload.csrf_token, state, announce]);
 
   const focusField = useCallback((fieldId: string): void => {
     const element = entries.current.get(fieldId);
@@ -114,6 +138,10 @@ export function SigningPage({ payload }: SigningPageProps) {
   }
 
   const missing = missingFieldIds(state, requiredFieldIds);
+  // "Finish later" saves what is unsaved and then says how to come back. Values already
+  // persist on every save, so there is no separate draft to keep (issue #165).
+  const finishedForNow =
+    finishingLater && !state.saving && state.dirty.length === 0 && state.error === null;
   const ready = readyToSign(state, requiredFieldIds);
 
   return (
@@ -170,7 +198,14 @@ export function SigningPage({ payload }: SigningPageProps) {
                   value={state.values[field.id] ?? null}
                   recipientName={payload.recipient.name}
                   maxSignatureBytes={payload.limits.max_signature_image_bytes}
-                  onChange={(value) => dispatch({ type: "set", fieldId: field.id, value })}
+                  onChange={(value) => {
+                    if (!announcedStart.current) {
+                      announcedStart.current = true;
+                      announce({ type: "signing.started" });
+                    }
+
+                    dispatch({ type: "set", fieldId: field.id, value });
+                  }}
                 />
               </div>
             ))}
@@ -200,12 +235,34 @@ export function SigningPage({ payload }: SigningPageProps) {
             {state.saving ? "Saving…" : "Save what I have filled in"}
           </button>
 
+          {payload.buttons.show_save_for_later ? (
+            <button
+              type="button"
+              onClick={() => {
+                setFinishingLater(true);
+                void save();
+              }}
+              disabled={state.saving}
+              className="inline-flex min-h-11 items-center justify-center rounded-md border border-black/20 px-4 text-base font-medium disabled:opacity-50 dark:border-white/20"
+            >
+              Save and finish later
+            </button>
+          ) : null}
+
           <p className="text-muted-foreground text-sm" aria-live="polite">
             {state.dirty.length > 0
               ? `${state.dirty.length} unsaved ${state.dirty.length === 1 ? "change" : "changes"}.`
               : "Everything you have filled in is saved."}
           </p>
         </div>
+
+        {finishedForNow ? (
+          <p className="mt-4 rounded-md border border-black/10 p-3 text-sm dark:border-white/10" role="status">
+            Your entries are saved and nothing has been signed. You can close this page. To
+            finish, come back to it on this device while your signing session lasts, or ask the
+            sender to send you a new signing link.
+          </p>
+        ) : null}
       </section>
 
       <ConsentPanel

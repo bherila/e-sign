@@ -32,6 +32,7 @@ use Illuminate\Support\Str;
  * @property string $ip_hash
  * @property string $user_agent_hash
  * @property SigningVerification $verification_method
+ * @property string|null $otp_challenge_ref Public id of the one-time code that verified this session, if one did.
  * @property CarbonImmutable $started_at
  * @property CarbonImmutable $expires_at
  * @property CarbonImmutable|null $last_seen_at
@@ -49,6 +50,7 @@ class SigningSession extends Model
         'ip_hash',
         'user_agent_hash',
         'verification_method',
+        'otp_challenge_ref',
         'started_at',
         'expires_at',
         'last_seen_at',

@@ -33,7 +33,13 @@ use App\Domain\Integration\Firma\UnsupportedOptions;
 class PatchSigningRequestRequest extends FirmaRequest
 {
     /** Members of the properties-only form, which this build cannot honour. */
-    private const PROPERTY_MEMBERS = ['name', 'description', 'template_description', 'expiration_hours'];
+    private const PROPERTY_MEMBERS = [
+        'name', 'description', 'template_description', 'expiration_hours',
+        // Post-pin (reference v1.39.0/v1.40.0, issue #171): a settings change, a seal
+        // participant, and the multi-document layout precondition. Each is refused by name
+        // rather than dropped, so none of them can be a silent no-op.
+        'settings', 'seal_participant', 'documents_layout_version',
+    ];
 
     /**
      * @return array<string, mixed>
@@ -62,6 +68,9 @@ class PatchSigningRequestRequest extends FirmaRequest
             'description' => ['nullable', 'string', 'max:2000'],
             'template_description' => ['nullable', 'string', 'max:2000'],
             'expiration_hours' => ['nullable', 'integer'],
+            'settings' => ['nullable', 'array'],
+            'seal_participant' => ['nullable', 'array'],
+            'documents_layout_version' => ['nullable'],
         ];
     }
 

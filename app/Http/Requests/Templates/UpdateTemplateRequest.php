@@ -33,11 +33,15 @@ class UpdateTemplateRequest extends WorkspaceTemplateRequest
             'name' => ['sometimes', 'string', 'min:1', 'max:200'],
             'description' => ['sometimes', 'nullable', 'string', 'max:2000'],
             'retired' => ['sometimes', 'boolean'],
+            // Copied onto envelopes built from this template (issue #165). Null means the
+            // workspace decides.
+            'allow_decline' => ['sometimes', 'nullable', 'boolean'],
+            'show_save_for_later' => ['sometimes', 'nullable', 'boolean'],
         ];
     }
 
     /**
-     * @return array{name?: string, description?: string|null}
+     * @return array{name?: string, description?: string|null, allow_decline?: bool|null, show_save_for_later?: bool|null}
      */
     public function changes(): array
     {
@@ -52,6 +56,13 @@ class UpdateTemplateRequest extends WorkspaceTemplateRequest
             $changes['description'] = is_string($description) && trim($description) !== ''
                 ? trim($description)
                 : null;
+        }
+
+        foreach (['allow_decline', 'show_save_for_later'] as $setting) {
+            if ($this->has($setting)) {
+                $value = $this->input($setting);
+                $changes[$setting] = $value === null ? null : $this->boolean($setting);
+            }
         }
 
         return $changes;

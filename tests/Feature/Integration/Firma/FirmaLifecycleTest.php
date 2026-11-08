@@ -513,6 +513,74 @@ class FirmaLifecycleTest extends TestCase
     }
 
     /**
+     * Members upstream added after the pin are refused by name, never dropped (issue #171).
+     *
+     * Without this a multi-document or sealed request would be built as a single-document,
+     * unsealed one and answered 201 — the successful no-op AGENTS.md rules out.
+     */
+    public function test_post_pin_members_this_build_cannot_honour_are_refused_by_name(): void
+    {
+        $scenario = FirmaFacadeScenario::create();
+        $issued = $scenario->credential();
+        $version = $scenario->publishedTemplate();
+        $base = [
+            'template_id' => $version->template->public_id,
+            'name' => 'Synthetic post-pin request',
+            'recipients' => [
+                ['template_user_id' => 'buyer', 'first_name' => 'Dana', 'email' => 'dana@buyer.example.test', 'order' => 1],
+                ['template_user_id' => 'seller', 'first_name' => 'Sam', 'email' => 'sam@seller.example.test', 'order' => 2],
+            ],
+        ];
+
+        foreach ([
+            'document_ids' => ['document_ids' => ['01JSYNTHETICDOCUMENT000000']],
+            'document_id' => ['document_id' => '01JSYNTHETICDOCUMENT000000'],
+            'seal_participants' => ['seal_participants' => [['seal_id' => 'synthetic', 'order' => 1]]],
+            'fields[].seal_attribute' => ['fields' => [['variable_name' => 'agreement_date', 'seal_attribute' => 'name']]],
+        ] as $option => $extra) {
+            $this->postJson(self::BASE, $base + $extra, FirmaFacadeScenario::headers($issued))
+                ->assertStatus(501)
+                ->assertJsonPath('error', 'unsupported')
+                ->assertJsonPath('details.unsupported_option', $option);
+        }
+
+        // An empty seal list is upstream's "create without seals", which is simply true here.
+        $id = $this->postJson(self::BASE, $base + ['seal_participants' => []], FirmaFacadeScenario::headers($issued))
+            ->assertStatus(201)
+            ->json('id');
+
+        // The per-document routes are out of profile: the catch-all names them, never a 404.
+        $this->getJson(self::BASE.'/'.$id.'/documents', FirmaFacadeScenario::headers($issued))
+            ->assertStatus(501)
+            ->assertJsonPath('error', 'unsupported');
+    }
+
+    public function test_patching_settings_is_refused_rather_than_dropped(): void
+    {
+        $scenario = FirmaFacadeScenario::create();
+        $issued = $scenario->credential();
+        $version = $scenario->publishedTemplate();
+
+        $id = $this->postJson(self::BASE, [
+            'template_id' => $version->template->public_id,
+            'name' => 'Synthetic patch target',
+            'recipients' => [
+                ['template_user_id' => 'buyer', 'first_name' => 'Dana', 'email' => 'dana@buyer.example.test', 'order' => 1],
+                ['template_user_id' => 'seller', 'first_name' => 'Sam', 'email' => 'sam@seller.example.test', 'order' => 2],
+            ],
+        ], FirmaFacadeScenario::headers($issued))->assertStatus(201)->json('id');
+
+        $this->patchJson(self::BASE.'/'.$id, [
+            'settings' => ['allow_decline' => false],
+            'field' => ['variable_name' => 'agreement_date', 'value' => '2026-02-01'],
+        ], FirmaFacadeScenario::headers($issued))
+            ->assertStatus(501)
+            ->assertJsonPath('error', 'unsupported');
+
+        $this->assertNull(Envelope::query()->where('public_id', $id)->firstOrFail()->allow_decline);
+    }
+
+    /**
      * Send refuses while a party is not ready, and says which prefill is missing.
      */
     public function test_send_refuses_when_a_required_prefill_is_missing(): void

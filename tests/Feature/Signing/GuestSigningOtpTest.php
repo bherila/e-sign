@@ -87,6 +87,34 @@ class GuestSigningOtpTest extends TestCase
         $this->assertNotNull($issued->invitation->refresh()->consumed_at);
     }
 
+    /**
+     * The verification is evidence a reviewer can find: the audit row names the channel and the
+     * code record, and the session it admitted cites the same record (issue #166).
+     */
+    public function test_a_verified_code_is_recorded_with_its_channel_and_cited_by_the_session(): void
+    {
+        config()->set('esign.signing.require_otp', true);
+
+        $scenario = GuestSigningScenario::sent();
+        $issued = $scenario->invite();
+        $url = GuestSigningScenario::startUrl($scenario->envelope, GuestSigningScenario::tokenOf($issued));
+
+        $this->post($url)->assertOk();
+        $this->post($url, ['code' => $this->mailedCode()])->assertRedirect();
+
+        $challenge = SigningOtpChallenge::query()->firstOrFail();
+        $event = AuditEvent::query()->where('action', 'signing.otp.verified')->firstOrFail();
+
+        $this->assertSame('email', $event->payload['channel'] ?? null);
+        $this->assertSame($challenge->public_id, $event->payload['otp_challenge'] ?? null);
+        $this->assertSame($scenario->envelope->public_id, $event->payload['envelope'] ?? null);
+
+        $this->assertSame($challenge->public_id, SigningSession::query()->firstOrFail()->otp_challenge_ref);
+
+        $started = AuditEvent::query()->where('action', 'signing.session.started')->firstOrFail();
+        $this->assertSame($challenge->public_id, $started->payload['otp_challenge'] ?? null);
+    }
+
     public function test_a_wrong_code_is_refused_and_costs_an_attempt(): void
     {
         config()->set('esign.signing.require_otp', true);

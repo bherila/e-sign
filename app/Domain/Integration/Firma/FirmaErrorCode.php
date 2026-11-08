@@ -25,6 +25,15 @@ enum FirmaErrorCode: string
     /** Upstream's generic 400 for a body it cannot use. */
     case InvalidRequest = 'invalid_request';
 
+    /**
+     * A document with a page that has no valid content of its own (issue #167).
+     *
+     * Upstream answers this `400` with code `MALFORMED_PDF` and `malformed_pages` (reference
+     * v1.40.1); the token follows this enum's lowercase vocabulary, and the page numbers
+     * travel in `details`, as every structured member here does.
+     */
+    case MalformedPdf = 'malformed_pdf';
+
     case Unauthorized = 'unauthorized';
 
     case Forbidden = 'forbidden';
@@ -97,7 +106,7 @@ enum FirmaErrorCode: string
     public function status(): int
     {
         return match ($this) {
-            self::InvalidRequest => Response::HTTP_BAD_REQUEST,
+            self::InvalidRequest, self::MalformedPdf => Response::HTTP_BAD_REQUEST,
             self::Unauthorized => Response::HTTP_UNAUTHORIZED,
             self::Forbidden => Response::HTTP_FORBIDDEN,
             self::NotFound => Response::HTTP_NOT_FOUND,

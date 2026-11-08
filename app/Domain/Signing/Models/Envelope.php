@@ -63,6 +63,8 @@ use RuntimeException;
  * @property array<string, mixed> $render_settings
  * @property string $consent_policy_version
  * @property bool|null $require_otp
+ * @property bool|null $allow_decline
+ * @property bool|null $show_save_for_later
  * @property AssuranceLevel $assurance_level
  * @property SigningMode $signing_mode
  * @property EnvelopeState $state
@@ -133,6 +135,8 @@ class Envelope extends Model
         // attestation as its verification_method. See
         // App\Domain\Signing\Sessions\OtpRequirement.
         'require_otp',
+        'allow_decline',
+        'show_save_for_later',
         'assurance_level',
         'signing_mode',
         'state',
@@ -162,6 +166,8 @@ class Envelope extends Model
             'state' => EnvelopeState::class,
             'version' => 'integer',
             'require_otp' => 'boolean',
+            'allow_decline' => 'boolean',
+            'show_save_for_later' => 'boolean',
             'expiration_hours' => 'integer',
             'sent_at' => 'immutable_datetime',
             'completed_at' => 'immutable_datetime',

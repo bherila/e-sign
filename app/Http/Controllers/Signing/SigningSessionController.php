@@ -54,6 +54,11 @@ class SigningSessionController extends Controller
                 'reason' => $context->recipient->decline_reason,
                 'declinedAt' => $context->recipient->declined_at,
                 'returnUrl' => $context->session->return_url,
+                'signingEvent' => [
+                    'type' => 'signing.declined',
+                    'envelope_id' => $context->envelope->public_id,
+                    'recipient_id' => $context->recipient->public_id,
+                ],
             ]);
         }
 
@@ -90,6 +95,11 @@ class SigningSessionController extends Controller
                 ->where('state', '!=', RecipientState::Signed->value)
                 ->doesntExist(),
             'returnUrl' => $context->session->return_url,
+            'signingEvent' => [
+                'type' => 'signing.completed',
+                'envelope_id' => $context->envelope->public_id,
+                'recipient_id' => $context->recipient->public_id,
+            ],
         ]);
     }
 

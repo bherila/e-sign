@@ -10,6 +10,7 @@
 
     The one instruction on the page is the one that is always correct.
 --}}
+@php($signingEvent ??= ['type' => 'signing.error', 'code' => 'link_unusable'])
 @extends('layouts.signing')
 
 @section('content')

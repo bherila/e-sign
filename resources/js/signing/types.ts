@@ -73,6 +73,17 @@ export interface SigningUrls {
 /** A stored field value. `null` means the field has no value yet. */
 export type FieldValue = string | boolean | null;
 
+/**
+ * Which decision buttons this signer is offered (issue #165).
+ *
+ * A rendering hint only: with `allow_decline` false the server refuses a decline whatever is
+ * posted, so hiding the button is not what keeps the rule.
+ */
+export interface SignerButtons {
+  allow_decline: boolean;
+  show_save_for_later: boolean;
+}
+
 export interface SigningPayload {
   envelope: SigningEnvelope;
   recipient: SigningRecipient;
@@ -92,5 +103,6 @@ export interface SigningPayload {
   consent: ConsentPayload;
   limits: CaptureLimits;
   urls: SigningUrls;
+  buttons: SignerButtons;
   csrf_token: string;
 }

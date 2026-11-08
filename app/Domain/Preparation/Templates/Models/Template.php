@@ -38,6 +38,8 @@ use Illuminate\Support\Str;
  * @property int|null $current_version_id
  * @property CarbonInterface|null $retired_at
  * @property int|null $created_by
+ * @property bool|null $allow_decline Copied onto envelopes built from this template (issue #165).
+ * @property bool|null $show_save_for_later idem.
  */
 class Template extends Model
 {
@@ -53,12 +55,16 @@ class Template extends Model
         'current_version_id',
         'retired_at',
         'created_by',
+        'allow_decline',
+        'show_save_for_later',
     ];
 
     protected function casts(): array
     {
         return [
             'retired_at' => 'datetime',
+            'allow_decline' => 'boolean',
+            'show_save_for_later' => 'boolean',
         ];
     }
 

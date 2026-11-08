@@ -9,13 +9,14 @@ than return a successful no-op (`AGENTS.md`, "Fail closed").
 
 | | |
 |---|---|
-| Upstream reference | Firma Partner API **v1.35.0** (`info.version` = `01.35.00`), OpenAPI 3.0.3 |
-| Pinned document | `https://docs.firma.dev/api-reference/v01.35.00/openapi-v01.35.00.json`, SHA-256 `91c7128a35ae52ac3937715041e41c1bee119cfb69b3dcf6fdc8135a4e3c98b9`, retrieved 2026-09-08T06:52:14Z |
+| Upstream reference | Firma Partner API **v1.40.4** (`info.version` = `01.40.04`), OpenAPI 3.0.3 — re-pinned from v1.35.0 by issue #171; every delta is accounted for in [Delta from v1.35.0](#delta-from-v1350) |
+| Pinned document | `https://docs.firma.dev/api-reference/v01.40.04/openapi-v01.40.04.json`, SHA-256 `6a05e97d3def17ed25dd5fc707bcd7fc42eba556ba11929d917ad6dd2aef2228`, retrieved 2026-11-08T02:02:29Z |
+| Previous pin | v1.35.0, SHA-256 `91c7128a…98b9`, retrieved 2026-09-08 — no longer served by the docs site (`tests/Fixtures/firma/SCHEMA.md`, "Why the pin moved") |
 | Pin record | `tests/Fixtures/firma/SCHEMA.md` (also explains why the document is not vendored) |
-| Prose sources | `https://docs.firma.dev/guides/webhooks` (unversioned, retrieved 2026-09-08) for the webhook envelope, event names and signature scheme — none of which are in the machine-readable document |
+| Prose sources | `https://docs.firma.dev/guides/webhooks` (unversioned, retrieved 2026-09-08) for the webhook envelope and signature scheme, which are not in the machine-readable document; the event **names** are in it since v1.40.2. `https://docs.firma.dev/guides/api-changelog.md` (retrieved 2026-11-08) for the v1.36–v1.40.4 deltas that carry no schema change |
 | Facade base path | `/functions/v1/signing-request-api` (upstream `servers[0]` is `https://api.firma.dev/functions/v1/signing-request-api`) |
 | Adapter version | **1** — `app/Domain/Integration/Firma`, `app/Http/Controllers/Compat/Firma`, `routes/compat-firma.php` (issue #33) |
-| Fixture version | **2026-09-08** — `tests/Fixtures/firma/firma-compat-v1/`, four workflows × four endpoints |
+| Fixture version | **2026-09-08** — `tests/Fixtures/firma/firma-compat-v1/`, four workflows × four endpoints. Recorded under v1.35.0 and not re-recorded: members added since are named where the contract test compares key sets (`FirmaContractTest::SETTINGS_ADDED_AFTER_RECORDING`) |
 
 **Every "upstream shape" cell below is read off the pinned document unless it is tagged
 `(prose)`.** Nothing here is inferred from a numeric magnitude or from consumer behaviour
@@ -35,13 +36,15 @@ is the acceptance criterion of issue #33. Counts are in [Status summary](#status
 
 ## Status summary
 
-Every row of every table below, counted. There are no `unknown` rows.
+Every row of every table below that has a `Status` column, from "Authentication and transport"
+through "Delta from v1.35.0", counted. There are no `unknown` rows. Recounted for issue #171;
+the previous figures (48 / 47 / 14) had not been updated as rows were added.
 
 | Status | Rows |
 |---|---|
-| supported | 48 |
-| intentionally different | 47 |
-| unsupported | 14 |
+| supported | 58 |
+| intentionally different | 59 |
+| unsupported | 23 |
 | **unknown** | **0** |
 
 "Intentionally different" outnumbering "supported" is the accurate reading of what a
@@ -86,6 +89,7 @@ those rows are one of four recurring decisions:
 | Template overrides / prefills | Template-based: match template fields by `template_field_id` (preferred) or `variable_name` (fallback); match template users by `template_user_id` or `order`. Only user info is overridable — `order` and `designation` always inherit from the template. Unmatched fields are silently ignored. | **intentionally different** | `FirmaLifecycleTest::test_a_prefill_that_matches_no_field_is_refused`, `::test_a_draft_is_created_from_an_imported_template_alias` | Both addressing modes work; `order` and the signing sequence still come from the template. Silent ignore is the vendor behaviour we must not reproduce (`docs/HANDOFF.md` §2, §10): an unmatched override is a `400` naming the field ids or variable names that do exist. A dropped prefill is a blank in an executed agreement nobody notices. A `variable_name` matching two fields is also an error — the recorded fixtures show `full_name` twice on one agreement — so the caller says which by `id`. |
 | `template_id` namespace | `format: uuid`, upstream's own id | supported | `FirmaLifecycleTest::test_a_draft_is_created_from_an_imported_template_alias`, `::test_the_created_template_id_round_trips`, `::test_a_template_version_id_also_resolves` | Accepts this application's `templates.public_id`, an imported alias from `template_aliases` — the provider id the consumer already has hardcoded — or a template *version* public id. Native id first, because that namespace is ours. `docs/HANDOFF.md` §6 keeps the first two in separate fields, so neither ever becomes the other. The create response echoes the **template's** id rather than the version the envelope copied, so the one id a consumer would store is one the next create accepts; the version form resolves as well, for anything an integration read from elsewhere. |
 | `400` / `404` | `400` invalid input (must supply `document` xor `template_id`); `404` template not found or not in workspace | supported | `FirmaLifecycleTest::test_an_unknown_template_id_is_not_found`, `FirmaCreateAndSendTest::test_a_document_and_a_template_together_are_refused` | A template that resolves and has no published version is `422`, not `404`: the caller named something real that is not ready, and a `404` would send them looking for a typo. The `404` is produced after scope enforcement, so another tenant's id is indistinguishable from one that does not exist. |
+| `settings.allow_decline`, `settings.show_save_for_later` | `true`, `false`, or `null` on signing requests and templates, cascading request → workspace → company (default `true`); a template's values copied at creation, a value sent replacing them; any other value `400` naming the key (post-pin, reference v1.40.0, prose) | supported | `SignerButtonsTest` | Stored on the envelope and echoed as stored, `null` included. Resolution is envelope, then workspace, then the deployment default (`esign.signing.allow_decline`, `esign.signing.show_save_for_later`, both `true`): this product has no company above the workspace, so the deployment plays that role. With `allow_decline` resolved `false` the signing page offers no Decline **and** `EnvelopeStateMachine::decline()` refuses one, so the agreement can only be stopped by cancelling it. `show_save_for_later` shows the signer's "Save and finish later" button; values persist on every save, so it saves what is unsaved and says how to come back. Set on templates through `PATCH /workspaces/{workspace}/templates/{template}`; the facade's template and workspace settings routes stay out of profile, and `PATCH` of a request's settings is not offered (the properties form of `PATCH` is `501`). |
 | `settings.require_otp_verification` | `SigningRequestSettings.require_otp_verification`, boolean | supported | `FirmaCreateAndSendTest::test_require_otp_verification_is_honoured`, `::test_omitting_the_otp_setting_leaves_the_envelope_undecided` | Honoured, and written to `envelopes.require_otp`. **Null is not false**: saying nothing leaves the request inheriting its workspace and then the deployment default, and an explicit `false` overrules both — a distinction a caller migrating from a workspace that required a code needs to be able to make. The code is honestly labelled everywhere a human sees it as a second check on the same factor, continued access to the mailbox the link went to; never a second factor, and never an eIDAS assurance (`docs/HANDOFF.md` §9). |
 | Other `settings` members | `SigningRequestSettings`, 14 members | **intentionally different** | `FirmaCreateAndSendTest::test_hand_drawn_only_is_not_implemented` | Four are `501` when asked for as `true` — `hand_drawn_only`, `allow_editing_before_sending`, `attach_pdf_on_finish`, and a non-empty `identity_editable_fields`. The rest are accepted and reported truthfully on read. `false` and `null` are never requests for anything and always pass, which is the difference between failing closed and being unusable. |
 | Atomicity | not stated for this route | supported | `FirmaLifecycleTest::test_a_prefill_that_matches_no_field_is_refused` | Creation is one transaction. A draft whose prefills were rejected does not survive as a half-built request the client never learned about. |
@@ -96,7 +100,7 @@ those rows are one of four recurring decisions:
 |---|---|---|---|---|
 | Request body | Inline object, requires `name`. `document` (base64, ~4.5 MB inline cap) **xor** `template_id` **xor** `document_id` (from `POST /documents`, up to 50 MB). Plus `recipients[]`, `fields[]`, `anchor_tags[]`, `reminders[]`, `settings`, `expiration_hours` | supported | `FirmaCreateAndSendTest::test_the_document_is_ingested_and_the_request_is_sent` | `document` and `template_id` are supported; `document_id` is not, because `POST /documents` is out of profile — a caller cannot obtain one from this surface, so accepting the field would be accepting an id we never issued. The 4.5 MB inline cap is enforced on the decoded bytes, and the deployment's own upload limit applies on top. A base64 payload prefixed `data:application/pdf;base64,` is accepted, because it turns up in practice. |
 | `201` response | `CreateAndSendResponse` — `status` enum is **`["sent"]` only**; `first_signer` = `{id, name, email, signing_link}`; `recipients[]` with real UUIDs; `fields[]` (`Field`); `credits_remaining` | **intentionally different** | `FirmaCreateAndSendTest::test_the_document_is_ingested_and_the_request_is_sent` | `credits_remaining` is `null`: there is no credit ledger, so any number would be invented, and omitting the key would break a consumer that reads it. `first_signer.signing_link` is ours and is the stable resolver rather than a minted invitation — see the signing-links row under Authentication for why. `recipients[]` carries `finished_on` as well, so a caller does not need `/users` immediately. |
-| Document intake | not stated — upstream accepts the bytes | supported | `FirmaCreateAndSendTest::test_an_encrypted_document_is_refused_before_anything_is_created` | The bytes go through `DocumentIntake`, the same intake the upload UI uses: staged, hashed, really parsed by the preflight parser, written and read back, recorded with the report. An encrypted, already-signed, or structurally unsupported PDF is a `400` carrying the parser's findings, before any signing request exists. The original is retained byte-for-byte and never re-rendered (AGENTS.md). |
+| Document intake | not stated in the pinned document; reference v1.40.1 adds `400 MALFORMED_PDF` with `malformed_pages` (1-based) and `document_position` for a page with no valid content, and `400 VALIDATION_ERROR` for an unreadable PDF | supported | `FirmaCreateAndSendTest::test_an_encrypted_document_is_refused_before_anything_is_created`, `::test_a_document_with_a_damaged_page_is_refused_as_malformed`, `MalformedPagePreflightTest` | The bytes go through `DocumentIntake`, the same intake the upload UI uses: staged, hashed, really parsed by the preflight parser, written and read back, recorded with the report. An encrypted, already-signed, unreadable, or structurally unsupported PDF is a `400 invalid_request` carrying the parser's findings, before any signing request exists. A damaged page — `/Contents` present but not drawing instructions — is `400 malformed_pdf` with `details.malformed_pages` and `details.document_position` (always `1`: one document per request here), and the findings beside them; upstream's `document_id` member is never present because a document is never supplied by id. A page with no `/Contents`, a `null` one, or one referring to an undefined object (ISO 32000-1 7.3.9, 7.3.10) is a legitimately blank page and is accepted. The original is retained byte-for-byte and never re-rendered (AGENTS.md). |
 | Validate-before-send | `400` → `CreateAndSendValidationError` with `phase` enum `create_validation\|send_validation` and `validation_errors[]` = `{recipient_index (1-based), recipient_email, missing_fields[]}` | supported | `FirmaLifecycleTest::test_send_refuses_when_a_required_prefill_is_missing` | Reproduced verbatim, including `phase`, because it is how the consumer surfaces a missing prefill to a human. `validation_errors[]` is built from the same readiness projection `/users` reports, so a caller that polls after a refused send sees the same answer. |
 | Atomicity | `500` description: "Any partially-created signing request is rolled back, so no draft remains." | supported | `FirmaCreateAndSendTest::test_hand_drawn_only_is_not_implemented`, `::test_a_coordinate_outside_the_percent_range_is_refused`, `::test_an_anchor_that_matches_nothing_is_refused` | Matches our fail-closed rule and is stricter: everything judgeable without the document — an unsupported option, an out-of-range percentage, an unplaceable field type, a recipient with no `order`, an approver — is refused *before* the bytes are stored, so those requests leave nothing at all. A refusal that genuinely needed the document leaves the document, with its preflight report, because keeping an upload is intake's own rule — that report is the only evidence of what was uploaded when a sender reports a rejection. No signing request is ever half-created either way. The consumer's platform-NDA path currently warns and returns a link on send failure; the migration must fail closed instead (`docs/HANDOFF.md` §2). |
 | `402` / `422` | `402` `InsufficientCreditsError`; `422` `UnprocessableEntityError` for suppressed (bounced/spam-marked) recipient addresses | unsupported | | `402` has no analogue: there are no credits to run out of. `422` for a suppressed address needs a suppression list, which does not exist yet; when it does, this row becomes supported without a shape change. Neither is fabricated in the meantime. |
@@ -117,7 +121,7 @@ those rows are one of four recurring decisions:
 | Download URLs | `final_document_download_url`, `document_only_download_url`, `certificate_only_download_url` — all nullable pre-signed URIs "expire after 1 hour"; each has a paired `*_download_error` enum `file_not_accessible\|null` | **intentionally different** | idem | We never pre-sign, on any driver (`docs/BLOB_STORAGE.md` rule 1). The facade returns app-issued, signature-covered, fifteen-minute URLs in the same fields, and the bytes stream through the application. All three are null until the agreement is executed, which is what the recorded fixtures show. `*_download_error` stays null: an artifact row exists only after its bytes were written and read back, so "recorded but inaccessible" is a fault to report loudly at download time rather than a field on a polling response. |
 | `document_url` / `document_url_expires_at` | Pre-signed URI plus its expiry | **intentionally different** | idem | Same treatment: an app-issued fifteen-minute link to the reviewed revision — the bytes the parties are shown — rather than a storage pre-sign. Issued in every state including a draft, because the caller is the sender reading back their own upload. |
 | Deprecated 0/1 integers | `use_signing_order`, `allow_download`, `allow_editing_before_sending`, `hand_drawn_only`, `attach_pdf_on_finish` — `integer` enum `[0, 1]`, all marked `deprecated` | supported | `FirmaContractTest::test_the_polling_response_has_the_recorded_key_set` | Emitted at the top level as integers **and** under `settings` as booleans, each with the right type in its own place (D5). The test asserts the types separately, because a client reading `response.use_signing_order` and one reading `response.settings.use_signing_order` are both in the wild. |
-| `settings` | `SigningRequestSettings`, 14 members | **intentionally different** | idem, and `FirmaCreateAndSendTest::test_require_otp_verification_is_honoured` | Every member emitted so the key set matches. Three describe something this product models — `use_signing_order` (sequential vs parallel), `allow_download` (always true; every party can fetch the executed PDF through an authorized download), and `require_otp_verification`, which reports the **resolved** answer from `OtpRequirement`: this request's own setting, then its workspace's, then the deployment default. Resolved rather than echoed, so a caller that set nothing still sees what its guests will be asked for. The other eleven report `false` or `null`, each documented in `SigningRequestSettings` with which it is and why; inventing `true` for a setting nothing enforces would be a successful no-op one read at a time. |
+| `settings` | `SigningRequestSettings`, 14 members (16 from reference v1.40.0) | **intentionally different** | idem, and `FirmaCreateAndSendTest::test_require_otp_verification_is_honoured` | Every member emitted so the key set matches. Three describe something this product models — `use_signing_order` (sequential vs parallel), `allow_download` (always true; every party can fetch the executed PDF through an authorized download), and `require_otp_verification`, which reports the **resolved** answer from `OtpRequirement`: this request's own setting, then its workspace's, then the deployment default. Resolved rather than echoed, so a caller that set nothing still sees what its guests will be asked for. The other eleven report `false` or `null`, each documented in `SigningRequestSettings` with which it is and why; inventing `true` for a setting nothing enforces would be a successful no-op one read at a time. `allow_decline` and `show_save_for_later` (v1.40.0) are modelled and echoed as stored — see their own row. The recorded fixtures predate them; `FirmaContractTest::SETTINGS_ADDED_AFTER_RECORDING` names them so the key-set comparison stays exact. |
 | `credit_cost` | `integer`, "Credits consumed when sent" | **intentionally different** | idem | `null`. There is no credit system, and the two alternatives were both worse: omitting the key breaks a consumer that reads `response.credit_cost`, and a number invents a billing fact. Null says "no cost is recorded", which is true. (This row was `unsupported — omit and document` in Stage 0; emitting the key as null is the ruling, because the recorded fixtures carry the key and the consumer's polling code reads the whole object.) |
 
 ### `PATCH /signing-requests/{id}`
@@ -195,9 +199,23 @@ those rows are one of four recurring decisions:
 
 ## Webhook events
 
-The pinned OpenAPI document contains **no** `webhooks` object, no event payload schema, and
-types `Webhook.events` as an unconstrained `array<string>` with no enum. Everything in this
-section is `(prose)` from `https://docs.firma.dev/guides/webhooks`.
+The event **names** are now read off the pinned document: since the reference's v1.40.2
+correction, `POST /webhooks` and `PUT /webhooks/{id}` enumerate the 26 events upstream sends
+in `events.items.enum`. The document still has no `webhooks` object and no event payload
+schema, so payload shapes, the envelope and the signature scheme remain `(prose)` from
+`https://docs.firma.dev/guides/webhooks`.
+
+**Catalog audit (issue #170).** Every name this outbox accepts is one of the 26, and
+`WebhookEventNameTest::test_every_profile_name_is_one_upstream_sends` keeps it that way. The
+same correction lists five names upstream refuses on subscription and never sends —
+`signing_request.declined`, `signing_request.voided`, `signing_request.field.completed`,
+`signing_request.resent`, `signing_request.credits.purchased` — and every one is refused here
+too (`::test_every_name_upstream_refuses_is_refused_here`). In particular this surface has never
+emitted a request-level `signing_request.declined` (D12): a decline publishes
+`signing_request.recipient.declined`, which is what the correction tells a consumer to
+subscribe to. The native `esign.envelope.declined` is a separate surface and unaffected. Of the
+26, the rows below account for 19; the other seven are the organization-seal family, out of
+profile until seals exist (issue #164).
 
 The outbox accepts exactly the names below plus our own, which are prefixed `esign.`;
 anything else is refused rather than recorded (`App\Domain\Delivery\Webhooks\WebhookEventName`,
@@ -228,6 +246,8 @@ told two different stories. The mapping from transition to event to message is
 | `template.updated`, `template.used` | Template events | unsupported | | Out of `firma-compat-v1`. Templates are a later family (`docs/HANDOFF.md` §10). |
 | `workspace.created`, `workspace.updated` | Workspace events | unsupported | | Out of profile. |
 | `domain.verified`, `domain.verification.failed` | Domain events | unsupported | | Out of profile; we do not manage sender domains through this API. |
+| `organization_seal.created`, `organization_seal.updated`, `organization_seal.deleted`, `organization_seal.erased` | Seal lifecycle events (reference v1.37.0) | unsupported | `WebhookEventNameTest::test_every_profile_name_is_one_upstream_sends` | Out of profile: this product has no organization seals (issue #164). The outbox refuses the names, so no subscription can wait on an event nothing here produces. |
+| `signing_request.seal.applied`, `signing_request.seal.paused`, `signing_request.seal.swapped` | Seal participant events on a request (reference v1.37.0) | unsupported | idem | idem. The service's own PAdES seal is a different thing and is not announced by these. |
 
 ### Envelope and delivery
 
@@ -255,6 +275,45 @@ Implemented in `app/Domain/Delivery/Webhooks` (issue #34). Contract and runbook:
 | Destination policy | Upstream requires HTTPS and a ≤5 s response | **intentionally different** | `tests/Unit/Delivery/DestinationPolicyTest.php`, `tests/Unit/Delivery/WebhookTransportOptionsTest.php` | We additionally validate every resolved address, block metadata/internal targets, refuse credentials in the URL, never follow a redirect, and pin the connection to the addresses we checked (DNS rebinding). The policy runs on every attempt, not once at creation. The internal consumer callback is permitted only by an administrator allowlist in deployment configuration, never by a caller-controlled flag (`docs/HANDOFF.md` §11). |
 | Duplicate suppression | Receivers are told to deduplicate on the event id | supported | `DeliverWebhookTest::test_a_replay_is_a_new_attempt_of_the_same_event` | Deduplication is the receiver's job; our side of the bargain is that the event id never changes across retries or replays, and neither do the body bytes. |
 | Delivery ordering | Not stated by the guide | **intentionally different** | `OutboxWriterTest::test_two_events_keep_the_order_in_which_they_occurred` | We make no ordering promise — a retry can reorder anything — and instead guarantee `created_at` reflects when the transition occurred, so a receiver can order and reject regressions itself. |
+
+## Delta from v1.35.0
+
+Issue #171. Every change between the previous pin and v1.40.4 that touches an in-profile route,
+an in-profile option, or this surface's error and event vocabulary, with the decision made
+about it. Located by diffing the in-profile operations of the two documents (request members,
+response members, response codes) and reading the changelog for the releases that changed
+behaviour without changing the schema. The v1.35.0 side of the diff is the copy in upstream's
+documentation repository, which is a later revision of the pinned bytes, so the changelog is
+the authority for *when* a change landed.
+
+Families that are out of profile as a whole — `/templates*` (including the new
+`/templates/{id}/documents*`), `/seals*`, `/webhooks*` administration, `/company*`,
+`/workspaces*`, the list route — stay out of profile and answer `501` (see
+[Out of profile](#out-of-profile)); their deltas are not listed one by one.
+
+| Delta | Reference release | Status | Fixture / test | Notes |
+|---|---|---|---|---|
+| Structured errors: `code` (uppercase) and `errors[]` on every error body | v1.36.0 | **intentionally different** | `FirmaAuthTest`, `FirmaLifecycleTest` | This surface keeps its `{error, message, details}` envelope with lowercase tokens in `error` (D1 for `create-and-send`). Adding a second, uppercase vocabulary beside the first would give every refusal two names to keep in step; the tokens adopted from the post-pin reference (`already_sent`, `request_too_large`, `malformed_pdf`) are upstream's codes in this vocabulary. |
+| `warnings[]` on the `create-and-send` response | v1.36.0 | **intentionally different** | | Not emitted. Nothing here is accepted with a caveat: what cannot be honoured is refused with a body naming it, so there is never a warning to report. |
+| `create-and-send` `201` no longer lists `fields[]` | v1.36.0 | **intentionally different** | `FirmaCreateAndSendTest` | Still emitted. Removing a member a consumer written against the pinned shape may read would break it for no gain; an extra member is harmless to one written against the current shape. |
+| `anchor_tags[].add_white_background`, `anchor_tags[].document_index` | v1.36.0, v1.39.0 | unsupported | `FirmaCreateAndSendTest` (`anchor_tags`) | `anchor_tags[]` as a whole is `501`; anchors are supplied per field as `fields[].anchor`. |
+| Organization seals: `seal_participants[]`, `fields[].seal_attribute`, `fields[].seal_participant_temp_id`, `PATCH` `seal_participant`, seal inheritance from templates, `dropped` | v1.37.0, v1.39.1 | unsupported | `FirmaLifecycleTest::test_post_pin_members_this_build_cannot_honour_are_refused_by_name` | No seal participants exist here (issue #164). A non-empty `seal_participants` and either field member are `501` naming the member; `seal_participants: []` — upstream's "create without seals" — is simply true and accepted. Before this change these members were dropped by request validation and the request built without them, a silent no-op. Responses do not carry `seal_participants`. |
+| `designation: "CC"` stored and returned; `Approver` | v1.37.1 (and v01.14.00) | unsupported | `FirmaCreateAndSendTest::test_a_non_signer_designation_is_not_implemented` | `Approver` and `CC` are `501` naming the designation (issue #169). |
+| Catalan (`ca`) language | v1.38.0 | unsupported | | `language` is `501` in every value; the signing pages are served in this application's locale. |
+| Multiple documents: `document_ids`, the `/signing-requests/{id}/documents*` routes, `documents[]`, `documents_version`, `documents_layout_version` | v1.39.0 | unsupported | `FirmaLifecycleTest::test_post_pin_members_this_build_cannot_honour_are_refused_by_name`, `::test_patching_settings_is_refused_rather_than_dropped` | One document per request (`docs/HANDOFF.md` §6, issue #163). `document_ids` is `501`, as is `PATCH` with `documents_layout_version`; the `/documents*` sub-routes answer the catch-all `501`. `document_id` (the v1.29.0 two-step upload, also post-dating nothing but never declared) is now `501` rather than dropped. Responses do not carry `documents[]`. |
+| Participant order: one order space for signers, approvers and seals; `INVALID_SIGNING_ORDER`, `SEAL_ORDER_COLLISION`, `SIGNING_ORDER_LOCKED_APPLIED` | v1.39.0 | **intentionally different** | | With signers only, the order space is the signers' `order`, and the seal-specific codes cannot arise. Upstream's shift-insert moves of a participant are `PATCH` operations this surface does not offer. |
+| `settings.allow_decline`, `settings.show_save_for_later` | v1.40.0 | supported | `SignerButtonsTest` | See the `POST /signing-requests` row. `PATCH` of `settings` is `501` rather than dropped. |
+| `413 REQUEST_TOO_LARGE` over 6 MiB | v1.40.0 | supported | `FirmaLifecycleTest::test_a_body_over_the_size_limit_is_refused_before_anything_is_created` | `request_too_large`; see the transport table. |
+| `400 MALFORMED_PDF` with `malformed_pages`, `document_position`, `document_id` | v1.40.1 | supported | `FirmaCreateAndSendTest::test_a_document_with_a_damaged_page_is_refused_as_malformed` | `malformed_pdf`; see the `POST /signing-requests` row (issue #167). |
+| Unreadable PDF: `400 VALIDATION_ERROR` instead of `500` | v1.40.1 | **intentionally different** | `FirmaCreateAndSendTest::test_an_encrypted_document_is_refused_before_anything_is_created` | Already a `400` here, as `invalid_request` with the parser's findings — the token this surface uses for a body it cannot use. |
+| Webhook event list corrected to the 26 sent | v1.40.2 | supported | `WebhookEventNameTest` | See the catalog audit under [Webhook events](#webhook-events) (issue #170). |
+| `otp_verified` audit events; `verify-signing-otp` responses | v1.40.3 | unsupported | `GuestSigningOtpTest`, `CompletionReportOtpTest` | `/audit` and `verify-signing-otp` are out of profile. The evidence is kept natively (issue #166); see [Out of profile](#out-of-profile). |
+| `409 ALREADY_SENT` on a repeated send; `400` for cancelled or declined | v1.40.4 | supported | `FirmaLifecycleTest::test_sending_twice_is_a_conflict`, `::test_sending_a_cancelled_request_is_not_already_sent` | `already_sent`; the cancelled/declined case stays `409 invalid_state`. See the `/send` table. |
+| `409 SEND_IN_PROGRESS` | v1.40.4 | **intentionally different** | | Never emitted: a send here is synchronous under the envelope lock, so there is no in-flight send state for a second call to observe. A concurrent second send waits for the lock and then gets `already_sent`. |
+| `create-and-send` removes the request when the send step fails before sending; `409` with `signing_request_id` once sending started | v1.40.4 | **intentionally different** | `FirmaCreateAndSendTest` | A send refused by its gate here is `422 validation_failed` with `phase: send_validation`, and the draft is kept, unsent and never announced, as the record of what was submitted; its id is not in the body. A send cannot partially start here, so the `409` case does not arise. A caller retrying the same body creates a second draft. |
+| `GET /signing-requests/{id}/download` partial snapshot for any unfinished sent request; `409` while the certificate is generating | v1.40.4 | supported | `FirmaDownloadTest` | Matches D11's resolution: the partial snapshot is served and flagged. Completion and the report are one transaction here, so the "certificate still generating" window does not exist. |
+| `document_only_hash` describes the sealed per-document PDF | v1.40.4 | unsupported | | Only on the multi-document `documents[]` objects, which are not emitted. |
+| Webhook secret rotation: once per hour, one previous secret kept, `429 COOLDOWN_ACTIVE` | v1.40.4 | **intentionally different** | `DeliverWebhookTest::test_during_a_rotation_both_secrets_sign_the_same_attempt` | Rotation is an operator command here, not an HTTP route; see the rotation-overlap row. |
 
 ## Disagreements
 
@@ -356,7 +415,7 @@ original document before signing"). Partial-download support is therefore unspec
 the event list only has `signing_request.recipient.declined`. Do not manufacture a
 `signing_request.declined` event to fill the gap (`docs/HANDOFF.md` §11).
 
-**Resolved:** unchanged from Stage 0. We emit `signing_request.recipient.declined` and our own `esign.envelope.declined` beside it, and never manufacture the upstream name.
+**Resolved:** unchanged from Stage 0. We emit `signing_request.recipient.declined` and our own `esign.envelope.declined` beside it, and never manufacture the upstream name. Upstream's v1.40.2 correction confirms the reading: `signing_request.declined` is refused on subscription and never sent, and a consumer is told to subscribe to `signing_request.recipient.declined` (issue #170).
 
 **D13 — Webhook event identity: `id` versus `event_id`.** The webhook guide's envelope and
 its idempotency example both use `id`. The consumer's webhook controller resolves `event_id`
@@ -376,7 +435,7 @@ neither (only `consecutive_failures`, `auto_disabled_at`, `enabled`, timestamps)
 
 **D15 — The unversioned spec URL is not the pinned one.**
 `https://docs.firma.dev/api-reference/openapi.json` resolves but served a different, smaller
-document (31 paths) than the pinned v01.35.00 file (72 paths) at retrieval time. Anyone
+document (31 paths) than the then-pinned v01.35.00 file (72 paths) at retrieval time. Anyone
 re-deriving this matrix must use the versioned URL in `tests/Fixtures/firma/SCHEMA.md`.
 
 **Resolved:** unchanged. Anyone re-deriving this matrix uses the versioned URL in `tests/Fixtures/firma/SCHEMA.md`; `scripts/fetch-firma-schema.sh` verifies the digest.
@@ -391,6 +450,15 @@ required to return a clear error rather than a no-op success: `/company*`, `/wor
 on `/signing-requests/{id}`, `/signing-requests/{id}/reminders`,
 `/signing-requests/{id}/audit`, `/signing-requests/{id}/resend`, and
 `/signing-requests/{id}/signers/{signer_id}/{signature,initials,stamps,files}`.
+
+`/signing-requests/{id}/audit` stays out of profile after upstream's v1.40.3 added
+`otp_verified` events to it (issue #166). The evidence that release describes is kept natively:
+the verification is audited with its channel and code record, the session and the attestation
+cite the code, and the completion report and evidence document name it
+(`docs/signing/guest-access.md`, "One-time-code evidence"). The native evidence export is where
+an integrator reads it. Projecting this application's audit trail into upstream's free-text
+`event` rows would be a second, lossy rendering of evidence that already has one authoritative
+form, so the route keeps answering `501` until a consumer needs it.
 
 Each answers `501` with a body naming the method and path, asserted by
 `tests/Feature/Integration/Firma/FirmaAuthTest::test_a_route_outside_the_profile_is_not_implemented`

@@ -7,6 +7,7 @@
     the link from the invitation again, which is both the correct instruction and the one
     that reveals nothing.
 --}}
+@php($signingEvent ??= ['type' => 'signing.error', 'code' => 'no_session'])
 @extends('layouts.signing')
 
 @section('content')

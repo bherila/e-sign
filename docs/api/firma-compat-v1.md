@@ -12,7 +12,7 @@ Implements issue #33. Acceptance profile **`firma-compat-v1`**.
 |---|---|
 | Base path | `/functions/v1/signing-request-api` — upstream's `servers[0]`, verbatim |
 | Profile contract | [`docs/compatibility/firma-capability-matrix.md`](../compatibility/firma-capability-matrix.md) — every route, field, status and event, with a final status and a test reference |
-| Upstream reference | Firma Partner API v1.35.0, pinned in [`tests/Fixtures/firma/SCHEMA.md`](../../tests/Fixtures/firma/SCHEMA.md) |
+| Upstream reference | Firma Partner API v1.40.4 (re-pinned from v1.35.0, issue #171), pinned in [`tests/Fixtures/firma/SCHEMA.md`](../../tests/Fixtures/firma/SCHEMA.md) |
 | Recorded fixtures | `tests/Fixtures/firma/firma-compat-v1/` — four consumer workflows × four endpoints |
 | Routes | `routes/compat-firma.php`, mounted by `App\Providers\IntegrationServiceProvider` |
 | HTTP | `app/Http/Controllers/Compat/Firma`, `app/Http/Requests/Compat/Firma`, `app/Http/Resources/Compat/Firma`, `app/Http/Middleware/Compat` |
@@ -164,6 +164,7 @@ appears only when there is something structured to say. This is **not** the nati
 | `error` | Status | Means |
 |---|---|---|
 | `invalid_request` | 400 | The body, a coordinate, a type, or an override could not be used |
+| `malformed_pdf` | 400 | A page of the document has no valid content (`details.malformed_pages`, 1-based; `details.document_position`; the parser's `details.findings`). Re-export the file and upload it again |
 | `unauthorized` | 401 | No key, or one that is unknown, revoked, or expired |
 | `forbidden` | 403 | Valid key, missing scope (`details.required_scope`), or an expired/edited download link |
 | `not_found` | 404 | No such signing request **in your workspace** — identical to one that does not exist |
@@ -431,6 +432,18 @@ a caller that set nothing still sees what its guests will be asked for.
 
 The code is a second check on the **same** factor — continued access to the mailbox the link
 went to — not a second factor, and not an eIDAS advanced or qualified signature.
+
+### `settings.allow_decline` and `settings.show_save_for_later`
+
+Honoured on both create routes, as `true`, `false`, or `null`; anything else is
+`400 invalid_request` naming the key. `null` means the workspace decides, and the deployment
+default (both `true`) applies below that. A request built from a template copies the template's
+values unless you send one, in which case yours replaces it — `null` included. Changing the
+template later changes no request already created.
+
+With `allow_decline` false the signing page shows no Decline button and a decline is refused by
+the service, so the agreement can only be stopped by cancelling it. `GET /signing-requests/{id}`
+returns both as stored.
 
 ### The polling response
 

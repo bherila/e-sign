@@ -749,6 +749,23 @@ return [
         // eIDAS advanced or qualified signature (docs/HANDOFF.md section 9).
         'require_otp' => filter_var(env('ESIGN_SIGNING_REQUIRE_OTP', false), FILTER_VALIDATE_BOOLEAN),
 
+        // Deployment defaults for the signer's Decline and Finish later buttons
+        // (issue #165). Resolution is envelope, then workspace, then these; a
+        // template's values are copied onto envelopes built from it. With
+        // allow_decline false the state machine also refuses a decline, so the
+        // agreement can only be stopped by cancelling it.
+        'allow_decline' => filter_var(env('ESIGN_SIGNING_ALLOW_DECLINE', true), FILTER_VALIDATE_BOOLEAN),
+        'show_save_for_later' => filter_var(env('ESIGN_SIGNING_SHOW_SAVE_FOR_LATER', true), FILTER_VALIDATE_BOOLEAN),
+
+        // Exact origins (https://app.example.com) a signing page may announce its
+        // progress to with postMessage (issue #168, docs/signing/embedded-events.md).
+        // Comma-separated. Empty — the default — posts nothing anywhere. This does
+        // not make signing pages frameable; frame-ancestors stays 'none'.
+        'embed_origins' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('ESIGN_SIGNING_EMBED_ORIGINS', '')),
+        ))),
+
         'otp' => [
             'length' => 6,
             'ttl_minutes' => (int) env('ESIGN_SIGNING_OTP_TTL_MINUTES', 10),

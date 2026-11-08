@@ -65,6 +65,14 @@ class StoreSigningRequestRequest extends FirmaRequest
             'completion_message' => ['nullable', 'string', 'max:2000'],
             'completion_redirect_url' => ['nullable', 'string', 'max:2048'],
             'completion_redirect_delay' => ['nullable', 'integer'],
+
+            // Post-pin members (reference v1.39.0, issue #171). Without a rule `validated()`
+            // would drop them and the request would go ahead as if they had not been sent —
+            // a multi-document or sealed request silently built as a single-document unsealed
+            // one. Declared so the guard refuses them by name.
+            'document_id' => ['nullable', 'string', 'max:191'],
+            'document_ids' => ['nullable', 'array'],
+            'seal_participants' => ['nullable', 'array'],
         ];
     }
 

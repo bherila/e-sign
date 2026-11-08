@@ -131,6 +131,22 @@ final readonly class TcPdfPreflight implements PdfPreflight
                 $budget->step();
                 $pages[] = $page->geometry;
 
+                $defect = $graph->contentDefect($page->dictionary);
+                if ($defect !== null) {
+                    $findings[] = PreflightFinding::reject(
+                        PreflightCode::MalformedPage,
+                        sprintf(
+                            'The PDF is damaged: page %d has no valid content (%s), so it would render '
+                            .'blank and could not be sealed with the rest of the document. Re-export the '
+                            .'file from the application that created it, or save it again from a PDF '
+                            .'editor, and upload it again.',
+                            $page->geometry->pageNumber,
+                            $defect,
+                        ),
+                        $page->geometry->pageNumber,
+                    );
+                }
+
                 if ($page->geometry->userUnit !== 1.0) {
                     $findings[] = PreflightFinding::warn(
                         PreflightCode::UserUnitNotPreserved,

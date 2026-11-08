@@ -316,6 +316,87 @@ final class PdfObjectGraph
     }
 
     /**
+     * Why a page's /Contents is not drawing instructions, or null when it is usable.
+     *
+     * ISO 32000-1 7.7.3.3: /Contents is a stream or an array of streams, and when it is
+     * absent the page is empty. Three spellings of "absent" are legitimate blank pages and are
+     * not defects: no entry at all; an entry whose value is `null` (7.3.9 makes a null-valued
+     * entry equivalent to an absent one); and a reference to an object the file does not
+     * define (7.3.10 says such a reference is a reference to the null object, not an error).
+     * A *present* value that is something else — a dictionary such as another page's, a
+     * number, a string — leaves a page that renders blank and that nothing downstream can draw
+     * on, which is the damage issue #167 refuses. Two pages sharing one content stream is legal
+     * and is not reported. Inside an array, null and undefined members are skipped likewise.
+     *
+     * @param  array<string, array<int, mixed>>  $pageDict
+     */
+    public function contentDefect(array $pageDict): ?string
+    {
+        $entry = $pageDict['Contents'] ?? null;
+
+        if ($this->isNullOrUndefined($entry)) {
+            return null;
+        }
+
+        if (($entry[0] ?? null) === 'objref' && is_string($entry[1] ?? null) && $this->isStream($entry[1])) {
+            return null;
+        }
+
+        $resolved = $this->resolve($entry);
+
+        if ($this->isNullOrUndefined($resolved)) {
+            return null;
+        }
+
+        if (! is_array($resolved) || ($resolved[0] ?? null) !== '[') {
+            return 'its /Contents is not a content stream';
+        }
+
+        $items = is_array($resolved[1] ?? null) ? $resolved[1] : [];
+
+        foreach ($items as $item) {
+            if (! is_array($item) || $this->isNullOrUndefined($item)) {
+                continue;
+            }
+
+            if (($item[0] ?? null) !== 'objref' || ! is_string($item[1] ?? null) || ! $this->isStream($item[1])) {
+                return 'its /Contents array holds something other than content streams';
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * A PDF null, a reference to an object the file does not define, or nothing at all.
+     *
+     * @param  array<int, mixed>|null  $entry
+     */
+    private function isNullOrUndefined(?array $entry): bool
+    {
+        if ($entry === null || ($entry[0] ?? null) === 'null') {
+            return true;
+        }
+
+        if (($entry[0] ?? null) === 'objref') {
+            return ! is_string($entry[1] ?? null) || $this->object($entry[1]) === [];
+        }
+
+        return false;
+    }
+
+    private function isStream(string $ref): bool
+    {
+        foreach ($this->object($ref) as $entry) {
+            if (($entry[0] ?? null) === 'stream') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Concatenated, decoded content streams for a page /Contents entry.
      *
      * ISO 32000-1 7.8.2: an array of streams is treated as a single stream with the
