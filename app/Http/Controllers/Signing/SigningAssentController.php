@@ -80,6 +80,7 @@ class SigningAssentController extends Controller
             reviewedEnvelopeVersion: (int) $request->validated('reviewed_envelope_version'),
             verificationMethod: $context->session->verification_method->attested(),
             clientEvidence: $fingerprint->asClientEvidence($request, 'guest_signing_page'),
+            otpChallengeRef: $context->session->otp_challenge_ref,
         );
 
         try {

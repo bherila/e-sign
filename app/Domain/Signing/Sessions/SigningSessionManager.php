@@ -11,6 +11,7 @@ use App\Domain\Signing\Models\Envelope;
 use App\Domain\Signing\Models\EnvelopeRecipient;
 use App\Domain\Signing\Sessions\Exceptions\GuestAccessDenied;
 use App\Domain\Signing\Sessions\Models\RecipientInvitation;
+use App\Domain\Signing\Sessions\Models\SigningOtpChallenge;
 use App\Domain\Signing\Sessions\Models\SigningSession;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Config\Repository;
@@ -71,12 +72,15 @@ final class SigningSessionManager
         SigningVerification $verification,
         InvitationIssuer $issuer,
         ?string $returnUrl = null,
+        ?SigningOtpChallenge $otpChallenge = null,
     ): StartedSigningSession {
         $fingerprint = ClientFingerprint::of($request, $this->digest);
         $token = SigningToken::generate();
         $now = CarbonImmutable::now();
 
-        $session = DB::transaction(function () use ($invitation, $issuer, $fingerprint, $token, $now, $verification, $returnUrl): SigningSession {
+        $otpChallengeRef = $otpChallenge?->public_id;
+
+        $session = DB::transaction(function () use ($invitation, $issuer, $fingerprint, $token, $now, $verification, $returnUrl, $otpChallengeRef): SigningSession {
             if (! $issuer->consume($invitation)) {
                 throw GuestAccessDenied::invitationNotLive('consumed');
             }
@@ -89,6 +93,7 @@ final class SigningSessionManager
                 'ip_hash' => $fingerprint->ipHash,
                 'user_agent_hash' => $fingerprint->userAgentHash,
                 'verification_method' => $verification->value,
+                'otp_challenge_ref' => $otpChallengeRef,
                 'started_at' => $now,
                 'expires_at' => $now->addMinutes($this->ttlMinutes()),
                 'last_seen_at' => $now,
@@ -104,6 +109,7 @@ final class SigningSessionManager
                 'envelope_id' => $session->envelope_id,
                 'recipient_id' => $session->recipient_id,
                 'verification_method' => $verification->value,
+                'otp_challenge' => $otpChallengeRef,
                 // Whether a destination was accepted, not which one: the confirmation page
                 // shows the URL, and an audit row does not need a second copy of it.
                 'return_url_honoured' => $returnUrl !== null,

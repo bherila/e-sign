@@ -10,11 +10,13 @@ use App\Domain\Signing\Envelopes\RecipientState;
 use App\Domain\Signing\Envelopes\VerificationMethod;
 use App\Domain\Signing\Fields\ClientEvidence;
 use App\Domain\Signing\Models\RecipientAttestation;
+use App\Domain\Signing\Sessions\Models\SigningOtpChallenge;
 use App\Domain\Signing\Sessions\Models\SigningSession;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Testing\TestResponse;
 use Tests\Support\GuestSigningScenario;
 use Tests\Support\InteractsWithSigningSession;
+use Tests\Support\ReadsMailedOtpCodes;
 use Tests\Support\SyntheticImages;
 use Tests\TestCase;
 
@@ -31,6 +33,7 @@ use Tests\TestCase;
 class GuestSigningAcceptanceTest extends TestCase
 {
     use InteractsWithSigningSession;
+    use ReadsMailedOtpCodes;
     use RefreshDatabase;
 
     public function test_a_signer_completes_their_fields_and_signs(): void
@@ -82,6 +85,45 @@ class GuestSigningAcceptanceTest extends TestCase
                 ClientEvidence::ALLOWED_KEYS,
             ),
         );
+    }
+
+    /**
+     * An acceptance made in a session a one-time code admitted names that code (issue #166).
+     *
+     * The digest is unchanged — it already binds the session, and the session names the same
+     * code — so the reference sits beside it on the attestation and in the evidence.
+     */
+    public function test_an_acceptance_in_a_code_verified_session_names_the_code(): void
+    {
+        config()->set('esign.signing.require_otp', true);
+
+        $scenario = GuestSigningScenario::sent();
+        $issued = $scenario->invite();
+        $this->post(GuestSigningScenario::startUrl($scenario->envelope, GuestSigningScenario::tokenOf($issued)))->assertOk();
+        $cookie = $this->startSigningSession($scenario, $issued, ['code' => $this->mailedOtpCode()]);
+        $reviewed = $this->fillRequiredFields($scenario, $cookie);
+
+        $this->accept($scenario, $cookie, $reviewed)->assertRedirect();
+
+        $challenge = SigningOtpChallenge::query()->whereNotNull('verified_at')->firstOrFail();
+        $attestation = RecipientAttestation::query()->firstOrFail();
+
+        $this->assertSame($challenge->public_id, SigningSession::query()->firstOrFail()->otp_challenge_ref);
+        $this->assertSame($challenge->public_id, $attestation->otp_challenge_ref);
+        $this->assertSame(VerificationMethod::EmailOtp, $attestation->verification_method);
+    }
+
+    public function test_an_acceptance_without_a_code_names_none(): void
+    {
+        config()->set('esign.signing.require_otp', false);
+
+        $scenario = GuestSigningScenario::sent();
+        $cookie = $this->startSigningSession($scenario);
+        $reviewed = $this->fillRequiredFields($scenario, $cookie);
+
+        $this->accept($scenario, $cookie, $reviewed)->assertRedirect();
+
+        $this->assertNull(RecipientAttestation::query()->firstOrFail()->otp_challenge_ref);
     }
 
     public function test_the_confirmation_page_shows_the_server_acceptance_time(): void

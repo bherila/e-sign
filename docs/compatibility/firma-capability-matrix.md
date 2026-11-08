@@ -408,6 +408,15 @@ on `/signing-requests/{id}`, `/signing-requests/{id}/reminders`,
 `/signing-requests/{id}/audit`, `/signing-requests/{id}/resend`, and
 `/signing-requests/{id}/signers/{signer_id}/{signature,initials,stamps,files}`.
 
+`/signing-requests/{id}/audit` stays out of profile after upstream's v1.40.3 added
+`otp_verified` events to it (issue #166). The evidence that release describes is kept natively:
+the verification is audited with its channel and code record, the session and the attestation
+cite the code, and the completion report and evidence document name it
+(`docs/signing/guest-access.md`, "One-time-code evidence"). The native evidence export is where
+an integrator reads it. Projecting this application's audit trail into upstream's free-text
+`event` rows would be a second, lossy rendering of evidence that already has one authoritative
+form, so the route keeps answering `501` until a consumer needs it.
+
 Each answers `501` with a body naming the method and path, asserted by
 `tests/Feature/Integration/Firma/FirmaAuthTest::test_a_route_outside_the_profile_is_not_implemented`
 for both a `POST` to an out-of-profile signing-request sub-route and a `GET` to an

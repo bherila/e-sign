@@ -229,7 +229,15 @@ final class OtpChallenges
             AuditActor::system('signing.otp'),
             'signing.otp.verified',
             $challenge,
-            ['recipient' => $recipient->public_id, 'purpose' => $purpose->value],
+            [
+                'recipient' => $recipient->public_id,
+                'purpose' => $purpose->value,
+                // Which code record, and over which channel: the evidence a reviewer reads to
+                // see that the signer entered the code sent to them (issue #166).
+                'channel' => 'email',
+                'otp_challenge' => $challenge->public_id,
+                'envelope' => $recipient->envelope?->public_id,
+            ],
         );
 
         return $challenge;
@@ -245,12 +253,25 @@ final class OtpChallenges
      */
     public function hasRecentVerification(EnvelopeRecipient $recipient, OtpPurpose $purpose): bool
     {
+        return $this->recentVerification($recipient, $purpose) instanceof SigningOtpChallenge;
+    }
+
+    /**
+     * The code this recipient most recently answered for this purpose, while it still counts.
+     *
+     * This is the record a session started on the strength of it cites (issue #166), so the
+     * acceptance made in that session can name the code that admitted its author.
+     */
+    public function recentVerification(EnvelopeRecipient $recipient, OtpPurpose $purpose): ?SigningOtpChallenge
+    {
         return SigningOtpChallenge::query()
             ->where('recipient_id', $recipient->getKey())
             ->where('purpose', $purpose->value)
             ->whereNotNull('verified_at')
             ->where('verified_at', '>', CarbonImmutable::now()->subMinutes($this->ttlMinutes()))
-            ->exists();
+            ->orderByDesc('verified_at')
+            ->orderByDesc('id')
+            ->first();
     }
 
     /**

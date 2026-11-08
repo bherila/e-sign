@@ -45,6 +45,10 @@ final readonly class AcceptanceRequest
 
     /**
      * @param  array<string, mixed>  $clientEvidence  Minimized here; anything unrecognised is dropped.
+     * @param  string|null  $otpChallengeRef  Public id of the one-time code that verified the session, if one did.
+     *                                        Recorded on the attestation beside the digest, not in it:
+     *                                        the digest already binds `session_ref`, and the session
+     *                                        names the same code, so encoding v1 stays recomputable.
      */
     public function __construct(
         public string $consentPolicyVersion,
@@ -53,6 +57,7 @@ final readonly class AcceptanceRequest
         public int $reviewedEnvelopeVersion,
         public VerificationMethod $verificationMethod = VerificationMethod::EmailLink,
         array $clientEvidence = [],
+        public ?string $otpChallengeRef = null,
     ) {
         if (trim($sessionRef) === '' || mb_strlen($sessionRef) > self::MAX_SESSION_REF_LENGTH) {
             throw new InvalidArgumentException(

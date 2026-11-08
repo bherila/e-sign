@@ -1372,6 +1372,7 @@ final readonly class EnvelopeStateMachine
             'session_ref' => $request->sessionRef,
             'accepted_at' => $acceptedAt,
             'verification_method' => $request->verificationMethod,
+            'otp_challenge_ref' => $request->otpChallengeRef,
             'client_evidence' => $request->clientEvidence,
             'prev_attestation_sha256' => $previous?->attestation_sha256,
             'attestation_sha256' => $digest,

@@ -38,6 +38,7 @@ use RuntimeException;
  * @property string $session_ref
  * @property CarbonImmutable $accepted_at
  * @property VerificationMethod $verification_method
+ * @property string|null $otp_challenge_ref Public id of the one-time code that verified the session this acceptance was made in.
  * @property array<string, mixed> $client_evidence
  * @property string|null $prev_attestation_sha256
  * @property string $attestation_sha256
@@ -57,6 +58,7 @@ class RecipientAttestation extends Model
         'session_ref',
         'accepted_at',
         'verification_method',
+        'otp_challenge_ref',
         'client_evidence',
         'prev_attestation_sha256',
         'attestation_sha256',
