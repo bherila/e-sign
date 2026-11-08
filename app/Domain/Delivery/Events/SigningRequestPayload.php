@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Delivery\Events;
 
+use App\Domain\Preparation\Schema\RecipientDesignation;
 use App\Domain\Signing\Envelopes\EnvelopeState;
 use App\Domain\Signing\Models\Envelope;
 use App\Domain\Signing\Models\EnvelopeRecipient;
@@ -38,15 +39,23 @@ use Illuminate\Database\Eloquent\Collection;
  * - **`first_name` / `last_name` are absent.** This product stores one display name and
  *   splitting it would be a guess about a person's name (`docs/HANDOFF.md` §2 keeps identity
  *   facts unguessed). `name` and `email` are emitted verbatim.
- * - **`designation` is always `Signer`.** There is no approver or CC concept here yet, and
- *   inventing one per recipient would put an authority in the payload that nothing enforces.
+ * - **A cc recipient's `order` is their place among the cc recipients.** Upstream's separate
+ *   cc sequence; they have no stage here (issue #169). `designation` is the party's own.
  */
 final class SigningRequestPayload
 {
     /**
-     * Upstream's designation enum is `Signer|Approver|CC`. Everyone we model signs.
+     * Upstream's spelling of each native designation. Kept here rather than read from the
+     * Firma module because Delivery does not depend on Integration (docs/ARCHITECTURE.md);
+     * `FirmaDesignationTest` pins it against `FirmaProfile::DESIGNATIONS`.
+     *
+     * @var array<string, string>
      */
-    public const DESIGNATION = 'Signer';
+    public const DESIGNATIONS = [
+        'signer' => 'Signer',
+        'approver' => 'Approver',
+        'cc' => 'CC',
+    ];
 
     /**
      * The full envelope-scoped payload: the request, every recipient, and the workspace.
@@ -148,8 +157,8 @@ final class SigningRequestPayload
             'id' => $recipient->public_id,
             'name' => $recipient->name,
             'email' => $recipient->email,
-            'designation' => self::DESIGNATION,
-            'order' => $recipient->order_index,
+            'designation' => self::DESIGNATIONS[($recipient->designation ?? RecipientDesignation::Signer)->value],
+            'order' => self::orderOf($recipient),
             'finished_on' => self::at($recipient->signed_at),
             'declined_on' => self::at($recipient->declined_at),
             'decline_reason' => $recipient->decline_reason,
@@ -225,5 +234,19 @@ final class SigningRequestPayload
     private static function at(?CarbonInterface $moment): ?string
     {
         return $moment?->toIso8601String();
+    }
+
+    /** A signer's or approver's stage; a cc recipient's place among the envelope's cc recipients. */
+    private static function orderOf(EnvelopeRecipient $recipient): int
+    {
+        if ($recipient->designation !== RecipientDesignation::Cc) {
+            return $recipient->order_index;
+        }
+
+        return max(1, EnvelopeRecipient::query()
+            ->where('envelope_id', $recipient->envelope_id)
+            ->where('designation', RecipientDesignation::Cc->value)
+            ->where('id', '<=', $recipient->getKey())
+            ->count());
     }
 }

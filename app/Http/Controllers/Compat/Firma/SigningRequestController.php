@@ -14,6 +14,7 @@ use App\Domain\Integration\Firma\SigningRequestSettings;
 use App\Domain\Integration\Firma\SigningRequestUsers;
 use App\Domain\Integration\Firma\UnsupportedOptions;
 use App\Domain\Integration\Native\EnvelopeService;
+use App\Domain\Signing\Envelopes\RecipientState;
 use App\Domain\Signing\Exceptions\SendPreconditionsFailed;
 use App\Domain\Signing\Models\Envelope;
 use App\Domain\Signing\Models\EnvelopeRecipient;
@@ -337,16 +338,23 @@ class SigningRequestController extends Controller
             $envelope->setRelation('recipients', $envelope->recipients()->get());
         }
 
-        foreach ($envelope->getRelation('recipients') as $recipient) {
+        // A cc recipient is never invited and never signs (issue #169), and sorts first by its
+        // stage 0, so it is never the answer here, whatever order the rows come in.
+        $participants = $envelope->getRelation('recipients')
+            ->reject(static fn (EnvelopeRecipient $recipient): bool => $recipient->state === RecipientState::Copied)
+            ->values();
+
+        foreach ($participants as $recipient) {
             /** @var EnvelopeRecipient $recipient */
             if ($recipient->invited_at !== null) {
                 return $recipient;
             }
         }
 
-        // Nobody has been written to yet — the mail is scheduled on the queue — so the first
-        // party of the first stage is the one who will be.
-        return $envelope->getRelation('recipients')->first();
+        // Nobody has been written to yet — the mail is scheduled on the queue — so a party the
+        // send released is the one who will be: active now, in the first stage.
+        return $participants->first(static fn (EnvelopeRecipient $recipient): bool => $recipient->state === RecipientState::Active)
+            ?? $participants->first();
     }
 
     /**

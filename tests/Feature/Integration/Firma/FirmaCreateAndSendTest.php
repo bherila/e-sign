@@ -609,28 +609,6 @@ class FirmaCreateAndSendTest extends TestCase
         $this->assertSame(0, $this->ingestedCount());
     }
 
-    /** An approver or a copy recipient is a 501, not a signer by another name. */
-    public function test_a_non_signer_designation_is_not_implemented(): void
-    {
-        [, $issued] = $this->scenario();
-
-        $this->postJson(self::BASE.'/create-and-send', [
-            'name' => 'Synthetic with an approver',
-            'document' => base64_encode(PdfFixtures::bytes('single-page-letter')),
-            'recipients' => [['first_name' => 'Dana', 'email' => 'dana@buyer.example.test', 'order' => 1, 'designation' => 'Approver']],
-            'fields' => [[
-                'type' => 'signature',
-                'page_number' => 1,
-                'position' => ['x' => 10.0, 'y' => 80.0, 'width' => 25.0, 'height' => 4.0],
-            ]],
-        ], FirmaFacadeScenario::headers($issued))
-            ->assertStatus(501)
-            ->assertJsonPath('error', 'unsupported')
-            ->assertJsonPath('details.unsupported_option', 'recipients[].designation=Approver');
-
-        $this->assertSame(0, $this->ingestedCount());
-    }
-
     /**
      * A field type this profile declares and this build cannot place is a 501 naming it.
      *

@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace App\Domain\Integration\Firma;
 
+use App\Domain\Preparation\Schema\RecipientDesignation;
+
 /**
  * One party of an inbound `POST /signing-requests[/create-and-send]`, resolved.
  *
  * The profile sends `first_name`, an optional `last_name`, an `email`, a `designation` and an
- * `order`, and lets a caller refer to a recipient from a field by a temporary id
+ * `order` (for a cc recipient, a place in upstream's separate cc sequence), and lets a caller refer to a recipient from a field by a temporary id
  * (`temp_1`, `temp_2`…). This object is what that becomes once the request has been read:
  * a **schema recipient id** the field schema will use as the field owner's handle, the
  * display name, the address, and the stage.
@@ -38,14 +40,30 @@ final readonly class PlannedRecipient
         public string $email,
         public int $order,
         public array $reference,
+        public RecipientDesignation $designation = RecipientDesignation::Signer,
     ) {}
 
+    /** A cc recipient: outside the signing order, owning no fields (issue #169). */
+    public function isCopied(): bool
+    {
+        return $this->designation === RecipientDesignation::Cc;
+    }
+
     /**
-     * @return array{id: string, name: string, email: string}
+     * The schema recipient. `designation` is written only when it is not the default, which
+     * is the canonical form's own rule, so a request with only signers keeps its 1.0 bytes.
+     *
+     * @return array{id: string, name: string, email: string, designation?: string}
      */
     public function toSchemaRecipient(): array
     {
-        return ['id' => $this->schemaId, 'name' => $this->name, 'email' => $this->email];
+        $recipient = ['id' => $this->schemaId, 'name' => $this->name, 'email' => $this->email];
+
+        if ($this->designation !== RecipientDesignation::Signer) {
+            $recipient['designation'] = $this->designation->value;
+        }
+
+        return $recipient;
     }
 
     /**
@@ -53,7 +71,7 @@ final readonly class PlannedRecipient
      */
     public function toContactOverride(): array
     {
-        return $this->toSchemaRecipient();
+        return ['id' => $this->schemaId, 'name' => $this->name, 'email' => $this->email];
     }
 
     public function answersTo(string $reference): bool

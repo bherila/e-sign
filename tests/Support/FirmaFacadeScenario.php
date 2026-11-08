@@ -237,7 +237,7 @@ final class FirmaFacadeScenario
      * Run the real finalizer, resolved from the container so the provider's wiring stays on
      * the tested path.
      */
-    private function finalize(Envelope $envelope): Envelope
+    public function finalize(Envelope $envelope): Envelope
     {
         app(EnvelopeFinalizer::class)->finalize($envelope);
 

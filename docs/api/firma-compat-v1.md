@@ -222,7 +222,6 @@ Refused options, and why each one:
 | `reminders[]` | Reminders are sent on the service's own schedule. |
 | `anchor_tags[]` | Anchors are supplied per field; see [Anchors](#anchors). |
 | `language`, `completion_title`, `completion_message`, `completion_redirect_url`, `completion_redirect_delay` | The signing and completion pages are this application's own; supplied copy would not be rendered, and there is no redirect to a third-party URL. |
-| `recipients[].designation` other than `Signer` | An approver would have to be treated as a signer — binding them to an agreement they meant to review — or dropped. |
 | `fields[].type` in `dropdown`, `file`, `image`, `number`, `radio`, `radio_buttons`, `stamp`, `url` | Declared upstream, not placeable here. Never coerced into a text box: a field a signer was never asked to complete is worse than a rejected request. |
 | PATCH properties (`name`, `description`, `expiration_hours`) | The title is part of the immutable snapshot. |
 | PATCH `field.prefilled_editable` / `field.read_only` that **changes** the field | Editability belongs to the copied schema. A value that agrees with the field is honoured as the no-op it is. |
@@ -358,6 +357,14 @@ contact details are overridable.
 `recipients[].template_user_id` is this application's schema recipient id; `order` also
 resolves, when it names exactly one party of the template's signing sequence.
 
+**Designations** (issue #169). A `Signer` signs and an `Approver` approves (with
+`approval_signature`, `approval_checkmark` and `approval_date` fields, which only an Approver may
+own), each in the stage its `order` names. A `CC` is copied on the completed agreement and owns
+no fields; its `order` is its place in a separate CC sequence and never names a signing position.
+At least one recipient must be a `Signer`. On a template-based request a `CC` is never matched to
+a template party: it is added, and a template CC whose address it shares is that CC rather than a
+second copy.
+
 **`fields[]` means two different things**, decided by the source:
 
 - **From a template** it is a set of **prefills**. Each entry names a field by
@@ -479,7 +486,8 @@ specifies no order for this array.
 - `first_name` and `last_name` are **null**. This product stores one display name, and
   splitting a person's name into parts is a guess about that person; `name` carries the whole
   thing. The keys are present so reading them gives null rather than an undefined index.
-- `designation` is always `Signer`.
+- `designation` is the party's own: `Signer`, `Approver`, or `CC` (issue #169). A `CC` has no
+  signing stage; its `order` is its place among the request's CC recipients.
 - The contact block (`phone_number`, `street_address`, …, `custom_fields`) is null. This is a
   contact record the service does not keep — identity binds on the attestation, not on a
   stored address book. A field's `title` or `company` *value* is a field value and appears on

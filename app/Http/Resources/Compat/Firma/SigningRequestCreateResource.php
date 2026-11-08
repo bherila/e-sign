@@ -126,8 +126,8 @@ class SigningRequestCreateResource extends JsonResource
                 'id' => $recipient->public_id,
                 'name' => $recipient->name,
                 'email' => $recipient->email,
-                'designation' => FirmaProfile::DESIGNATION,
-                'order' => $recipient->order_index,
+                'designation' => FirmaProfile::designationOf($recipient->designation),
+                'order' => FirmaProfile::orderOf($recipient, $envelope->getRelation('recipients')),
             ];
         }
 

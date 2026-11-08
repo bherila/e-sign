@@ -27,9 +27,9 @@ use stdClass;
  * index, and `name` carries the whole thing. Upstream lists `first_name` as required; a
  * fabricated half of somebody's name would be worse than an honest null.
  *
- * **`designation` is always `Signer`.** Upstream's enum is `Signer|Approver|CC`. Every party
- * modelled here signs; emitting `Approver` for somebody nothing treats as an approver would
- * put an authority in the payload that nothing enforces.
+ * **A cc recipient's `order` is their place among the cc recipients**, upstream's separate cc
+ * sequence ({@see FirmaProfile::orderOf()}): they have no stage. `designation` is the party's
+ * own, `Signer`, `Approver` or `CC` (issue #169).
  *
  * **The contact and profile block is null.** `phone_number`, `street_address`, `city`,
  * `state_province`, `postal_code`, `country`, `title`, `company` and `custom_fields` are a
@@ -86,8 +86,8 @@ final readonly class SigningRequestUsers
                 // guesses which part of it is which.
                 'first_name' => null,
                 'last_name' => null,
-                'designation' => FirmaProfile::DESIGNATION,
-                'order' => $recipient->order_index,
+                'designation' => FirmaProfile::designationOf($recipient->designation),
+                'order' => FirmaProfile::orderOf($recipient, $envelope->getRelation('recipients')),
                 'finished_on' => $recipient->signed_at?->toIso8601String(),
                 'declined_on' => $recipient->declined_at?->toIso8601String(),
                 'decline_reason' => $recipient->decline_reason,

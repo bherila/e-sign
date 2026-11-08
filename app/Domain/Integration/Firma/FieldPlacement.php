@@ -11,6 +11,7 @@ use App\Domain\Preparation\Geometry\NativeRect;
 use App\Domain\Preparation\Geometry\PageGeometry;
 use App\Domain\Preparation\Schema\CanonicalNumber;
 use App\Domain\Preparation\Schema\CoordinateSpaceDeclaration;
+use App\Domain\Preparation\Schema\RecipientDesignation;
 use App\Domain\Preparation\Text\Anchor;
 use App\Domain\Preparation\Text\AnchorOccurrence;
 use App\Domain\Preparation\Text\AnchorOrigin;
@@ -67,9 +68,6 @@ use Illuminate\Support\Str;
  */
 final readonly class FieldPlacement
 {
-    /** Upstream's `designation` values. Only one of them means anything here. */
-    public const DESIGNATIONS = ['Signer', 'Approver', 'CC'];
-
     public function __construct(
         private PdfTextLocator $text,
         private AnchorResolver $anchors,
@@ -89,19 +87,14 @@ final readonly class FieldPlacement
         $planned = [];
 
         foreach (array_values($recipients) as $index => $recipient) {
-            $designation = (string) ($recipient['designation'] ?? FirmaProfile::DESIGNATION);
+            $designation = FirmaProfile::designationFrom((string) ($recipient['designation'] ?? FirmaProfile::DESIGNATION));
 
-            if ($designation !== FirmaProfile::DESIGNATION) {
-                // Upstream lets a party be an approver or a copy recipient. Neither is
-                // modelled here, and accepting one would mean either treating an approver as
-                // a signer — binding them to an agreement they only meant to review — or
-                // dropping a party the caller listed.
-                throw FirmaException::unsupported(
-                    'recipients[].designation='.$designation,
-                    'Only "'.FirmaProfile::DESIGNATION.'" recipients are implemented in this build. An '
-                    .'approver or a copy recipient would have to be treated as a signer or silently '
-                    .'dropped, and both are worse than refusing the request.',
-                    ['supported_designations' => [FirmaProfile::DESIGNATION]],
+            if ($designation === null) {
+                throw FirmaException::of(
+                    FirmaErrorCode::InvalidRequest,
+                    'Recipient '.($index + 1).' has a `designation` upstream does not define. Use one of '
+                    .implode(', ', FirmaProfile::DESIGNATIONS).'.',
+                    ['recipient_index' => $index + 1, 'designations' => array_values(FirmaProfile::DESIGNATIONS)],
                 );
             }
 
@@ -133,6 +126,8 @@ final readonly class FieldPlacement
             $schemaId = 'r'.($index + 1);
             $temporaryId = trim((string) ($recipient['id'] ?? $recipient['temp_id'] ?? ''));
 
+            $copied = $designation === RecipientDesignation::Cc;
+
             $planned[] = new PlannedRecipient(
                 schemaId: $schemaId,
                 name: self::displayName($recipient),
@@ -142,10 +137,13 @@ final readonly class FieldPlacement
                     mb_strtolower($schemaId),
                     mb_strtolower($temporaryId),
                     mb_strtolower($email),
-                    (string) $order,
+                    // A cc recipient's `order` is a place in upstream's separate cc sequence, not
+                    // a signing position, so it never answers for one: "order 1" names the first
+                    // signer, never the first cc recipient.
+                    $copied ? '' : (string) $order,
                 ]))),
+                designation: $designation,
             );
-
         }
 
         if ($planned === []) {
@@ -155,7 +153,24 @@ final readonly class FieldPlacement
             );
         }
 
-        return $planned;
+        // Upstream's rule and the field schema's (`no_signer`): approvers approve and cc
+        // recipients are copied, so an agreement with no signer is not an agreement.
+        if (array_filter($planned, static fn (PlannedRecipient $r): bool => $r->designation === RecipientDesignation::Signer) === []) {
+            throw FirmaException::of(
+                FirmaErrorCode::InvalidRequest,
+                'A signing request needs at least one recipient with `designation` Signer. Approvers approve '
+                .'and CC recipients are copied; an agreement nobody signs is not an agreement.',
+            );
+        }
+
+        // Participants keep the order they were given in; cc recipients follow, in their own
+        // sequence. The recipients are created in this order, so a cc recipient's place among
+        // them is what `order` reports back for them (FirmaProfile::orderOf()).
+        $participants = array_values(array_filter($planned, static fn (PlannedRecipient $r): bool => ! $r->isCopied()));
+        $copies = array_values(array_filter($planned, static fn (PlannedRecipient $r): bool => $r->isCopied()));
+        usort($copies, static fn (PlannedRecipient $a, PlannedRecipient $b): int => $a->order <=> $b->order);
+
+        return [...$participants, ...$copies];
     }
 
     /**
@@ -211,7 +226,7 @@ final readonly class FieldPlacement
      * @param  list<array<string, mixed>>  $fields  Validated request fields.
      * @param  Closure(): string  $documentBytes  Opens the PDF, lazily: only a request with
      *                                            at least one anchor pays for the parse.
-     * @return array<string, mixed> Native field schema 1.0.
+     * @return array<string, mixed> Native field schema: 1.0, or 1.2 when a party is an approver or cc.
      *
      * @throws FirmaException
      */
@@ -290,8 +305,15 @@ final readonly class FieldPlacement
             );
         }
 
+        $designated = array_filter(
+            $recipients,
+            static fn (PlannedRecipient $r): bool => $r->designation !== RecipientDesignation::Signer,
+        ) !== [];
+
         return [
-            'schema_version' => '1.0',
+            // 1.0 unless a party is an approver or a cc recipient, which only 1.2 can say. A
+            // request that uses neither keeps exactly the document, and the digest, it had.
+            'schema_version' => $designated ? '1.2' : '1.0',
             'document_id' => $documentId,
             // Always the native tuple. The schema records the space its numbers are in, and
             // by the time a definition reaches here they are native points.
@@ -318,6 +340,9 @@ final readonly class FieldPlacement
      */
     public static function signingOrder(array $recipients, bool $useSigningOrder = true): array
     {
+        // A cc recipient is outside the signing order (schema 1.2): never staged.
+        $recipients = array_values(array_filter($recipients, static fn (PlannedRecipient $r): bool => ! $r->isCopied()));
+
         if (! $useSigningOrder) {
             return [array_map(static fn (PlannedRecipient $r): string => $r->schemaId, $recipients)];
         }
@@ -352,14 +377,28 @@ final readonly class FieldPlacement
         foreach ($references as $reference) {
             foreach ($recipients as $recipient) {
                 if ($recipient->answersTo((string) $reference)) {
+                    if ($recipient->isCopied()) {
+                        // Upstream: "CC recipients receive a completed copy but cannot sign or have
+                        // fields assigned."
+                        throw FirmaException::of(
+                            FirmaErrorCode::InvalidRequest,
+                            'Field '.($index + 1).' is assigned to a CC recipient. A CC recipient is copied on '
+                            .'the completed agreement and has no fields; assign it to a Signer or an Approver.',
+                            ['field_index' => $index + 1],
+                        );
+                    }
+
                     return $recipient;
                 }
             }
         }
 
-        if ($references === [] && count($recipients) === 1) {
-            // One party, one possible owner. Not a guess: there is nothing to choose between.
-            return $recipients[0];
+        $owners = array_values(array_filter($recipients, static fn (PlannedRecipient $r): bool => ! $r->isCopied()));
+
+        if ($references === [] && count($owners) === 1) {
+            // One party who can own a field, one possible owner. Not a guess: there is nothing
+            // to choose between.
+            return $owners[0];
         }
 
         throw FirmaException::of(
