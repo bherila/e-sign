@@ -531,20 +531,26 @@ jobs:
         run: |
           set -eu
           # The scheduler role is a shell loop around `schedule:run` (.docker/scripts/entrypoint.sh)
-          # that CI never started before issue #37. Prove it boots, runs one pass without error,
-          # and that the image's HEALTHCHECK reports it healthy.
+          # that CI never started before issue #37. Prove it boots, that `schedule:run` really
+          # ran a pass (the every-minute heartbeat task reports DONE), that the loop survives the
+          # pass, and that the image's HEALTHCHECK reports it healthy.
+          #
+          # What is *not* asserted is that every scheduled task succeeds: this throwaway sqlite
+          # database is unmigrated (migrations run only in the `database` job, AGENTS.md), so a
+          # task that reads a table fails here by construction, and does so only when CI happens
+          # to start on its five-minute boundary. Those tasks are covered against a migrated
+          # database by the feature suite. A PHP fatal error is a boot fault and still fails.
           docker run -d --name esign-scheduler \
             -e APP_KEY="base64:$(openssl rand -base64 32)" -e APP_ENV=production -e APP_DEBUG=false \
             -e DB_CONNECTION=sqlite -e DB_DATABASE=/tmp/esign.sqlite -e SESSION_DRIVER=file \
             -e CACHE_STORE=file -e QUEUE_CONNECTION=sync -e LOG_CHANNEL=stderr \
             bwh-esign:ci scheduler
           sleep 15
-          test "$(docker inspect -f '{{.State.Running}}' esign-scheduler)" = true || { docker logs esign-scheduler; exit 1; }
+          logs=$(docker logs esign-scheduler 2>&1)
+          test "$(docker inspect -f '{{.State.Running}}' esign-scheduler)" = true || { echo "$logs"; exit 1; }
+          grep -qE 'health:scheduler-heartbeat.*DONE' <<<"$logs" || { echo "No schedule:run pass completed"; echo "$logs"; exit 1; }
+          if grep -qi 'PHP Fatal error' <<<"$logs"; then echo "$logs"; exit 1; fi
           docker exec esign-scheduler esign-healthcheck
-          if docker logs esign-scheduler 2>&1 | grep -qiE 'exception|fatal error'; then
-            docker logs esign-scheduler
-            exit 1
-          fi
           docker rm -f esign-scheduler >/dev/null
 
       - name: Check the production Compose example's key and hardening contract
