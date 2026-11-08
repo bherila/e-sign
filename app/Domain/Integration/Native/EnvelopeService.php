@@ -143,12 +143,14 @@ final readonly class EnvelopeService
      * decides whether a given field is the sender's to write — a read-only field is, a
      * signature never is, and a service-supplied one is nobody's.
      *
-     * Contact corrections are the one thing the state machine has no transition for, because
-     * they change neither the agreement nor anyone's position in it: they rewrite
-     * `envelope_recipients.name` and `.email` and the identity snapshot beside them. They
-     * are allowed **only while the envelope is a draft**. After send, an invitation has been
-     * addressed and a correction is a different envelope, not an edit — so a non-draft
-     * envelope is refused with the same `409 illegal_transition` any other illegal move gets.
+     * Contact corrections go through {@see EnvelopeStateMachine::correctRecipients()}, the
+     * `update` transition: they rewrite `envelope_recipients.name` and `.email` and the
+     * identity snapshot beside them, and they are allowed **only while the envelope is a
+     * draft**. After send, an invitation has been addressed and a correction is a different
+     * envelope, not an edit — so a non-draft envelope is refused with the same
+     * `409 illegal_transition` any other illegal move gets. The early check below answers the
+     * ordinary case; the authoritative one is made under the envelope lock, so a correction
+     * racing a send cannot rewrite an address after the invitation was scheduled (S-5).
      *
      * The copied field schema is never touched. It is immutable by model guard
      * ({@see Envelope::SNAPSHOT_COLUMNS}) and by design: `schema_recipient_id` is the handle
@@ -404,9 +406,12 @@ final readonly class EnvelopeService
             return [];
         }
 
+        // Schema recipient ids are part of the envelope's immutable snapshot, so checking them
+        // before the lock is sound; the state check and the writes happen under it, in the
+        // state machine (S-5).
         $rows = $envelope->recipients()->get()->keyBy('schema_recipient_id');
         $unknown = [];
-        $changed = [];
+        $corrections = [];
 
         foreach ($recipients as $override) {
             $row = $rows->get($override['id']);
@@ -417,28 +422,14 @@ final readonly class EnvelopeService
                 continue;
             }
 
-            $name = isset($override['name']) && trim((string) $override['name']) !== ''
-                ? trim((string) $override['name'])
-                : $row->name;
-            $email = isset($override['email']) && trim((string) $override['email']) !== ''
-                ? trim((string) $override['email'])
-                : $row->email;
-
-            if ($name === $row->name && $email === $row->email) {
-                continue;
-            }
-
-            $row->name = $name;
-            $row->email = $email;
-            // The snapshot records who this party was, so it is corrected with them rather
-            // than left describing the address the invitation is no longer going to.
-            $row->identity_snapshot = array_replace($row->identity_snapshot ?? [], [
-                'name' => $name,
-                'email' => $email,
-            ]);
-            $row->save();
-
-            $changed[] = $row->schema_recipient_id;
+            $corrections[$row->schema_recipient_id] = [
+                'name' => isset($override['name']) && trim((string) $override['name']) !== ''
+                    ? trim((string) $override['name'])
+                    : $row->name,
+                'email' => isset($override['email']) && trim((string) $override['email']) !== ''
+                    ? trim((string) $override['email'])
+                    : $row->email,
+            ];
         }
 
         if ($unknown !== []) {
@@ -453,7 +444,7 @@ final readonly class EnvelopeService
             );
         }
 
-        return $changed;
+        return $this->machine->correctRecipients($envelope, $corrections);
     }
 
     private function reload(Envelope $envelope): Envelope

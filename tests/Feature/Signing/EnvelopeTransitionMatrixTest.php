@@ -53,8 +53,8 @@ class EnvelopeTransitionMatrixTest extends TestCase
             }
         }
 
-        // 9 states x 11 transitions, minus the 20 legal pairs.
-        $this->assertSame(79, $attempted);
+        // 9 states x 12 transitions, minus the 21 legal pairs.
+        $this->assertSame(87, $attempted);
     }
 
     public function test_every_legal_transition_is_reachable(): void
@@ -163,6 +163,7 @@ class EnvelopeTransitionMatrixTest extends TestCase
 
         match ($transition) {
             'send' => $machine->send($envelope),
+            'update' => $machine->correctRecipients($envelope, []),
             'submit_values' => $machine->submitValues($recipient, []),
             'set_sender_values' => $machine->setSenderValues($envelope, []),
             // A session reference that cannot collide with the one `signAs()` used to

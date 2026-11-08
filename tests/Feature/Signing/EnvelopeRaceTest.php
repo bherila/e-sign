@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Signing;
 
+use App\Domain\Integration\Native\EnvelopeService;
 use App\Domain\Signing\Envelopes\EnvelopeState;
 use App\Domain\Signing\Exceptions\IllegalTransition;
 use App\Domain\Signing\Exceptions\StaleEnvelope;
@@ -28,6 +29,57 @@ use Tests\TestCase;
 class EnvelopeRaceTest extends TestCase
 {
     use RefreshDatabase;
+
+    /**
+     * S-5: a recipient correction read while the envelope was a draft, applied after it was
+     * sent, must not rewrite the address the invitation went to, nor the identity snapshot.
+     */
+    public function test_a_recipient_correction_read_before_send_cannot_rewrite_the_invited_address(): void
+    {
+        $scenario = SigningScenario::create();
+        $envelope = $scenario->preparedDraft(['field_schema' => SigningFixtures::singleSigner()]);
+        $recipient = $scenario->recipient($envelope, 'signer');
+        $invitedAddress = $recipient->email;
+
+        // The PATCH request loads the envelope while it is still a draft ...
+        $stale = Envelope::query()->findOrFail($envelope->getKey());
+        $this->assertSame(EnvelopeState::Draft, $stale->state);
+
+        // ... and the send commits first.
+        $scenario->machine()->send($envelope);
+
+        try {
+            $this->app->make(EnvelopeService::class)->updateDraft($stale, [], [
+                ['id' => 'signer', 'email' => 'someone.else@example.test'],
+            ]);
+            $this->fail('A correction offered against a draft that has since been sent must be refused.');
+        } catch (IllegalTransition|StaleEnvelope) {
+            // Either answer refuses it; neither writes.
+        }
+
+        $recipient->refresh();
+        $this->assertSame($invitedAddress, $recipient->email);
+        $this->assertSame($invitedAddress, $recipient->identity_snapshot['email'] ?? null);
+    }
+
+    public function test_a_recipient_correction_on_a_draft_lands_and_advances_the_version(): void
+    {
+        $scenario = SigningScenario::create();
+        $envelope = $scenario->preparedDraft(['field_schema' => SigningFixtures::singleSigner()]);
+        $before = $envelope->refresh()->version;
+
+        $changed = $scenario->machine()->correctRecipients($envelope, [
+            'signer' => ['name' => 'Corrected Name', 'email' => 'corrected@example.test'],
+        ]);
+
+        $this->assertSame(['signer'], $changed);
+        $this->assertSame($before + 1, $envelope->refresh()->version);
+
+        $recipient = $scenario->recipient($envelope, 'signer');
+        $this->assertSame('corrected@example.test', $recipient->email);
+        $this->assertSame('corrected@example.test', $recipient->identity_snapshot['email'] ?? null);
+        $this->assertSame('Corrected Name', $recipient->identity_snapshot['name'] ?? null);
+    }
 
     public function test_cancel_beats_a_signature_read_before_it(): void
     {
