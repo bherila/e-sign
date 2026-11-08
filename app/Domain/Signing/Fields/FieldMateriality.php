@@ -62,7 +62,11 @@ final class FieldMateriality
             FieldType::Name,
             FieldType::Title,
             FieldType::Company,
-            FieldType::SigningDate => true,
+            FieldType::SigningDate,
+            // An approver's own marks (schema 1.2): they belong to that party, like a signature.
+            FieldType::ApprovalSignature,
+            FieldType::ApprovalCheckmark,
+            FieldType::ApprovalDate => true,
             FieldType::Text,
             FieldType::Checkbox,
             FieldType::AgreementDate => false,
@@ -73,14 +77,14 @@ final class FieldMateriality
      * Filled by the service at rendering time from evidence it already holds, so nobody has
      * to supply it and the send gate must not demand it.
      *
-     * Only `signing_date`, which is `recipient_attestations.accepted_at` for the recipient
-     * who owns the field. It is never written into `envelope_field_values`: a value the
+     * `signing_date`, which is `recipient_attestations.accepted_at` for the recipient who owns
+     * the field, and `approval_date`, the same for an approver (schema 1.2). It is never written into `envelope_field_values`: a value the
      * service derives from an immutable attestation should be derived, not copied into a
      * mutable table where it could disagree with its own source.
      */
     public static function isServiceSupplied(FieldType $type): bool
     {
-        return $type === FieldType::SigningDate;
+        return $type === FieldType::SigningDate || $type === FieldType::ApprovalDate;
     }
 
     /**

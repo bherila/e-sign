@@ -6,7 +6,9 @@ import {
   DEFAULT_ANCHOR_PLACEMENT,
   FIELD_TYPES,
   type FieldDefinition,
+  fieldOwners,
   type FieldSchemaDocument,
+  fieldTypesFor,
 } from "@/schema/fieldSchema";
 
 import type { FieldPatch } from "./editorReducer";
@@ -73,7 +75,7 @@ export function FieldInspector({
       <EditorSelect
         label="Recipient"
         value={field.recipient_id}
-        options={document.recipients.map((recipient) => ({
+        options={fieldOwners(document).map((recipient) => ({
           value: recipient.id,
           label: `${recipient.name} (${recipient.id})`,
         }))}
@@ -84,7 +86,7 @@ export function FieldInspector({
       <EditorSelect
         label="Type"
         value={field.type}
-        options={FIELD_TYPES.map((type) => ({ value: type, label: type }))}
+        options={typeOptionsFor(document, field)}
         disabled={readOnly}
         onValueChange={(value) => onPatch(field.id, { type: value as (typeof FIELD_TYPES)[number] })}
       />
@@ -266,4 +268,19 @@ export function FieldInspector({
       </div>
     </section>
   );
+}
+
+/**
+ * The types this field's owner may hold (schema 1.2), plus the field's own type when an imported
+ * document gave it one they may not: the select must show what the field is, and the validation
+ * panel says what is wrong with it.
+ */
+function typeOptionsFor(
+  document: { recipients: { id: string; designation?: "signer" | "approver" | "cc" }[] },
+  field: { recipient_id: string; type: (typeof FIELD_TYPES)[number] },
+): { value: string; label: string }[] {
+  const allowed = fieldTypesFor(document.recipients.find((recipient) => recipient.id === field.recipient_id)?.designation);
+  const types = allowed.includes(field.type) ? allowed : [field.type, ...allowed];
+
+  return types.map((type) => ({ value: type, label: type }));
 }

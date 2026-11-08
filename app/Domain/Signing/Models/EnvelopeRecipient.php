@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Signing\Models;
 
+use App\Domain\Preparation\Schema\RecipientDesignation;
 use App\Domain\Signing\Envelopes\RecipientState;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
@@ -27,6 +28,7 @@ use Illuminate\Support\Str;
  * @property string $public_id
  * @property int $envelope_id
  * @property string $schema_recipient_id
+ * @property RecipientDesignation $designation Copied from the field schema (1.2); signer before it.
  * @property string $name
  * @property string $email
  * @property int $order_index
@@ -44,6 +46,7 @@ class EnvelopeRecipient extends Model
     protected $fillable = [
         'envelope_id',
         'schema_recipient_id',
+        'designation',
         'name',
         'email',
         'order_index',
@@ -56,6 +59,7 @@ class EnvelopeRecipient extends Model
     {
         return [
             'state' => RecipientState::class,
+            'designation' => RecipientDesignation::class,
             'order_index' => 'integer',
             'version' => 'integer',
             'identity_snapshot' => 'array',

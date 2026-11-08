@@ -51,8 +51,11 @@ export function RecipientLegend({ document, colors, fieldCounts }: RecipientLege
                 {recipient.name}
                 {recipient.role === undefined ? "" : ` (${recipient.role})`}
               </span>
+              {recipient.designation === undefined || recipient.designation === "signer" ? null : (
+                <Badge variant="outline">{recipient.designation === "cc" ? "cc" : "approver"}</Badge>
+              )}
               <Badge variant="outline" className="tabular-nums">
-                {stage === undefined ? "not signing" : `stage ${stage}`}
+                {stage === undefined ? (recipient.designation === "cc" ? "copied" : "not signing") : `stage ${stage}`}
               </Badge>
               <Badge variant="secondary" className="tabular-nums">
                 {fieldCounts.get(recipient.id) ?? 0} fields

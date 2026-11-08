@@ -13,7 +13,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { FIELD_TYPES, type FieldSchemaDocument } from "@/schema/fieldSchema";
+import { FIELD_TYPES, fieldOwners, type FieldSchemaDocument, fieldTypesFor } from "@/schema/fieldSchema";
 
 import type { FieldPatch } from "./editorReducer";
 import { EditorSelect } from "./EditorSelect";
@@ -60,12 +60,18 @@ export function FieldTable({
   onDuplicate,
   onDelete,
 }: FieldTableProps) {
-  const recipientOptions = document.recipients.map((recipient) => ({
+  const recipientOptions = fieldOwners(document).map((recipient) => ({
     value: recipient.id,
     label: `${recipient.name} (${recipient.id})`,
   }));
 
-  const typeOptions = FIELD_TYPES.map((type) => ({ value: type, label: type }));
+  // Per row: the types the field's owner may hold (schema 1.2), keeping the field's own type when
+  // an imported document gave it one they may not, so the select shows what the field is.
+  const typeOptionsFor = (recipientId: string, current: (typeof FIELD_TYPES)[number]) => {
+    const allowed = fieldTypesFor(document.recipients.find((recipient) => recipient.id === recipientId)?.designation);
+
+    return (allowed.includes(current) ? allowed : [current, ...allowed]).map((type) => ({ value: type, label: type }));
+  };
 
   return (
     <div className="w-full overflow-x-auto">
@@ -129,7 +135,7 @@ export function FieldTable({
                     hideLabel
                     label={`Type of ${field.id}`}
                     value={field.type}
-                    options={typeOptions}
+                    options={typeOptionsFor(field.recipient_id, field.type)}
                     disabled={readOnly}
                     onValueChange={(value) =>
                       onPatch(field.id, { type: value as (typeof FIELD_TYPES)[number] })

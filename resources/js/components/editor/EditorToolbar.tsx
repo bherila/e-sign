@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { FIELD_TYPES, type FieldSchemaDocument, type FieldType } from "@/schema/fieldSchema";
+import { fieldOwners, type FieldSchemaDocument, type FieldType, fieldTypesFor } from "@/schema/fieldSchema";
 
 import { EditorSelect } from "./EditorSelect";
 import { NumberInput } from "./NumberInput";
@@ -197,7 +197,9 @@ export function EditorToolbar({
         <EditorSelect
           label="New field type"
           value={newFieldType}
-          options={FIELD_TYPES.map((type) => ({ value: type, label: type }))}
+          options={fieldTypesFor(
+            document.recipients.find((recipient) => recipient.id === newFieldRecipient)?.designation,
+          ).map((type) => ({ value: type, label: type }))}
           disabled={readOnly}
           className="w-40"
           onValueChange={(value) => onNewFieldTypeChange(value as FieldType)}
@@ -206,11 +208,11 @@ export function EditorToolbar({
         <EditorSelect
           label="For recipient"
           value={newFieldRecipient}
-          options={document.recipients.map((recipient) => ({
+          options={fieldOwners(document).map((recipient) => ({
             value: recipient.id,
             label: recipient.name,
           }))}
-          disabled={readOnly || document.recipients.length === 0}
+          disabled={readOnly || fieldOwners(document).length === 0}
           className="w-44"
           onValueChange={onNewFieldRecipientChange}
         />
@@ -218,7 +220,7 @@ export function EditorToolbar({
         <Button
           type="button"
           size="sm"
-          disabled={readOnly || document.recipients.length === 0}
+          disabled={readOnly || fieldOwners(document).length === 0}
           onClick={onAddField}
         >
           <PlusIcon aria-hidden="true" />

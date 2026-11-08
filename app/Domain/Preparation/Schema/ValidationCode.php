@@ -56,6 +56,15 @@ enum ValidationCode: string
     /** A recipient appears in more than one signing stage, or twice in one. */
     case RecipientDuplicatedInSigningOrder = 'recipient_duplicated_in_signing_order';
 
+    /** A CC recipient placed in signing_order: they never act, so they have no stage (1.2). */
+    case CcRecipientInSigningOrder = 'cc_recipient_in_signing_order';
+
+    /** No recipient is a signer: an agreement nobody signs is not one (1.2). */
+    case NoSigner = 'no_signer';
+
+    /** A field bound to a recipient whose designation may not own that type (1.2). */
+    case FieldOwnerNotAllowed = 'field_owner_not_allowed';
+
     /** `page` is below 1, or beyond the page count of the document being validated against. */
     case PageOutOfRange = 'page_out_of_range';
 

@@ -135,7 +135,9 @@ class FieldSchemaRoundTripTest extends TestCase
             $field = [
                 'id' => 'f'.$index.'-'.$i,
                 'recipient_id' => $ids[mt_rand(0, $recipientCount - 1)],
-                'type' => FieldType::values()[mt_rand(0, count(FieldType::values()) - 1)],
+                // Every recipient here is a signer, so the approver-only types (schema 1.2) are not
+                // theirs to own; they round-trip in FieldSchemaDocumentTest instead.
+                'type' => self::signerTypes()[mt_rand(0, count(self::signerTypes()) - 1)],
                 'page' => mt_rand(1, self::PAGE_COUNT),
                 'rect' => self::generateRect(),
                 'required' => mt_rand(0, 1) === 1,
@@ -304,5 +306,14 @@ class FieldSchemaRoundTripTest extends TestCase
         }
 
         return $stages;
+    }
+
+    /** @return list<string> */
+    private static function signerTypes(): array
+    {
+        return array_values(array_filter(
+            FieldType::values(),
+            static fn (string $type): bool => ! FieldType::from($type)->isApproval(),
+        ));
     }
 }

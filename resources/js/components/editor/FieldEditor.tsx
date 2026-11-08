@@ -8,9 +8,11 @@ import {
   carriesUnroundedCoordinate,
   describeIssue,
   type FieldDefinition,
+  fieldOwners,
   type FieldSchemaDocument,
   FieldSchemaError,
   type FieldType,
+  fieldTypesFor,
   type PageSize,
   parseFieldSchema,
   serializeFieldSchema,
@@ -128,9 +130,21 @@ function LoadedFieldEditor({ payload, initial, pages }: LoadedFieldEditorProps) 
   const [serverIssues, setServerIssues] = useState<ServerIssue[]>([]);
   const [conflict, setConflict] = useState<string | null>(null);
   const [newFieldType, setNewFieldType] = useState<FieldType>("signature");
-  const [newFieldRecipient, setNewFieldRecipient] = useState(
-    () => initial.recipients[0]?.id ?? "",
+  const [newFieldRecipient, setNewFieldRecipientState] = useState(
+    () => fieldOwners(initial)[0]?.id ?? "",
   );
+
+  // A new field's type must be one its owner may hold (schema 1.2): switching to an approver
+  // while "signature" is selected moves the selection to that owner's first allowed type.
+  const setNewFieldRecipient = (recipientId: string): void => {
+    setNewFieldRecipientState(recipientId);
+
+    const allowed = fieldTypesFor(state.document.recipients.find((recipient) => recipient.id === recipientId)?.designation);
+
+    if (allowed.length > 0 && !allowed.includes(newFieldType)) {
+      setNewFieldType(allowed[0]!);
+    }
+  };
 
   const devicePixelRatio = useDevicePixelRatio();
   const surface = useRef<HTMLDivElement | null>(null);

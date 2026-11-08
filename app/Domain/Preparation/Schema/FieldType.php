@@ -44,6 +44,15 @@ enum FieldType: string
     /** A single boolean tick box. */
     case Checkbox = 'checkbox';
 
+    /** An approver's approval mark (schema 1.2). Approvers only. */
+    case ApprovalSignature = 'approval_signature';
+
+    /** An approver's approval tick (schema 1.2). Approvers only. */
+    case ApprovalCheckmark = 'approval_checkmark';
+
+    /** The date an approver approved, from the service's clock (schema 1.2). Approvers only. */
+    case ApprovalDate = 'approval_date';
+
     /**
      * Declared type identifiers, in schema declaration order.
      *
@@ -63,8 +72,23 @@ enum FieldType: string
     public function isRecipientEntered(): bool
     {
         return match ($this) {
-            self::AgreementDate, self::SigningDate => false,
+            self::AgreementDate, self::SigningDate, self::ApprovalDate => false,
             default => true,
         };
     }
+
+    /** The approval types, which only an approver may own (schema 1.2). */
+    public function isApproval(): bool
+    {
+        return in_array($this, [self::ApprovalSignature, self::ApprovalCheckmark, self::ApprovalDate], true);
+    }
+
+    /** The marks a signer makes, which an approver may not own (schema 1.2). */
+    public function isSignatureMark(): bool
+    {
+        return $this === self::Signature || $this === self::Initials;
+    }
+
+    /** The first schema minor that declares the approval types. */
+    public const APPROVAL_SINCE_MINOR = 2;
 }

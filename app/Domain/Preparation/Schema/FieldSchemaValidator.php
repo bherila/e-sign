@@ -107,7 +107,7 @@ final class FieldSchemaValidator
     public const RECIPIENT_REQUIRED = ['id', 'name', 'email'];
 
     /** @var list<string> */
-    public const RECIPIENT_OPTIONAL = ['role'];
+    public const RECIPIENT_OPTIONAL = ['role', 'designation'];
 
     /** @var list<string> */
     public const FIELD_REQUIRED = ['id', 'recipient_id', 'type', 'page', 'rect'];
@@ -154,6 +154,8 @@ final class FieldSchemaValidator
 
     private const MAJOR_MINOR_1_1 = '1.1';
 
+    private const MAJOR_MINOR_1_2 = '1.2';
+
     /**
      * @param  array<string, mixed>  $document  A decoded document (`json_decode(..., true)`).
      * @param  PageSizes|null  $pageSizes  Displayed page sizes of the target PDF, when known.
@@ -169,15 +171,18 @@ final class FieldSchemaValidator
         $this->checkDocumentId($document, $errors);
         $this->checkCoordinateSpace($document, $errors);
 
+        $version = $this->declaredVersion($document);
         $recipientIds = $this->checkRecipients($document, $errors);
-        $this->checkSigningOrder($document, $recipientIds, $errors);
+        $designations = $this->checkDesignations($document, $version, $errors);
+        $this->checkSigningOrder($document, $recipientIds, $designations, $errors);
         $this->checkFields(
             $document,
             $recipientIds,
             $pageSizes,
             $variables,
-            $this->declaredVersion($document),
+            $version,
             $errors,
+            $designations,
         );
 
         return new ValidationResult($errors);
@@ -400,7 +405,7 @@ final class FieldSchemaValidator
      * @param  list<string>|null  $recipientIds
      * @param  list<ValidationError>  $errors
      */
-    private function checkSigningOrder(array $document, ?array $recipientIds, array &$errors): void
+    private function checkSigningOrder(array $document, ?array $recipientIds, array $designations, array &$errors): void
     {
         if (! array_key_exists('signing_order', $document)) {
             return;
@@ -479,6 +484,17 @@ final class FieldSchemaValidator
 
                 $placed[] = $id;
 
+                if (($designations[$id] ?? null) === RecipientDesignation::Cc) {
+                    $errors[] = new ValidationError(
+                        $path,
+                        ValidationCode::CcRecipientInSigningOrder,
+                        'Recipient "'.$id.'" is a cc recipient and appears in signing_order. A cc recipient is '
+                            .'copied on the completed agreement and never acts, so they have no stage.',
+                    );
+
+                    continue;
+                }
+
                 if ($recipientIds !== null && ! in_array($id, $recipientIds, true)) {
                     $errors[] = new ValidationError(
                         $path,
@@ -494,6 +510,10 @@ final class FieldSchemaValidator
         }
 
         foreach ($recipientIds as $index => $id) {
+            if (($designations[$id] ?? null) === RecipientDesignation::Cc) {
+                continue;
+            }
+
             if (! in_array($id, $placed, true)) {
                 $errors[] = new ValidationError(
                     '/recipients/'.$index.'/id',
@@ -517,6 +537,7 @@ final class FieldSchemaValidator
         ?array $variables,
         ?SchemaVersion $version,
         array &$errors,
+        array $designations = [],
     ): void {
         if (! array_key_exists('fields', $document)) {
             return;
@@ -589,7 +610,8 @@ final class FieldSchemaValidator
             }
 
             if (array_key_exists('type', $field)) {
-                $this->checkFieldType($path.'/type', $field['type'], $errors);
+                $this->checkFieldType($path.'/type', $field['type'], $version, $errors);
+                $this->checkFieldOwner($path, $field, $designations, $errors);
             }
 
             if (array_key_exists('page', $field)) {
@@ -643,7 +665,7 @@ final class FieldSchemaValidator
     /**
      * @param  list<ValidationError>  $errors
      */
-    private function checkFieldType(string $path, mixed $type, array &$errors): void
+    private function checkFieldType(string $path, mixed $type, ?SchemaVersion $version, array &$errors): void
     {
         if (! is_string($type)) {
             $errors[] = new ValidationError($path, ValidationCode::InvalidType, 'type must be a string.');
@@ -651,7 +673,21 @@ final class FieldSchemaValidator
             return;
         }
 
-        if (FieldType::tryFrom($type) instanceof FieldType) {
+        $known = FieldType::tryFrom($type);
+
+        if ($known instanceof FieldType && $known->isApproval()
+            && $version instanceof SchemaVersion && $version->minor < FieldType::APPROVAL_SINCE_MINOR) {
+            $errors[] = new ValidationError(
+                $path,
+                ValidationCode::UnsupportedFieldType,
+                'Field type "'.$type.'" arrived in schema '.self::MAJOR_MINOR_1_2.', and this document declares '
+                    .$version->toString().'. Declare '.self::MAJOR_MINOR_1_2.' to use it.',
+            );
+
+            return;
+        }
+
+        if ($known instanceof FieldType) {
             return;
         }
 
@@ -999,6 +1035,126 @@ final class FieldSchemaValidator
      *
      * @param  array<string, mixed>  $document
      */
+    /**
+     * `recipients[].designation`: its values, the version that declares it, and the one-signer rule.
+     *
+     * Returns each recipient id's designation (signer when omitted), for the signing-order and
+     * field-ownership rules that depend on it. A recipient whose id or designation is unusable
+     * is left out, so a malformed document reports its own problems and no derived ones.
+     *
+     * @param  array<string, mixed>  $document
+     * @param  list<ValidationError>  $errors
+     * @return array<string, RecipientDesignation>
+     */
+    private function checkDesignations(array $document, ?SchemaVersion $version, array &$errors): array
+    {
+        $recipients = $document['recipients'] ?? null;
+
+        if (! is_array($recipients) || ! array_is_list($recipients) || $recipients === []) {
+            return [];
+        }
+
+        $designations = [];
+        $complete = true;
+
+        foreach ($recipients as $index => $recipient) {
+            if (! $this->isObject($recipient) || ! is_string($recipient['id'] ?? null)) {
+                $complete = false;
+
+                continue;
+            }
+
+            $path = '/recipients/'.$index.'/designation';
+
+            if (! array_key_exists('designation', $recipient)) {
+                $designations[$recipient['id']] = RecipientDesignation::DEFAULT;
+
+                continue;
+            }
+
+            if ($version instanceof SchemaVersion && $version->minor < RecipientDesignation::SINCE_MINOR) {
+                $errors[] = new ValidationError(
+                    $path,
+                    ValidationCode::UnknownProperty,
+                    'recipients[].designation arrived in schema '.self::MAJOR_MINOR_1_2.', and this document declares '
+                        .$version->toString().'. Declare '.self::MAJOR_MINOR_1_2.' to use it: a document that says '
+                        .$version->toString().' is read against a contract that does not have it.',
+                );
+                $complete = false;
+
+                continue;
+            }
+
+            if (! is_string($recipient['designation'])) {
+                $errors[] = new ValidationError($path, ValidationCode::InvalidType, 'designation must be a string.');
+                $complete = false;
+
+                continue;
+            }
+
+            $designation = RecipientDesignation::tryFrom($recipient['designation']);
+
+            if (! $designation instanceof RecipientDesignation) {
+                $errors[] = new ValidationError(
+                    $path,
+                    ValidationCode::InvalidFormat,
+                    'designation must be one of '.implode(', ', RecipientDesignation::values()).'.',
+                );
+                $complete = false;
+
+                continue;
+            }
+
+            $designations[$recipient['id']] = $designation;
+        }
+
+        if ($complete && ! in_array(RecipientDesignation::Signer, $designations, true)) {
+            $errors[] = new ValidationError(
+                '/recipients',
+                ValidationCode::NoSigner,
+                'At least one recipient must be a signer. Approvers approve and cc recipients are copied; '
+                    .'an agreement nobody signs is not an agreement.',
+            );
+        }
+
+        return $designations;
+    }
+
+    /**
+     * Which designation may own which field type (schema 1.2).
+     *
+     * A cc recipient owns nothing; the approval types are an approver's; a signature or initials
+     * mark is a signer's, because an approver approves and does not sign.
+     *
+     * @param  array<string, mixed>  $field
+     * @param  array<string, RecipientDesignation>  $designations
+     * @param  list<ValidationError>  $errors
+     */
+    private function checkFieldOwner(string $path, array $field, array $designations, array &$errors): void
+    {
+        $owner = is_string($field['recipient_id'] ?? null) ? ($designations[$field['recipient_id']] ?? null) : null;
+        $type = is_string($field['type'] ?? null) ? FieldType::tryFrom($field['type']) : null;
+
+        if (! $owner instanceof RecipientDesignation || ! $type instanceof FieldType) {
+            return;
+        }
+
+        $problem = match (true) {
+            $owner === RecipientDesignation::Cc => 'is a cc recipient, who is copied on the agreement and owns no fields',
+            $type->isApproval() && $owner !== RecipientDesignation::Approver => 'is not an approver, and only an approver owns an approval field',
+            $type->isSignatureMark() && $owner === RecipientDesignation::Approver => 'is an approver, who approves and does not sign; use approval_signature',
+            default => null,
+        };
+
+        if ($problem !== null) {
+            $errors[] = new ValidationError(
+                $path.'/recipient_id',
+                ValidationCode::FieldOwnerNotAllowed,
+                'A '.$type->value.' field is bound to recipient "'.$field['recipient_id'].'", who '.$problem.'.',
+            );
+        }
+    }
+
     private function declaredVersion(array $document): ?SchemaVersion
     {
         $declared = $document['schema_version'] ?? null;

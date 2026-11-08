@@ -39,9 +39,9 @@ final class FieldValueValidator
     public static function normalize(FieldDefinition $field, mixed $value): mixed
     {
         return match ($field->type) {
-            FieldType::Checkbox => self::boolean($field, $value),
-            FieldType::AgreementDate, FieldType::SigningDate => self::date($field, $value),
-            FieldType::Signature, FieldType::Initials => self::text($field, $value, self::MAX_SIGNATURE_LENGTH),
+            FieldType::Checkbox, FieldType::ApprovalCheckmark => self::boolean($field, $value),
+            FieldType::AgreementDate, FieldType::SigningDate, FieldType::ApprovalDate => self::date($field, $value),
+            FieldType::Signature, FieldType::Initials, FieldType::ApprovalSignature => self::text($field, $value, self::MAX_SIGNATURE_LENGTH),
             FieldType::Text, FieldType::Name, FieldType::Company, FieldType::Title => self::text($field, $value, self::MAX_TEXT_LENGTH),
         };
     }

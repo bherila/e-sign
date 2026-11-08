@@ -133,6 +133,7 @@ final readonly class EnvelopeFactory
         return EnvelopeRecipient::query()->create([
             'envelope_id' => $envelope->getKey(),
             'schema_recipient_id' => $recipient->id,
+            'designation' => $recipient->designation,
             'name' => $recipient->name,
             'email' => $recipient->email,
             'order_index' => $stage,
@@ -146,6 +147,7 @@ final readonly class EnvelopeFactory
                 'name' => $recipient->name,
                 'email' => $recipient->email,
                 'role' => $recipient->role,
+                'designation' => $recipient->designation->value,
             ],
         ]);
     }
