@@ -82,4 +82,22 @@ describe("embedEvents", () => {
   it("announces to nobody from a top-level page with no opener", () => {
     expect(announcementTarget(window)).toBeNull();
   });
+
+  it("finds an opener from another realm, which instanceof would miss", () => {
+    // A cross-origin opener is a WindowProxy from another realm. A prototype-less object is
+    // the closest stand-in here: like it, it is not `instanceof Object` in this realm.
+    const opener = Object.create(null) as Window;
+    const popup = { opener } as unknown as Window;
+    Object.defineProperty(popup, "parent", { value: popup });
+
+    expect(opener instanceof Object).toBe(false);
+    expect(announcementTarget(popup)).toBe(opener);
+  });
+
+  it("prefers the framing parent over an opener", () => {
+    const parent = {} as Window;
+    const framed = { parent, opener: {} } as unknown as Window;
+
+    expect(announcementTarget(framed)).toBe(parent);
+  });
 });

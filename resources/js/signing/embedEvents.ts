@@ -89,13 +89,21 @@ export function readEmbedConfig(doc: Document = document): EmbedConfig | null {
   }
 }
 
-/** The window to announce to: the framing parent, else the opener, else nobody. */
+/**
+ * The window to announce to: the framing parent, else the opener, else nobody.
+ *
+ * A null check, not `instanceof`: the opener of a popup belongs to another realm (and, for
+ * the cross-origin opener this contract exists for, is a WindowProxy), so `instanceof Object`
+ * is false for exactly the window that should be told.
+ */
 export function announcementTarget(win: Window = window): Window | null {
   if (win.parent !== win) {
     return win.parent;
   }
 
-  return win.opener instanceof Object ? (win.opener as Window) : null;
+  const opener: unknown = win.opener;
+
+  return opener !== null && opener !== undefined ? (opener as Window) : null;
 }
 
 /**

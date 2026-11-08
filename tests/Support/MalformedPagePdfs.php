@@ -26,10 +26,25 @@ final class MalformedPagePdfs
         return self::build('/Contents 3 0 R');
     }
 
-    /** Page 2's content refers to an object the file does not contain. */
+    /** Page 2's content is a number. */
+    public static function contentsAreANumber(): string
+    {
+        return self::build('/Contents 42');
+    }
+
+    /**
+     * Page 2's content refers to an object the file does not define: a reference to the null
+     * object (ISO 32000-1 7.3.10), so a blank page, not a damaged one.
+     */
     public static function contentsPointAtNothing(): string
     {
         return self::build('/Contents 99 0 R');
+    }
+
+    /** Page 2's /Contents is null: equivalent to absent (ISO 32000-1 7.3.9). */
+    public static function contentsNull(): string
+    {
+        return self::build('/Contents null');
     }
 
     /** Page 2's content array holds a dictionary among its streams. */

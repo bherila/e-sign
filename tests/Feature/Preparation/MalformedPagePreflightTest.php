@@ -24,7 +24,7 @@ final class MalformedPagePreflightTest extends TestCase
     {
         return [
             'contents point at another page' => [MalformedPagePdfs::contentsPointAtAnotherPage()],
-            'contents point at nothing' => [MalformedPagePdfs::contentsPointAtNothing()],
+            'contents are a number' => [MalformedPagePdfs::contentsAreANumber()],
             'contents array holds a non-stream' => [MalformedPagePdfs::contentsArrayHoldsANonStream()],
         ];
     }
@@ -49,6 +49,8 @@ final class MalformedPagePreflightTest extends TestCase
             'every page has its own stream' => [MalformedPagePdfs::healthy()],
             'a page with no /Contents is blank, not damaged' => [MalformedPagePdfs::blankPage()],
             'two pages may share one stream' => [MalformedPagePdfs::sharedContentStream()],
+            'a null /Contents is absent (7.3.9)' => [MalformedPagePdfs::contentsNull()],
+            'a reference to an undefined object is null (7.3.10)' => [MalformedPagePdfs::contentsPointAtNothing()],
         ];
     }
 
