@@ -27,6 +27,7 @@ enum PreflightCode: string
     case TimeBudgetExceeded = 'time_budget_exceeded';
     case MemoryBudgetExceeded = 'memory_budget_exceeded';
     case InvalidPageGeometry = 'invalid_page_geometry';
+    case MalformedPage = 'malformed_page';
     case UserUnitNotPreserved = 'user_unit_not_preserved';
     case AnnotationsNotPreserved = 'annotations_not_preserved';
     case NonZeroCropBoxOrigin = 'non_zero_crop_box_origin';

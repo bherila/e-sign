@@ -164,6 +164,7 @@ appears only when there is something structured to say. This is **not** the nati
 | `error` | Status | Means |
 |---|---|---|
 | `invalid_request` | 400 | The body, a coordinate, a type, or an override could not be used |
+| `malformed_pdf` | 400 | A page of the document has no valid content (`details.malformed_pages`, 1-based; `details.document_position`; the parser's `details.findings`). Re-export the file and upload it again |
 | `unauthorized` | 401 | No key, or one that is unknown, revoked, or expired |
 | `forbidden` | 403 | Valid key, missing scope (`details.required_scope`), or an expired/edited download link |
 | `not_found` | 404 | No such signing request **in your workspace** — identical to one that does not exist |

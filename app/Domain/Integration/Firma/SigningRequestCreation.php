@@ -15,6 +15,7 @@ use App\Domain\Integration\Native\NewEnvelope;
 use App\Domain\Preparation\Documents\DocumentIntake;
 use App\Domain\Preparation\Documents\Models\Document;
 use App\Domain\Preparation\Documents\Models\DocumentRevision;
+use App\Domain\Preparation\Preflight\PreflightCode;
 use App\Domain\Preparation\Schema\FieldSchemaDocument;
 use App\Domain\Preparation\Schema\Recipient;
 use App\Domain\Preparation\Templates\Models\TemplateVersion;
@@ -451,6 +452,32 @@ final readonly class SigningRequestCreation
     {
         $report = is_array($document->preflight_report) ? $document->preflight_report : [];
         $findings = is_array($report['findings'] ?? null) ? $report['findings'] : [];
+
+        // A damaged page is upstream's own refusal (`MALFORMED_PDF`, reference v1.40.1), so it
+        // gets its own token and the page numbers a caller shows its user. The findings ride
+        // along unchanged, so nothing else the parser found is hidden behind it.
+        $malformedPages = [];
+        foreach ($findings as $finding) {
+            if (is_array($finding) && ($finding['code'] ?? null) === PreflightCode::MalformedPage->value
+                && is_int($finding['page'] ?? null)) {
+                $malformedPages[] = $finding['page'];
+            }
+        }
+
+        if ($malformedPages !== []) {
+            sort($malformedPages);
+
+            return FirmaException::of(
+                FirmaErrorCode::MalformedPdf,
+                'The PDF is damaged: page '.$malformedPages[0].' has no valid content. Repair or '
+                .'re-export the file, then upload it again.',
+                [
+                    'malformed_pages' => array_values(array_unique($malformedPages)),
+                    'document_position' => 1,
+                    'findings' => array_values($findings),
+                ],
+            );
+        }
 
         return FirmaException::of(
             FirmaErrorCode::InvalidRequest,

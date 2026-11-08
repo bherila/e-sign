@@ -316,6 +316,65 @@ final class PdfObjectGraph
     }
 
     /**
+     * Why a page's /Contents is not drawing instructions, or null when it is usable.
+     *
+     * ISO 32000-1 7.7.3.3: /Contents is a stream or an array of streams, and when it is
+     * absent the page is empty. An absent entry is therefore a legitimate blank page and is
+     * not a defect. A *present* entry that resolves to anything but a stream — a missing
+     * object, a number, or a dictionary such as another page's — leaves a page that renders
+     * blank and that nothing downstream can draw on, which is the damage issue #167 refuses.
+     * Two pages sharing one content stream is legal and is not reported.
+     *
+     * @param  array<string, array<int, mixed>>  $pageDict
+     */
+    public function contentDefect(array $pageDict): ?string
+    {
+        if (! array_key_exists('Contents', $pageDict)) {
+            return null;
+        }
+
+        $entry = $pageDict['Contents'];
+
+        if (($entry[0] ?? null) === 'objref') {
+            if (! is_string($entry[1] ?? null) || $this->object($entry[1]) === []) {
+                return 'its /Contents refers to an object that does not exist';
+            }
+
+            if ($this->isStream($entry[1])) {
+                return null;
+            }
+        }
+
+        $resolved = $this->resolve($entry);
+
+        if (! is_array($resolved) || ($resolved[0] ?? null) !== '[') {
+            return 'its /Contents is not a content stream';
+        }
+
+        $items = is_array($resolved[1] ?? null) ? $resolved[1] : [];
+
+        foreach ($items as $item) {
+            if (! is_array($item) || ($item[0] ?? null) !== 'objref' || ! is_string($item[1] ?? null)
+                || ! $this->isStream($item[1])) {
+                return 'its /Contents array holds something other than content streams';
+            }
+        }
+
+        return null;
+    }
+
+    private function isStream(string $ref): bool
+    {
+        foreach ($this->object($ref) as $entry) {
+            if (($entry[0] ?? null) === 'stream') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Concatenated, decoded content streams for a page /Contents entry.
      *
      * ISO 32000-1 7.8.2: an array of streams is treated as a single stream with the
