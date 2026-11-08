@@ -40,6 +40,18 @@ class FirmaContractTest extends TestCase
     private const FIXTURES = __DIR__.'/../../../Fixtures/firma/firma-compat-v1';
 
     /**
+     * `settings` members upstream added after the fixtures were recorded (2026-09-08).
+     *
+     * The recordings cannot contain them, so they are named here — each with the reference
+     * release that introduced it — rather than the comparison being loosened. Anything else
+     * extra or missing still fails.
+     */
+    private const SETTINGS_ADDED_AFTER_RECORDING = [
+        'allow_decline',        // reference v1.40.0, issue #165
+        'show_save_for_later',  // reference v1.40.0, issue #165
+    ];
+
+    /**
      * Each recorded workflow, with the scenario method that reaches its state.
      *
      * @return array<string, array{0: string, 1: string}>
@@ -69,7 +81,11 @@ class FirmaContractTest extends TestCase
         $this->assertSameKeys($fixture, $body, 'request.json');
         $this->assertSameKeys($fixture['status'], $body['status'], 'request.json status');
         $this->assertSameKeys($fixture['timestamps'], $body['timestamps'], 'request.json timestamps');
-        $this->assertSameKeys($fixture['settings'], $body['settings'], 'request.json settings');
+        $this->assertSameKeys(
+            $fixture['settings'] + array_fill_keys(self::SETTINGS_ADDED_AFTER_RECORDING, null),
+            $body['settings'],
+            'request.json settings',
+        );
         $this->assertSameKeys($fixture['certificate'], $body['certificate'], 'request.json certificate');
 
         // FirmaFixtureShapeTest's own assertions, applied to our response.

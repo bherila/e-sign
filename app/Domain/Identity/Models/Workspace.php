@@ -24,6 +24,8 @@ use Illuminate\Support\Str;
  * @property string $name
  * @property string $slug
  * @property bool|null $require_otp
+ * @property bool|null $allow_decline
+ * @property bool|null $show_save_for_later
  */
 class Workspace extends Model
 {
@@ -41,6 +43,8 @@ class Workspace extends Model
         // individual envelope may still override both. See
         // App\Domain\Signing\Sessions\OtpRequirement.
         'require_otp',
+        'allow_decline',
+        'show_save_for_later',
     ];
 
     /**
@@ -50,6 +54,8 @@ class Workspace extends Model
     {
         return [
             'require_otp' => 'boolean',
+            'allow_decline' => 'boolean',
+            'show_save_for_later' => 'boolean',
         ];
     }
 

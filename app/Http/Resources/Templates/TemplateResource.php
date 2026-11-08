@@ -38,6 +38,8 @@ class TemplateResource extends JsonResource
             'workspace_id' => $template->workspace?->public_id,
             'name' => $template->name,
             'description' => $template->description,
+            'allow_decline' => $template->allow_decline,
+            'show_save_for_later' => $template->show_save_for_later,
             'retired_at' => $template->retired_at?->toIso8601String(),
             'current_version' => $current === null ? null : [
                 'id' => $current->public_id,

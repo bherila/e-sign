@@ -268,6 +268,13 @@ or neither, is a `422`.
 `expires_in_hours` is the one field where absent and null differ: omit it for the seven-day
 default, or send `null` for an envelope that never expires.
 
+`allow_decline` and `show_save_for_later` (booleans, nullable) control the signer's Decline and
+"Save and finish later" buttons. `null` means the workspace decides, and below that the
+deployment default (both `true`). From a template, omitting a key copies the template's value
+and sending one — `null` included — replaces it. With `allow_decline` resolved `false` the
+service refuses a decline as well as hiding the button; only the sender can then stop the
+agreement, by cancelling it.
+
 An envelope **copies** its source. A template edited tomorrow cannot change an agreement that
 is already out for signature.
 

@@ -16,6 +16,7 @@ use App\Domain\Signing\Contracts\AnchorResolution;
 use App\Domain\Signing\Contracts\AssurancePolicyCheck;
 use App\Domain\Signing\Contracts\EnvelopeEventSink;
 use App\Domain\Signing\Exceptions\ConsentMismatch;
+use App\Domain\Signing\Exceptions\DeclineNotAllowed;
 use App\Domain\Signing\Exceptions\FieldSubmissionRejected;
 use App\Domain\Signing\Exceptions\IllegalTransition;
 use App\Domain\Signing\Exceptions\MissingArtifactReference;
@@ -118,6 +119,7 @@ final readonly class EnvelopeStateMachine
         private EnvelopeEventSink $sink,
         private AssurancePolicyCheck $assurance,
         private AnchorResolution $anchors,
+        private SignerButtons $buttons = new SignerButtons,
     ) {}
 
     /**
@@ -551,6 +553,12 @@ final readonly class EnvelopeStateMachine
 
                 if ($lockedRecipient->state !== RecipientState::Active) {
                     throw RecipientNotEligible::notActive($lockedRecipient, 'decline');
+                }
+
+                // Read under the lock, from the locked row, so a sender who turned declining
+                // off cannot be raced by a decline already in flight (issue #165).
+                if (! $this->buttons->allowDecline($locked)) {
+                    throw DeclineNotAllowed::on($locked);
                 }
 
                 $now = CarbonImmutable::now();

@@ -29,6 +29,11 @@ final readonly class NewEnvelope
      *                                 (App\Domain\Signing\Sessions\OtpRequirement). An
      *                                 explicit false overrules both, which is a different
      *                                 instruction from saying nothing.
+     * @param  bool  $allowDeclineSpecified  Whether `allow_decline` was sent at all (issue #165). When it
+     *                                       was not, an envelope built from a template copies the
+     *                                       template's value; when it was, the value sent — `null`
+     *                                       included, meaning "the workspace decides" — replaces it.
+     * @param  bool  $showSaveForLaterSpecified  The same rule for `show_save_for_later`.
      */
     public function __construct(
         public ?string $templateVersionId = null,
@@ -43,6 +48,10 @@ final readonly class NewEnvelope
         public ?string $consentPolicyVersion = null,
         public bool $expirySpecified = false,
         public ?bool $requireOtp = null,
+        public ?bool $allowDecline = null,
+        public bool $allowDeclineSpecified = false,
+        public ?bool $showSaveForLater = null,
+        public bool $showSaveForLaterSpecified = false,
     ) {}
 
     /**
@@ -78,12 +87,28 @@ final readonly class NewEnvelope
             // presence of the key distinguishes them.
             expirySpecified: array_key_exists('expires_in_hours', $input),
             requireOtp: is_bool($input['require_otp'] ?? null) ? $input['require_otp'] : null,
+            allowDecline: self::nullableBool($input, 'allow_decline'),
+            allowDeclineSpecified: array_key_exists('allow_decline', $input),
+            showSaveForLater: self::nullableBool($input, 'show_save_for_later'),
+            showSaveForLaterSpecified: array_key_exists('show_save_for_later', $input),
         );
     }
 
     public function fromTemplate(): bool
     {
         return $this->templateVersionId !== null;
+    }
+
+    /**
+     * A validated `boolean` (which also admits `0`, `1`, `"0"`, `"1"`) as a bool, or null.
+     *
+     * @param  array<string, mixed>  $input
+     */
+    private static function nullableBool(array $input, string $key): ?bool
+    {
+        $value = $input[$key] ?? null;
+
+        return $value === null ? null : filter_var($value, FILTER_VALIDATE_BOOLEAN);
     }
 
     /**

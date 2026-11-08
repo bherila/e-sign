@@ -74,6 +74,21 @@ final readonly class EnvelopeService
             // (database/migrations/..._add_require_otp_to_workspaces_and_envelopes.php).
             if ($input->requireOtp !== null) {
                 $envelope->require_otp = $input->requireOtp;
+            }
+
+            // The signer's buttons (issue #165). A template's values are copied now, so a
+            // later template edit cannot change what this agreement offers; a value the
+            // caller sent — null included — replaces the template's.
+            $template = $input->fromTemplate()
+                ? TemplateVersion::query()->where('public_id', $envelope->source_template_version_id)->first()?->template
+                : null;
+
+            $envelope->allow_decline = $input->allowDeclineSpecified ? $input->allowDecline : $template?->allow_decline;
+            $envelope->show_save_for_later = $input->showSaveForLaterSpecified
+                ? $input->showSaveForLater
+                : $template?->show_save_for_later;
+
+            if ($envelope->isDirty()) {
                 $envelope->save();
             }
 
@@ -90,6 +105,8 @@ final readonly class EnvelopeService
                     'source' => $input->fromTemplate() ? 'template_version' : 'document',
                     'source_template_version_id' => $envelope->source_template_version_id,
                     'require_otp' => $input->requireOtp,
+                    'allow_decline' => $envelope->allow_decline,
+                    'show_save_for_later' => $envelope->show_save_for_later,
                     'prefilled_fields' => array_keys($input->values),
                 ],
             );

@@ -141,6 +141,7 @@ export function ConsentPanel({ payload, reviewed, ready, blockedReason }: Consen
         </button>
       </form>
 
+      {payload.buttons.allow_decline ? (
       <div className="mt-10 border-t border-black/10 pt-6 dark:border-white/10">
         {declining ? (
           <form method="POST" action={payload.urls.decline} className="space-y-4">
@@ -197,6 +198,7 @@ export function ConsentPanel({ payload, reviewed, ready, blockedReason }: Consen
           </button>
         )}
       </div>
+      ) : null}
     </section>
   );
 }

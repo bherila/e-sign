@@ -129,6 +129,8 @@ final readonly class SigningRequestCreation
         $version = $this->locator->templateVersion($workspace, $templateId);
         $schema = $version->fieldSchemaDocument();
 
+        $buttons = self::signerButtons($body);
+
         return $this->envelopes->create(
             $workspace,
             new NewEnvelope(
@@ -139,6 +141,10 @@ final readonly class SigningRequestCreation
                 expiresInHours: self::expirationHours($body),
                 expirySpecified: array_key_exists('expiration_hours', $body),
                 requireOtp: self::requireOtp($body),
+                allowDecline: $buttons['allowDecline'],
+                allowDeclineSpecified: $buttons['allowDeclineSpecified'],
+                showSaveForLater: $buttons['showSaveForLater'],
+                showSaveForLaterSpecified: $buttons['showSaveForLaterSpecified'],
             ),
             $credential,
         );
@@ -308,6 +314,8 @@ final readonly class SigningRequestCreation
             useSigningOrder: ($settings['use_signing_order'] ?? true) !== false,
         );
 
+        $buttons = self::signerButtons($body);
+
         return $this->envelopes->create(
             $workspace,
             new NewEnvelope(
@@ -322,6 +330,10 @@ final readonly class SigningRequestCreation
                 expiresInHours: self::expirationHours($body),
                 expirySpecified: array_key_exists('expiration_hours', $body),
                 requireOtp: self::requireOtp($body),
+                allowDecline: $buttons['allowDecline'],
+                allowDeclineSpecified: $buttons['allowDeclineSpecified'],
+                showSaveForLater: $buttons['showSaveForLater'],
+                showSaveForLaterSpecified: $buttons['showSaveForLaterSpecified'],
             ),
             $credential,
         );
@@ -484,6 +496,42 @@ final readonly class SigningRequestCreation
             'The document was refused by the PDF preflight check, so no signing request was created.',
             ['findings' => array_values($findings)],
         );
+    }
+
+    /**
+     * `settings.allow_decline` and `settings.show_save_for_later` (reference v1.40.0, issue #165).
+     *
+     * Each is `true`, `false`, or `null` — null meaning the workspace decides — and anything
+     * else is refused naming the key, as upstream does. A key that is absent is not the same as
+     * `null`: absent copies a template's value, `null` replaces it.
+     *
+     * @param  array<string, mixed>  $body
+     * @return array{allowDecline: bool|null, allowDeclineSpecified: bool, showSaveForLater: bool|null, showSaveForLaterSpecified: bool}
+     *
+     * @throws FirmaException
+     */
+    private static function signerButtons(array $body): array
+    {
+        $settings = is_array($body['settings'] ?? null) ? $body['settings'] : [];
+        $out = [];
+
+        foreach (['allow_decline' => 'allowDecline', 'show_save_for_later' => 'showSaveForLater'] as $key => $name) {
+            $specified = array_key_exists($key, $settings);
+            $value = $settings[$key] ?? null;
+
+            if ($specified && $value !== null && ! is_bool($value)) {
+                throw FirmaException::of(
+                    FirmaErrorCode::InvalidRequest,
+                    'settings.'.$key.' must be a boolean or null.',
+                );
+            }
+
+            $out[$name] = $value;
+            $out[$name.'Specified'] = $specified;
+        }
+
+        /** @var array{allowDecline: bool|null, allowDeclineSpecified: bool, showSaveForLater: bool|null, showSaveForLaterSpecified: bool} $out */
+        return $out;
     }
 
     /**

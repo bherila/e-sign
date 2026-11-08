@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useReducer, useRef } from "react";
+import { useCallback, useMemo, useReducer, useRef, useState } from "react";
 
 import { type FieldDefinition, type FieldSchemaDocument, parseFieldSchema } from "@/schema/fieldSchema";
 
@@ -68,6 +68,8 @@ export function SigningPage({ payload }: SigningPageProps) {
     [schema, payload.own_field_ids],
   );
 
+  const [finishingLater, setFinishingLater] = useState(false);
+
   const requiredFieldIds = useMemo<string[]>(
     () => ownFields.filter((field) => field.required).map((field) => field.id),
     [ownFields],
@@ -114,6 +116,10 @@ export function SigningPage({ payload }: SigningPageProps) {
   }
 
   const missing = missingFieldIds(state, requiredFieldIds);
+  // "Finish later" saves what is unsaved and then says how to come back. Values already
+  // persist on every save, so there is no separate draft to keep (issue #165).
+  const finishedForNow =
+    finishingLater && !state.saving && state.dirty.length === 0 && state.error === null;
   const ready = readyToSign(state, requiredFieldIds);
 
   return (
@@ -200,12 +206,34 @@ export function SigningPage({ payload }: SigningPageProps) {
             {state.saving ? "Saving…" : "Save what I have filled in"}
           </button>
 
+          {payload.buttons.show_save_for_later ? (
+            <button
+              type="button"
+              onClick={() => {
+                setFinishingLater(true);
+                void save();
+              }}
+              disabled={state.saving}
+              className="inline-flex min-h-11 items-center justify-center rounded-md border border-black/20 px-4 text-base font-medium disabled:opacity-50 dark:border-white/20"
+            >
+              Save and finish later
+            </button>
+          ) : null}
+
           <p className="text-muted-foreground text-sm" aria-live="polite">
             {state.dirty.length > 0
               ? `${state.dirty.length} unsaved ${state.dirty.length === 1 ? "change" : "changes"}.`
               : "Everything you have filled in is saved."}
           </p>
         </div>
+
+        {finishedForNow ? (
+          <p className="mt-4 rounded-md border border-black/10 p-3 text-sm dark:border-white/10" role="status">
+            Your entries are saved and nothing has been signed. You can close this page. To
+            finish, come back to it on this device while your signing session lasts, or ask the
+            sender to send you a new signing link.
+          </p>
+        ) : null}
       </section>
 
       <ConsentPanel

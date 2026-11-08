@@ -433,6 +433,18 @@ a caller that set nothing still sees what its guests will be asked for.
 The code is a second check on the **same** factor — continued access to the mailbox the link
 went to — not a second factor, and not an eIDAS advanced or qualified signature.
 
+### `settings.allow_decline` and `settings.show_save_for_later`
+
+Honoured on both create routes, as `true`, `false`, or `null`; anything else is
+`400 invalid_request` naming the key. `null` means the workspace decides, and the deployment
+default (both `true`) applies below that. A request built from a template copies the template's
+values unless you send one, in which case yours replaces it — `null` included. Changing the
+template later changes no request already created.
+
+With `allow_decline` false the signing page shows no Decline button and a decline is refused by
+the service, so the agreement can only be stopped by cancelling it. `GET /signing-requests/{id}`
+returns both as stored.
+
 ### The polling response
 
 `GET /signing-requests/{id}` is the endpoint a consumer loops on. Its full key set is

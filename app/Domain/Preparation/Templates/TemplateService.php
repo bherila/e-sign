@@ -117,6 +117,15 @@ final readonly class TemplateService
                 $applied['description'] = $changes['description'];
             }
 
+            // The signer's buttons (issue #165): copied onto envelopes built from this
+            // template from now on, never onto ones that already exist.
+            foreach (['allow_decline', 'show_save_for_later'] as $setting) {
+                if (array_key_exists($setting, $changes)) {
+                    $template->setAttribute($setting, $changes[$setting]);
+                    $applied[$setting] = $changes[$setting];
+                }
+            }
+
             if ($applied === []) {
                 return $template;
             }
