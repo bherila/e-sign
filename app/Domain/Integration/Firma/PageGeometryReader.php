@@ -90,7 +90,26 @@ final class PageGeometryReader
      */
     public function pageOf(Envelope $envelope, int $pageNumber): PageGeometry
     {
-        return $this->page($this->revisionOf($envelope), $pageNumber);
+        $set = $envelope->documentSet();
+
+        if (! $set->isMultiple()) {
+            return $this->page($this->revisionOf($envelope), $pageNumber);
+        }
+
+        // A set's pages are absolute (issue #163): find the member the page falls in and read
+        // that document's own page. Its size and rotation are what the coordinates convert by.
+        $entry = $set->entryForPage($pageNumber);
+        $revision = $entry === null ? null : DocumentRevision::query()->with('document')->find($entry->revisionId);
+
+        if ($entry === null || ! $revision instanceof DocumentRevision) {
+            throw FirmaException::of(
+                FirmaErrorCode::InvalidRequest,
+                'The document set has no page '.$pageNumber.'. It has '.$set->totalPages().'.',
+                ['page_number' => $pageNumber, 'page_count' => $set->totalPages()],
+            );
+        }
+
+        return $this->page($revision, $entry->localPage($pageNumber));
     }
 
     /**

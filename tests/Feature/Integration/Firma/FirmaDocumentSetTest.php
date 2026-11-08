@@ -6,9 +6,13 @@ namespace Tests\Feature\Integration\Firma;
 
 use App\Domain\Evidence\Finalization\Artifacts\Artifact;
 use App\Domain\Evidence\Finalization\Artifacts\ArtifactKind;
+use App\Domain\Integration\Firma\SigningRequestDownloads;
+use App\Domain\Integration\Firma\SigningRequestFields;
+use App\Domain\Integration\Firma\SigningRequestSettings;
 use App\Domain\Preparation\Documents\DocumentSet;
 use App\Domain\Preparation\Documents\Models\DocumentRevision;
 use App\Domain\Signing\Models\Envelope;
+use App\Http\Resources\Compat\Firma\SigningRequestCreateResource;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Support\FirmaFacadeScenario;
 use Tests\Support\PdfFixtures;
@@ -86,6 +90,48 @@ class FirmaDocumentSetTest extends TestCase
 
         $this->getJson(self::BASE.'/'.$envelope->public_id.'/documents/01JSYNTHETICNOSUCHDOCUMENT/download', FirmaFacadeScenario::headers($issued))
             ->assertNotFound();
+    }
+
+    /**
+     * A field on the second document is reported against that document's own page: its
+     * absolute page is kept, and its percentages are of the page it is actually drawn on.
+     */
+    public function test_fields_on_a_later_document_are_reported_against_that_documents_page(): void
+    {
+        $scenario = FirmaFacadeScenario::create();
+        $headers = FirmaFacadeScenario::headers($scenario->credential());
+        [$envelope] = $this->sentSet($scenario);
+
+        $fields = $this->getJson(self::BASE.'/'.$envelope->public_id.'/fields', $headers)->assertOk()->json('results');
+        $onSecond = array_values(array_filter($fields, static fn (array $field): bool => $field['page_number'] === 4));
+
+        $this->assertCount(1, $onSecond);
+        $rect = collect($envelope->field_schema['fields'])->firstWhere('page', 4)['rect'];
+        // The schedule is US Letter (612 x 792 pt), upright.
+        $this->assertEqualsWithDelta($rect['x'] / 612 * 100, $onSecond[0]['x_postion'], 0.01);
+        $this->assertEqualsWithDelta($rect['width'] / 612 * 100, $onSecond[0]['width'], 0.01);
+        $this->assertEqualsWithDelta($rect['y'] / 792 * 100, $onSecond[0]['y_position'], 0.01);
+    }
+
+    /**
+     * The create response, like the detail response, offers no aggregate review link for a
+     * set, and counts the whole set's pages.
+     */
+    public function test_the_create_response_for_a_set_has_no_aggregate_review_link(): void
+    {
+        $scenario = FirmaFacadeScenario::create();
+        [$envelope] = $this->sentSet($scenario);
+
+        $body = (new SigningRequestCreateResource(
+            $envelope,
+            app(SigningRequestFields::class),
+            app(SigningRequestDownloads::class),
+            app(SigningRequestSettings::class),
+        ))->resolve(request());
+
+        $this->assertNull($body['document_url']);
+        $this->assertSame(4, $body['page_count']);
+        $this->assertContains(4, array_column($body['fields'], 'page_number'));
     }
 
     public function test_editing_a_set_is_not_in_this_build_and_says_so(): void
