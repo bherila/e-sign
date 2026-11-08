@@ -129,6 +129,31 @@ class EnvelopeDesignationTest extends TestCase
         $this->assertSame(RecipientState::Copied, $scenario->recipient($envelope, 'records')->state);
     }
 
+    /**
+     * A draft created before the signing side of #169 stored its cc recipient as `pending` in
+     * stage 1. Sending it must not release them.
+     */
+    public function test_a_cc_recipient_stored_the_earlier_way_is_copied_at_send_rather_than_released(): void
+    {
+        $schema = self::schemaWithApproverAndCc();
+        $schema['signing_order'] = [['signer', 'manager']];
+
+        foreach (['sequential', 'parallel'] as $mode) {
+            $scenario = SigningScenario::create();
+            $envelope = $scenario->preparedDraft(['field_schema' => $schema, 'signing_mode' => $mode]);
+            $scenario->recipient($envelope, 'records')
+                ->forceFill(['state' => RecipientState::Pending, 'order_index' => 1])
+                ->save();
+
+            $scenario->machine()->send($envelope->refresh());
+
+            $records = $scenario->recipient($envelope, 'records');
+            $this->assertSame(RecipientState::Copied, $records->state, $mode);
+            $this->assertSame(0, $records->order_index, $mode);
+            $this->assertSame(RecipientState::Active, $scenario->recipient($envelope, 'signer')->state, $mode);
+        }
+    }
+
     public function test_a_cc_recipient_needs_an_address_for_the_completed_copy(): void
     {
         $scenario = SigningScenario::create();

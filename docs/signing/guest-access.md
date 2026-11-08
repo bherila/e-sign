@@ -10,7 +10,7 @@ execute it. This is how.
 | Consent and signature capture | `app/Domain/Signing/Capture/` |
 | HTTP surface | `app/Http/Controllers/Signing/`, `app/Http/Requests/Signing/`, `routes/signing.php` |
 | The signer's page | `resources/js/signing/`, `resources/views/signing/` |
-| Consent notice | `resources/views/signing/consent.md` |
+| Consent notice | `resources/views/signing/consent.md`; an approver's, `consent-approval.md` |
 | Configuration | `config/esign.php`, `signing.*` |
 | Tests | `tests/Feature/Signing/Guest*`, `tests/Feature/Signing/HarmlessGetTest.php`, `tests/Unit/Signing/` |
 | Specification | `docs/HANDOFF.md` sections 5 and 8; `docs/signing/state-machine.md` |
@@ -209,6 +209,12 @@ Which *version* was displayed is a different question, and the envelope already 
 acceptance, and copied onto the attestation. `signing.consent_policy_version` says which
 version the file on disk is; when the two disagree the page says so in place rather than
 rendering current wording under an older version's name.
+
+An approver (field schema 1.2) is shown `resources/views/signing/consent-approval.md` instead,
+because the signer's notice describes placing a signature, which an approver does not do. One
+`signing.consent_policy_version` names both files, and a substantive change to either is a new
+version; which of the two somebody saw is the recorded version together with their designation,
+which the attestation's field schema digest binds.
 
 Two tick boxes, not one. "I have read the notice" and "I intend this to be my signature and to
 be bound by it" are different statements, and `docs/HANDOFF.md` section 8 asks for explicit

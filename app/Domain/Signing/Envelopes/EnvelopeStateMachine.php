@@ -163,6 +163,7 @@ final readonly class EnvelopeStateMachine
             $expectedVersion,
             function (Envelope $locked) use ($envelope, $prepared, $anchorProblems): TransitionResult {
                 $from = $this->assertLegal('send', $locked);
+                $this->copyCcRecipients($locked);
 
                 // Anchors first: the gate below reasons about the field set that will actually be
                 // sent, which is the resolved one. A field whose optional anchor was absent is gone
@@ -1513,6 +1514,28 @@ final readonly class EnvelopeStateMachine
     // ---------------------------------------------------------------------------------
     // Ordering
     // ---------------------------------------------------------------------------------
+
+    /**
+     * Put every cc recipient of a draft outside the order: `copied`, stage 0.
+     *
+     * The factory has written them that way since issue #169's signing side, but a draft created
+     * before it stored a cc recipient as `pending` in stage 1 — harmless while the send gate
+     * refused such drafts, and an invitation to someone who must never be asked to act once it
+     * stopped. Corrected here, under the envelope lock and before anything is released, so the
+     * rule holds for every draft whatever order the code and its data were deployed in.
+     */
+    private function copyCcRecipients(Envelope $locked): void
+    {
+        EnvelopeRecipient::query()
+            ->where('envelope_id', $locked->getKey())
+            ->where('designation', RecipientDesignation::Cc->value)
+            ->where('state', '!=', RecipientState::Copied->value)
+            ->increment('version', 1, [
+                'state' => RecipientState::Copied->value,
+                'order_index' => 0,
+                'updated_at' => CarbonImmutable::now(),
+            ]);
+    }
 
     /** Release one signing stage. Returns how many recipients it activated. */
     private function activateStage(Envelope $locked, int $stage, CarbonImmutable $at): int

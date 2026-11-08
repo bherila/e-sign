@@ -6,6 +6,7 @@ namespace App\Http\Resources\Signing;
 
 use App\Domain\Preparation\Documents\Models\Document;
 use App\Domain\Preparation\Schema\FieldDefinition;
+use App\Domain\Preparation\Schema\RecipientDesignation;
 use App\Domain\Signing\Capture\ConsentPolicy;
 use App\Domain\Signing\Capture\SignatureImage;
 use App\Domain\Signing\Envelopes\SignerButtons;
@@ -62,7 +63,10 @@ final class SigningPagePayload
         $schema = $envelope->fieldSchema();
 
         $values = $envelope->fieldValues()->get();
-        $consent = $this->consent->forRecordedVersion($envelope->consent_policy_version);
+        $consent = $this->consent->forRecordedVersion(
+            $envelope->consent_policy_version,
+            $recipient->designation === RecipientDesignation::Approver,
+        );
 
         return [
             'envelope' => [

@@ -32,8 +32,20 @@ use RuntimeException;
  */
 final class ConsentPolicy
 {
-    /** The single source of the notice, relative to the application root. */
+    /** The notice a signer is shown, relative to the application root. */
     public const PATH = 'resources/views/signing/consent.md';
+
+    /**
+     * The notice an approver is shown (issue #169). An approver records an approval rather than
+     * a signature, so the signer's notice — "you are placing your electronic signature" — would
+     * describe an act they are not performing.
+     *
+     * One version string covers both files: `ESIGN_CONSENT_POLICY_VERSION` names the pair, and
+     * a substantive change to either is a new version. Which of the two a person was shown is
+     * then the recorded version plus their designation, which the attestation's field schema
+     * digest already binds.
+     */
+    public const APPROVAL_PATH = 'resources/views/signing/consent-approval.md';
 
     public function __construct(
         private readonly Repository $config,
@@ -62,18 +74,19 @@ final class ConsentPolicy
      * panel and still accepts an assent would be recording agreement to nothing, which is
      * the one failure mode this whole module exists to prevent.
      */
-    public function forRecordedVersion(string $recordedVersion): ConsentText
+    public function forRecordedVersion(string $recordedVersion, bool $approval = false): ConsentText
     {
-        return new ConsentText($recordedVersion, $this->textVersion(), $this->html());
+        return new ConsentText($recordedVersion, $this->textVersion(), $this->html($approval));
     }
 
-    public function markdown(): string
+    public function markdown(bool $approval = false): string
     {
-        $path = base_path(self::PATH);
+        $relative = $approval ? self::APPROVAL_PATH : self::PATH;
+        $path = base_path($relative);
 
         if (! $this->files->isFile($path)) {
             throw new RuntimeException(
-                'The consent notice is missing from '.self::PATH.'. A signing page cannot take '
+                'The consent notice is missing from '.$relative.'. A signing page cannot take '
                 .'an assent it has no text to display.',
             );
         }
@@ -81,10 +94,10 @@ final class ConsentPolicy
         return $this->files->get($path);
     }
 
-    public function html(): string
+    public function html(bool $approval = false): string
     {
         // `html_input: 'escape'` rather than the default: the file is trusted, and it is
         // still cheaper to make that assumption unnecessary than to rely on it.
-        return Str::markdown($this->markdown(), ['html_input' => 'escape', 'allow_unsafe_links' => false]);
+        return Str::markdown($this->markdown($approval), ['html_input' => 'escape', 'allow_unsafe_links' => false]);
     }
 }

@@ -139,6 +139,9 @@ class GuestSigningAcceptanceTest extends TestCase
         $payload = $this->payloadFrom($page->getContent());
 
         $this->assertSame('approver', $payload['recipient']['designation']);
+        // The approval notice, not the signer's: an approver is not placing a signature.
+        $this->assertStringContainsString('Approving this agreement electronically', $payload['consent']['html']);
+        $this->assertStringNotContainsString('placing your electronic signature', $payload['consent']['html']);
         $this->assertSame(['manager_signature'], $payload['required_signature_field_ids']);
         $this->assertSame(['manager_approved_on'], $payload['service_supplied_field_ids']);
         // The cc recipient is listed as a party, and as copied rather than as somebody pending.
