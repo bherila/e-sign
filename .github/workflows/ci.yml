@@ -82,6 +82,8 @@ jobs:
               - '.docker/**'
               - '.dockerignore'
               - 'docker-compose.yml'
+              - 'docker-compose.prod.example.yml'
+              - 'scripts/refresh-base-image-digests.sh'
             licenses:
               - 'composer.json'
               - 'composer.lock'
@@ -524,6 +526,51 @@ jobs:
             -e DB_CONNECTION=sqlite -e DB_DATABASE=/tmp/esign.sqlite -e SESSION_DRIVER=file \
             -e CACHE_STORE=file -e QUEUE_CONNECTION=sync -e LOG_CHANNEL=stderr \
             bwh-esign:ci worker --stop-when-empty
+
+      - name: Smoke test the scheduler role
+        run: |
+          set -eu
+          # The scheduler role is a shell loop around `schedule:run` (.docker/scripts/entrypoint.sh)
+          # that CI never started before issue #37. Prove it boots, that `schedule:run` really
+          # ran a pass (the every-minute heartbeat task reports DONE), that the loop survives the
+          # pass, and that the image's HEALTHCHECK reports it healthy.
+          #
+          # What is *not* asserted is that every scheduled task succeeds: this throwaway sqlite
+          # database is unmigrated (migrations run only in the `database` job, AGENTS.md), so a
+          # task that reads a table fails here by construction, and does so only when CI happens
+          # to start on its five-minute boundary. Those tasks are covered against a migrated
+          # database by the feature suite. A PHP fatal error is a boot fault and still fails.
+          docker run -d --name esign-scheduler \
+            -e APP_KEY="base64:$(openssl rand -base64 32)" -e APP_ENV=production -e APP_DEBUG=false \
+            -e DB_CONNECTION=sqlite -e DB_DATABASE=/tmp/esign.sqlite -e SESSION_DRIVER=file \
+            -e CACHE_STORE=file -e QUEUE_CONNECTION=sync -e LOG_CHANNEL=stderr \
+            bwh-esign:ci scheduler
+          sleep 15
+          logs=$(docker logs esign-scheduler 2>&1)
+          test "$(docker inspect -f '{{.State.Running}}' esign-scheduler)" = true || { echo "$logs"; exit 1; }
+          grep -qE 'health:scheduler-heartbeat.*DONE' <<<"$logs" || { echo "No schedule:run pass completed"; echo "$logs"; exit 1; }
+          if grep -qi 'PHP Fatal error' <<<"$logs"; then echo "$logs"; exit 1; fi
+          docker exec esign-scheduler esign-healthcheck
+          docker rm -f esign-scheduler >/dev/null
+
+      - name: Check the production Compose example's key and hardening contract
+        run: |
+          set -eu
+          # docker-compose.prod.example.yml promises that signing keys reach esign-worker only,
+          # read-only, and that every service runs read-only with every capability dropped
+          # (issue #37). Compose resolves the file; jq checks what it resolved to.
+          sudo mkdir -p /etc/esign && sudo touch /etc/esign/esign.env
+          ESIGN_IMAGE=bwh-esign:ci docker compose -f docker-compose.prod.example.yml --profile release config --format json > /tmp/compose.json
+          jq -e '.services | keys | sort == ["esign", "esign-migrate", "esign-scheduler", "esign-worker"]' /tmp/compose.json
+          # Exactly one service mounts the key directory, it is the worker, and the mount is read-only.
+          jq -e '[.services | to_entries[] | select(any(.value.volumes[]?; .source == "/etc/esign/keys")) | .key] == ["esign-worker"]' /tmp/compose.json
+          jq -e '.services["esign-worker"].volumes | all(.source != "/etc/esign/keys" or .read_only == true)' /tmp/compose.json
+          # Nothing else mounts anything from the host at all.
+          jq -e '[.services | to_entries[] | select(.key != "esign-worker") | .value.volumes[]?] == []' /tmp/compose.json
+          jq -e '.services | all(.read_only == true and (.cap_drop | index("ALL")) != null)' /tmp/compose.json
+          # Only the web role publishes a port, and only on loopback.
+          jq -e '[.services | to_entries[] | select(.value.ports != null) | .key] == ["esign"]' /tmp/compose.json
+          jq -e '.services.esign.ports | all(.host_ip == "127.0.0.1")' /tmp/compose.json
 
   validation:
     name: Independent seal validation (pyHanko)

@@ -12,11 +12,17 @@
 #
 #   docker build --target production -f .docker/Dockerfile -t bwh-esign:$(git rev-parse --short HEAD) .
 #
+# Base images are pinned by multi-arch index digest, the tag kept beside it for readers (issue
+# #37). A tag moves; a digest does not, so two builds of one commit start from the same bytes.
+# Refresh deliberately: scripts/refresh-base-image-digests.sh prints the current digest of each
+# tag, and tests/Unit/Docker/BaseImagePinTest fails if a FROM loses its pin. What a digest does not
+# fix is the apt-get layer below, which installs the distribution's current packages at build time.
+#
 # Runtime policy (docs/HANDOFF.md §13): PHP only. No Node, Python, Java, Chromium, or Redis in the
 # production image. Signing key material is never copied into a layer; mount it into the worker.
 
 # ---------- base: PHP 8.5 FPM + nginx + extensions ----------
-FROM php:8.5-fpm AS base
+FROM php:8.5-fpm@sha256:baf3ea13a8207fa18e1011bad1016e8b5e59fc974c6966d0efa6f36a16f875f0 AS base
 WORKDIR /var/www/html
 RUN apt-get update && apt-get install -y --no-install-recommends \
         nginx curl unzip procps \
@@ -60,7 +66,7 @@ CMD ["web"]
 # vendor/ is pure PHP, so it is built once on the native platform (no QEMU) and copied into every
 # target platform. This halves the dist downloads per multi-arch build and keeps flaky upstream
 # zipball fetches out of the slow emulated leg.
-FROM --platform=$BUILDPLATFORM composer:2 AS vendor
+FROM --platform=$BUILDPLATFORM composer:2@sha256:8de2184c6de224f4689e8f80ed5f5edaf0030b6b8b7839a22a2bcb6722ac87d0 AS vendor
 WORKDIR /app
 ENV COMPOSER_ALLOW_SUPERUSER=1 COMPOSER_NO_INTERACTION=1
 COPY composer.json composer.lock ./
@@ -73,7 +79,7 @@ RUN --mount=type=cache,target=/tmp/cache \
         || (sleep 15 && composer install --no-dev --no-scripts --no-autoloader --prefer-dist --ignore-platform-reqs))
 
 # ---------- assets: compile the frontend bundle ----------
-FROM --platform=$BUILDPLATFORM node:24-bookworm-slim AS assets
+FROM --platform=$BUILDPLATFORM node:24-bookworm-slim@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9 AS assets
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@11.5.0 --activate
 # pnpm-workspace.yaml carries install policy (overrides, allowBuilds); it must be present before install.

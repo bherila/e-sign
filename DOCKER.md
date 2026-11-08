@@ -32,6 +32,15 @@ docker run --rm -p 8080:8080 --env-file .env bwh-esign:<tag>            # web
 docker run --rm --env-file .env -v /secure/keys:/keys:ro bwh-esign:<tag> worker
 ```
 
+Every external base image is pinned by multi-arch index digest beside its tag
+(`php:8.5-fpm@sha256:…`), so two builds of one commit start from the same base bytes; a tag can be
+re-pointed upstream and a digest cannot. `tests/Unit/Docker/BaseImagePinTest` fails if a `FROM`
+loses its pin. Refresh deliberately: `scripts/refresh-base-image-digests.sh` prints each tag's
+current digest beside the pinned one, and a refresh is a reviewed commit like any other dependency
+bump. The pin covers the base layers only: the `apt-get install` layer still installs whatever the
+distribution's mirrors serve at build time, so the image is pinned in its inputs, not bit-for-bit
+reproducible.
+
 ## Published image
 
 `.github/workflows/publish-image.yml` pushes the production target to **`ghcr.io/bherila/e-sign`**
