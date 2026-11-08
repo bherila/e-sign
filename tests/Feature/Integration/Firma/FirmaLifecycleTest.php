@@ -399,7 +399,7 @@ class FirmaLifecycleTest extends TestCase
             FirmaFacadeScenario::headers($issued),
         )
             ->assertStatus(409)
-            ->assertJsonPath('error', 'ALREADY_SENT')
+            ->assertJsonPath('error', 'already_sent')
             ->assertJsonPath('details.transition', 'send')
             ->assertJsonPath('details.from', 'sent');
     }
@@ -440,7 +440,7 @@ class FirmaLifecycleTest extends TestCase
             'document' => str_repeat('A', 6_291_457),
         ], FirmaFacadeScenario::headers($issued))
             ->assertStatus(413)
-            ->assertJsonPath('error', 'REQUEST_TOO_LARGE');
+            ->assertJsonPath('error', 'request_too_large');
 
         $this->assertSame($before, Envelope::query()->count());
     }

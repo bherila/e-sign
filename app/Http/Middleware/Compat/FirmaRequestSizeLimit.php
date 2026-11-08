@@ -13,7 +13,7 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * The documented request-body ceiling for this surface: 6 MiB (6,291,456 bytes).
  *
- * Upstream refuses a larger body with `413 REQUEST_TOO_LARGE` on the routes that accept a
+ * Upstream refuses a larger body with a `413` and its `REQUEST_TOO_LARGE` code on the routes that accept a
  * document. The inline base64 document is the one body here that can grow without bound,
  * and a caller who learns about a ceiling from a gateway's `502` — what upstream answered
  * before it documented this — learns nothing it can act on. The refusal is raised here,

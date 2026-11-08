@@ -51,20 +51,25 @@ enum FirmaErrorCode: string
     case InvalidState = 'invalid_state';
 
     /**
-     * A send attempted on a request that has already been sent: upstream's verbatim token.
+     * A send attempted on a request that has already been sent.
      *
      * The pinned document's examples put a `400` here; upstream's current reference corrects
-     * that to `409` with this code, which is the answer a retrying client branches on. The
-     * capitals are upstream's as documented, not this enum's usual case — the token is copied
-     * exactly, as `no_document_available` is. See the `POST /signing-requests/{id}/send`
-     * table in the capability matrix.
+     * that to `409` with a dedicated code (`ALREADY_SENT`, in its structured error format),
+     * which is the answer a retrying client branches on. The token follows this enum's
+     * lowercase vocabulary, as every other member does. See the
+     * `POST /signing-requests/{id}/send` table in the capability matrix.
      */
-    case AlreadySent = 'ALREADY_SENT';
+    case AlreadySent = 'already_sent';
 
     /* ------------------------------------------------------------------------ 413 */
 
-    /** A request body over the documented 6 MiB ceiling: upstream's verbatim token. */
-    case RequestTooLarge = 'REQUEST_TOO_LARGE';
+    /**
+     * A request body over the documented 6 MiB ceiling.
+     *
+     * Upstream documents the code as `REQUEST_TOO_LARGE` in its structured error format;
+     * the token here follows this enum's lowercase vocabulary, as every other member does.
+     */
+    case RequestTooLarge = 'request_too_large';
 
     /* ------------------------------------------------------------------ 422 */
 
