@@ -148,7 +148,15 @@ final readonly class EvidenceDocument
                 'finalization_generation' => $generation,
             ],
 
-            'document' => [
+            // For a set, `document` keeps its meaning (one retained revision and that file's
+            // own digest) and names the first member; the set digest lives only under
+            // `document_set`, never beside a revision it is not the hash of.
+            'document' => $input->hasDocumentSet() ? [
+                'reviewed_revision' => $input->documents[0]['revision'],
+                'sha256' => $input->documents[0]['sha256'],
+                'covers' => 'The first document of the set: its reviewed revision as retained byte-for-byte. '
+                    .'Every document, and the digest an acceptance binds, are under "document_set".',
+            ] : [
                 'reviewed_revision' => $input->documentRevisionPublicId,
                 'sha256' => $input->documentSha256,
                 'covers' => 'The reviewed revision as retained byte-for-byte. The executed PDF is a new '

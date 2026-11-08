@@ -9,11 +9,14 @@ use App\Domain\Evidence\Retention\RetentionPolicy;
 use App\Domain\Evidence\Retention\RetentionSweeper;
 use App\Domain\Identity\Audit\AuditActor;
 use App\Domain\Identity\Audit\AuditEvent;
+use App\Domain\Preparation\Documents\DocumentSet;
 use App\Domain\Preparation\Documents\Models\Document;
+use App\Domain\Preparation\Documents\Models\DocumentRevision;
 use App\Domain\Signing\Models\Envelope;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Tests\Support\PdfFixtures;
 use Tests\Support\RetentionScenario;
 use Tests\Support\SigningScenario;
 use Tests\TestCase;
@@ -195,6 +198,50 @@ class RetentionSweepTest extends TestCase
         $this->assertDatabaseHas('envelopes', ['id' => $sent->getKey()]);
     }
 
+    /**
+     * A never-sent document-set draft takes its set rows with it; the restrictive foreign key
+     * would otherwise refuse the envelope's deletion and abort the sweep (issue #163).
+     */
+    public function test_an_old_document_set_draft_is_deleted_with_its_set_rows(): void
+    {
+        $scenario = SigningScenario::create()->bind();
+        $draft = $this->documentSet($scenario, sent: false);
+        RetentionScenario::backdate('envelopes', (int) $draft->getKey(), [
+            'created_at' => RetentionScenario::daysAgo(200),
+        ]);
+
+        $this->assertSame(2, DB::table('envelope_documents')->where('envelope_id', $draft->getKey())->count());
+
+        $this->artisan('esign:retention:run', ['--force' => true])->assertSuccessful();
+
+        $this->assertDatabaseMissing('envelopes', ['id' => $draft->getKey()]);
+        $this->assertSame(0, DB::table('envelope_documents')->where('envelope_id', $draft->getKey())->count());
+    }
+
+    /**
+     * A document that is only a later member of a sent envelope's set is still referenced.
+     */
+    public function test_a_document_only_a_set_member_references_is_never_swept(): void
+    {
+        $scenario = SigningScenario::create()->bind();
+        $envelope = $this->documentSet($scenario, sent: true);
+        $second = DocumentRevision::query()->findOrFail(
+            DB::table('envelope_documents')->where('envelope_id', $envelope->getKey())->where('position', 2)->value('document_revision_id'),
+        );
+
+        RetentionScenario::backdate('documents', (int) $second->document_id, [
+            'created_at' => RetentionScenario::daysAgo(900),
+        ]);
+
+        $plan = app(RetentionSweeper::class)->plan(RetentionPolicy::fromConfig(config()));
+        $this->assertNotContains((int) $second->document_id, array_column($plan->unreferencedDocuments, 'id'));
+
+        $this->artisan('esign:retention:run', ['--force' => true])->assertSuccessful();
+
+        $this->assertDatabaseHas('documents', ['id' => $second->document_id]);
+        $this->assertTrue(Storage::disk('documents')->exists($second->path));
+    }
+
     public function test_an_unreferenced_document_loses_its_rows_and_its_bytes(): void
     {
         $scenario = SigningScenario::create()->bind();
@@ -354,6 +401,25 @@ class RetentionSweepTest extends TestCase
         $this->artisan('esign:retention:run', ['--force' => true])->assertSuccessful();
 
         $this->assertSame(0, DB::table('auth_audit_log')->count());
+    }
+
+    /**
+     * A two-document envelope: the scenario's own document, then a one-page schedule.
+     */
+    private function documentSet(SigningScenario $scenario, bool $sent): Envelope
+    {
+        $second = $scenario->addDocument(PdfFixtures::bytes('single-page-letter'), 1, 'Synthetic schedule A');
+        $first = $scenario->revision;
+        $set = DocumentSet::of([
+            ['revision_id' => (int) $first->getKey(), 'title' => 'Synthetic agreement', 'sha256' => $first->sha256, 'page_count' => (int) $first->page_count],
+            ['revision_id' => (int) $second->getKey(), 'title' => 'Synthetic schedule A', 'sha256' => $second->sha256, 'page_count' => 1],
+        ]);
+        $overrides = [
+            'document_sha256' => $set->digest(),
+            'additional_document_revision_ids' => [$second->getKey()],
+        ];
+
+        return $sent ? $scenario->sent($overrides) : $scenario->preparedDraft($overrides);
     }
 
     private function seedAuthLogRows(int $count, int $ageInDays): void

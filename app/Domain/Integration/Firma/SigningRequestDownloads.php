@@ -196,7 +196,11 @@ final readonly class SigningRequestDownloads
         return [
             'final_document_download_url' => $this->urls->urlFor($envelope, DownloadUrlIssuer::EXECUTED, $expiresAt),
             'final_document_download_error' => null,
-            'document_only_download_url' => $this->urls->urlFor($envelope, DownloadUrlIssuer::REVIEW, $expiresAt),
+            // A set has no single reviewed file to hand out; each member's is under
+            // `documents[]`. Null rather than a link that would always refuse.
+            'document_only_download_url' => ! $envelope->documentSet()->isMultiple()
+                ? $this->urls->urlFor($envelope, DownloadUrlIssuer::REVIEW, $expiresAt)
+                : null,
             'document_only_download_error' => null,
             // Upstream calls it a certificate. This is the completion report: a statement of
             // what happened, deliberately not an X.509 credential belonging to any signer

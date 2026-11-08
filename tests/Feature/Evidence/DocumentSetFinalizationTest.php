@@ -79,6 +79,13 @@ class DocumentSetFinalizationTest extends TestCase
         $this->assertSame($set->digest(), $evidence['document_set']['sha256']);
         $this->assertSame([1, 2], array_column($evidence['document_set']['documents'], 'position'));
 
+        // `document` still describes one retained file and that file's own digest (the first
+        // member's), never the set digest beside a revision it is not the hash of.
+        $first = $evidence['document_set']['documents'][0];
+        $this->assertSame($first['reviewed_revision'], $evidence['document']['reviewed_revision']);
+        $this->assertSame($first['sha256'], $evidence['document']['sha256']);
+        $this->assertNotSame($set->digest(), $evidence['document']['sha256']);
+
         foreach ($evidence['document_set']['documents'] as $member) {
             $published = $artifacts->first(fn (Artifact $a): bool => $a->kind === ArtifactKind::ExecutedDocument && $a->slot === $member['position']);
             $this->assertSame($published->sha256, $member['executed_document_sha256']);

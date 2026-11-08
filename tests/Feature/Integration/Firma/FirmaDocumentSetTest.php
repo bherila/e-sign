@@ -65,6 +65,12 @@ class FirmaDocumentSetTest extends TestCase
         $this->assertSame(['signed', 'signed'], array_column($done->json('documents'), 'document_url_kind'));
         $this->assertSame($sealed->sha256, $done->json('documents.1.document_only_hash'));
 
+        // No aggregate review copy exists for a set, so none is advertised: a link here
+        // would always refuse. The sealed agreement and the report are still offered.
+        $this->assertNull($done->json('document_only_download_url'));
+        $this->assertNotNull($done->json('final_document_download_url'));
+        $this->get((string) $done->json('final_document_download_url'))->assertOk();
+
         $download = $this->getJson(self::BASE.'/'.$envelope->public_id.'/documents/'.$memberId.'/download?type=document', $headers)
             ->assertOk();
         $bytes = $this->get((string) $download->json('download_url'))->assertOk()->streamedContent();

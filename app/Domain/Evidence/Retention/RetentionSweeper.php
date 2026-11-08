@@ -243,14 +243,8 @@ final readonly class RetentionSweeper
             // only once the row is hard-deleted").
             ->whereNull('deleted_at')
             ->where('created_at', '<', $cutoff)
-            ->whereNotExists(fn ($query) => $query->from('document_revisions')
-                ->whereColumn('document_revisions.document_id', 'documents.id')
-                ->whereExists(fn ($inner) => $inner->from('envelopes')
-                    ->whereColumn('envelopes.document_revision_id', 'document_revisions.id')))
-            ->whereNotExists(fn ($query) => $query->from('document_revisions')
-                ->whereColumn('document_revisions.document_id', 'documents.id')
-                ->whereExists(fn ($inner) => $inner->from('template_versions')
-                    ->whereColumn('template_versions.document_revision_id', 'document_revisions.id')))
+            ->whereNotExists(fn ($query) => $this->referencedRevisions($query->from('document_revisions')
+                ->whereColumn('document_revisions.document_id', 'documents.id')))
             ->orderBy('id')
             ->get(['id', 'public_id', 'title', 'original_disk', 'original_path']);
 
@@ -437,6 +431,7 @@ final readonly class RetentionSweeper
                 $this->db->table('signing_sessions')->where('envelope_id', $id)->delete();
                 $this->db->table('recipient_invitations')->where('envelope_id', $id)->delete();
                 $this->db->table('envelope_recipients')->where('envelope_id', $id)->delete();
+                $this->db->table('envelope_documents')->where('envelope_id', $id)->delete();
                 $this->db->table('envelopes')->where('id', $id)->delete();
             });
 
@@ -480,16 +475,9 @@ final readonly class RetentionSweeper
                 continue;
             }
 
-            $stillUnreferenced = $this->db->table('document_revisions')
-                ->where('document_id', $planned['id'])
-                ->whereExists(fn ($query) => $query->from('envelopes')
-                    ->whereColumn('envelopes.document_revision_id', 'document_revisions.id'))
-                ->doesntExist()
-                && $this->db->table('document_revisions')
-                    ->where('document_id', $planned['id'])
-                    ->whereExists(fn ($query) => $query->from('template_versions')
-                        ->whereColumn('template_versions.document_revision_id', 'document_revisions.id'))
-                    ->doesntExist();
+            $stillUnreferenced = $this->referencedRevisions($this->db->table('document_revisions')
+                ->where('document_id', $planned['id']))
+                ->doesntExist();
 
             if (! $stillUnreferenced) {
                 $skipped[] = sprintf(
@@ -590,6 +578,25 @@ final readonly class RetentionSweeper
         }
 
         return $deleted;
+    }
+
+    /**
+     * Narrow a `document_revisions` query to the revisions something still names: an
+     * envelope's or template version's own revision, or a member of either's document set
+     * (issue #163). The plan and the apply-time recheck share this, so they cannot disagree
+     * about what "referenced" means.
+     */
+    private function referencedRevisions(Builder $revisions): Builder
+    {
+        return $revisions->where(fn (Builder $any) => $any
+            ->whereExists(fn ($query) => $query->from('envelopes')
+                ->whereColumn('envelopes.document_revision_id', 'document_revisions.id'))
+            ->orWhereExists(fn ($query) => $query->from('template_versions')
+                ->whereColumn('template_versions.document_revision_id', 'document_revisions.id'))
+            ->orWhereExists(fn ($query) => $query->from('envelope_documents')
+                ->whereColumn('envelope_documents.document_revision_id', 'document_revisions.id'))
+            ->orWhereExists(fn ($query) => $query->from('template_version_documents')
+                ->whereColumn('template_version_documents.document_revision_id', 'document_revisions.id')));
     }
 
     private function authLogTable(): string

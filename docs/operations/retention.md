@@ -24,7 +24,7 @@ environment variable.
 | Setting | Default | What it governs |
 |---|---|---|
 | `auth_logs_days` | `400` | Rows in auth-laravel's `auth_audit_log`: logins, passkeys, 2FA. |
-| `abandoned_drafts_days` | `90` | Envelopes in `draft` with a null `sent_at`, and documents no envelope or template version references. |
+| `abandoned_drafts_days` | `90` | Envelopes in `draft` with a null `sent_at`, and documents no envelope or template version references, as its own document or as a member of its document set. |
 | `executed_documents_days` | **`null` — never** | Completed envelopes. Null means no automatic deletion, ever. |
 | `purge_grace_days` | `30` | How long a soft-deleted envelope keeps its bytes. |
 
