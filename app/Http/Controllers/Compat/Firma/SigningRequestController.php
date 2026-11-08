@@ -79,9 +79,10 @@ class SigningRequestController extends Controller
      * The two phases are kept distinguishable, as upstream's `phase` enum requires: a body
      * that cannot be turned into a request fails in `create_validation` with nothing
      * persisted, and one that is built and then refused by the send gate fails in
-     * `send_validation` naming the parties who are not ready. Neither leaves a half-built
-     * draft: creation is one transaction, and a refused send is reported with the draft
-     * deleted from nobody's view because it was never announced.
+     * `send_validation` naming the parties who are not ready. Creation is one transaction, so
+     * there is never a half-built draft. A refused send keeps the complete one — unsent, never
+     * announced — and the body names it (`signing_request_id`), so a caller corrects and sends
+     * that draft rather than creating a second.
      */
     public function createAndSend(CreateAndSendRequest $request): JsonResponse
     {
@@ -291,6 +292,7 @@ class SigningRequestController extends Controller
                 'send_validation',
                 $failure->getMessage(),
                 $this->missingByRecipient($envelope),
+                $envelope->public_id,
             );
         }
     }

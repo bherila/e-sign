@@ -187,12 +187,16 @@ appears only when there is something structured to say. This is **not** the nati
   "phase": "send_validation",
   "validation_errors": [
     { "recipient_index": 1, "recipient_email": "dana@buyer.example", "missing_fields": ["agreement_date"] }
-  ]
+  ],
+  "signing_request_id": "01J…"
 }
 ```
 
-`phase` is `create_validation` (nothing was persisted) or `send_validation` (the request was
-built and the send gate refused it).
+`phase` is `create_validation` (nothing was persisted, and the body names no request) or
+`send_validation` (the request was built and the send gate refused it). In the second case the
+draft is kept, unsent and never announced, and `signing_request_id` names it: correct it with
+`PATCH /signing-requests/{id}` and send it with `POST /signing-requests/{id}/send`. Retrying the
+whole `create-and-send` creates a second draft.
 
 **Nothing leaks.** No body carries a stack trace, a file path, SQL, or the class name of an
 unexpected failure.

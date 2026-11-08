@@ -83,11 +83,20 @@ final class FirmaException extends RuntimeException
      * Worth reproducing verbatim: it is how the consumer surfaces a missing prefill to a
      * human, and `phase` is what tells it whether anything was created before the refusal.
      *
+     * `$signingRequestId` is the draft a `send_validation` refusal leaves behind. It is kept —
+     * unsent and never announced — as the record of what was submitted, so the caller is told
+     * which one it is: a retry then corrects that draft (`PATCH`) and sends it (`/send`) rather
+     * than creating a second one. Upstream's own name for the member, from the post-pin reference.
+     *
      * @param  'create_validation'|'send_validation'  $phase
      * @param  list<array{recipient_index: int, recipient_email: string|null, missing_fields: list<string>}>  $validationErrors
      */
-    public static function createAndSendValidation(string $phase, string $message, array $validationErrors): self
-    {
+    public static function createAndSendValidation(
+        string $phase,
+        string $message,
+        array $validationErrors,
+        ?string $signingRequestId = null,
+    ): self {
         return new self(
             FirmaErrorCode::ValidationFailed,
             $message,
@@ -100,7 +109,7 @@ final class FirmaException extends RuntimeException
                 'code' => FirmaErrorCode::ValidationFailed->value,
                 'phase' => $phase,
                 'validation_errors' => $validationErrors,
-            ],
+            ] + ($signingRequestId === null ? [] : ['signing_request_id' => $signingRequestId]),
         );
     }
 
