@@ -1,10 +1,11 @@
-import { useCallback, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import { type FieldDefinition, type FieldSchemaDocument, parseFieldSchema } from "@/schema/fieldSchema";
 
 import { saveValues, SigningApiError } from "./api";
 import { ConsentPanel } from "./ConsentPanel";
 import { DocumentReview } from "./DocumentReview";
+import { postSigningEvent } from "./embedEvents";
 import { FieldEntry } from "./FieldEntry";
 import {
   fieldEntryReducer,
@@ -69,6 +70,26 @@ export function SigningPage({ payload }: SigningPageProps) {
   );
 
   const [finishingLater, setFinishingLater] = useState(false);
+  const announcedStart = useRef(false);
+
+  // The embedding contract (docs/signing/embedded-events.md): a no-op unless the deployment
+  // allowlisted an origin. Ids and a count only — never an address or a value.
+  const announce = useCallback(
+    (detail: Omit<Parameters<typeof postSigningEvent>[0], "envelope_id" | "recipient_id">): void => {
+      postSigningEvent({ ...detail, envelope_id: payload.envelope.id, recipient_id: payload.recipient.id });
+    },
+    [payload.envelope.id, payload.recipient.id],
+  );
+
+  const announcedLoad = useRef(false);
+
+  useEffect(() => {
+    // Once per page load, including under StrictMode's double-invoked effects.
+    if (!announcedLoad.current) {
+      announcedLoad.current = true;
+      announce({ type: "signing.loaded", total_fields: ownFields.length });
+    }
+  }, [announce, ownFields.length]);
 
   const requiredFieldIds = useMemo<string[]>(
     () => ownFields.filter((field) => field.required).map((field) => field.id),
@@ -88,6 +109,7 @@ export function SigningPage({ payload }: SigningPageProps) {
       const result = await saveValues(payload.urls.values, payload.csrf_token, pending);
       dispatch({ type: "save_succeeded", fieldIds: result.field_ids, reviewed: result.reviewed });
     } catch (cause) {
+      announce({ type: "signing.error", code: "save_failed" });
       dispatch({
         type: "save_failed",
         message:
@@ -96,7 +118,7 @@ export function SigningPage({ payload }: SigningPageProps) {
             : "Your changes could not be saved. Nothing has been lost — try again.",
       });
     }
-  }, [payload.urls.values, payload.csrf_token, state]);
+  }, [payload.urls.values, payload.csrf_token, state, announce]);
 
   const focusField = useCallback((fieldId: string): void => {
     const element = entries.current.get(fieldId);
@@ -176,7 +198,14 @@ export function SigningPage({ payload }: SigningPageProps) {
                   value={state.values[field.id] ?? null}
                   recipientName={payload.recipient.name}
                   maxSignatureBytes={payload.limits.max_signature_image_bytes}
-                  onChange={(value) => dispatch({ type: "set", fieldId: field.id, value })}
+                  onChange={(value) => {
+                    if (!announcedStart.current) {
+                      announcedStart.current = true;
+                      announce({ type: "signing.started" });
+                    }
+
+                    dispatch({ type: "set", fieldId: field.id, value });
+                  }}
                 />
               </div>
             ))}

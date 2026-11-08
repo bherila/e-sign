@@ -37,7 +37,11 @@
     @vite(['resources/css/app.css'])
     @stack('head')
   </head>
-  <body class="min-h-screen bg-background text-foreground flex flex-col">
+  @php($signingEventsAttribute = app(\App\Domain\Signing\Sessions\SigningEmbedEvents::class)->attribute($signingEvent ?? null))
+  <body
+    class="min-h-screen bg-background text-foreground flex flex-col"
+    @if ($signingEventsAttribute !== null) data-signing-events="{{ $signingEventsAttribute }}" @endif
+  >
     <header class="border-b border-black/10 dark:border-white/10">
       <div class="mx-auto w-full max-w-3xl px-4 py-3 sm:px-6">
         <p class="text-muted-foreground text-xs uppercase tracking-wide">{{ config('app.name') }}</p>
@@ -58,5 +62,13 @@
     </footer>
 
     @stack('scripts')
+    {{--
+      The embedding event contract (docs/signing/embedded-events.md). Loaded only when the
+      deployment names an origin to announce to; a module, never inline, so the signing CSP
+      holds.
+    --}}
+    @if ($signingEventsAttribute !== null)
+      @vite(['resources/js/signing-events.ts'])
+    @endif
   </body>
 </html>

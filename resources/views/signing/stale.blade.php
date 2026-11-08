@@ -10,6 +10,7 @@
     The reload is a link and not a meta-refresh or a script. A page that reloaded itself
     would put the signer back in front of the same button with no idea anything had moved.
 --}}
+@php($signingEvent ??= ['type' => 'signing.error', 'code' => 'review_stale'])
 @extends('layouts.signing')
 
 @section('content')

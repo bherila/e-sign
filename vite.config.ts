@@ -79,6 +79,7 @@ export default defineConfig({
                 'resources/js/members.tsx',
                 'resources/js/editor.tsx',
                 'resources/js/signing.tsx',
+                'resources/js/signing-events.ts',
             ],
       refresh: true,
     }),

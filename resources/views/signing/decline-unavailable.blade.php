@@ -5,6 +5,7 @@
     the setting is off. Nothing was recorded, and the page says how the agreement can be
     stopped instead, because "you cannot" with no next step is not an answer.
 --}}
+@php($signingEvent ??= ['type' => 'signing.error', 'code' => 'decline_not_allowed'])
 @extends('layouts.signing')
 
 @section('content')
