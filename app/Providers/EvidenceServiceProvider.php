@@ -29,6 +29,7 @@ use App\Domain\Evidence\Retention\Console\VerifyRestoreCommand;
 use App\Domain\Evidence\Retention\Console\WriteBackupManifestCommand;
 use App\Domain\Evidence\Sealing\ConfiguredSealIdentity;
 use App\Domain\Evidence\Sealing\Console\RotateSealCommand;
+use App\Domain\Evidence\Sealing\Console\SealAttestCommand;
 use App\Domain\Evidence\Sealing\Console\SealStatusCommand;
 use App\Domain\Evidence\Sealing\HttpTimestampAuthority;
 use App\Domain\Evidence\Sealing\SealCertificateDirectory;
@@ -186,6 +187,7 @@ final class EvidenceServiceProvider extends ServiceProvider
         if ($this->app->runningInConsole()) {
             $this->commands([
                 SealStatusCommand::class,
+                SealAttestCommand::class,
                 RotateSealCommand::class,
                 PruneStagingArtifactsCommand::class,
 

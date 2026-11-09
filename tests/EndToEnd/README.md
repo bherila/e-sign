@@ -185,8 +185,12 @@ Stating this is the point of the file.
   running pyHanko against the committed artifacts; ETSI EN 319 142-1 conformance remains
   unproven (release gate 2, issue #7).
 - **No deployment.** This is the application in a test process, not a container or a cPanel
-  account. The Docker and cPanel smoke tests release gate 11 asks for are issue
-  [#38](https://github.com/bherila/e-sign/issues/38).
+  account. The Docker half of release gate 11 is the `compose-e2e` CI job
+  (`scripts/e2e/compose-smoke.sh`, issue [#37](https://github.com/bherila/e-sign/issues/37)):
+  the production image's web and worker roles against MySQL 8.4 and Garage, one agreement
+  created through the facade, signed as the guest over HTTP, finalized by a worker killed with
+  SIGKILL inside the job and recovered by `esign:finalization:resume`, then downloaded and
+  verified from Garage. The cPanel half has no automated smoke test.
 - **Not a migration test.** Nothing here imports an executed Firma document or reconciles a
   request that stayed on Firma. Release gate 13 is still owned by
   [#42](https://github.com/bherila/e-sign/issues/42) and

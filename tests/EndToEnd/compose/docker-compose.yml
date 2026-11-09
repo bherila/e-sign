@@ -1,0 +1,73 @@
+# The Compose end-to-end job (issue #37): the production image, as its roles run in production,
+# against MySQL 8.4 and Garage for S3 — the same S3-compatible store the reference deployment
+# uses. Driven from outside by scripts/e2e/compose-smoke.sh; never deployed, never used locally
+# with real data. Every credential here is synthetic and protects a container on a CI runner.
+name: esign-e2e
+
+x-esign: &esign
+  image: ${ESIGN_IMAGE:-bwh-esign:ci}
+  # Written by scripts/e2e/compose-smoke.sh once Garage has issued the bucket key.
+  env_file:
+    - ./e2e.env
+  depends_on:
+    mysql:
+      condition: service_healthy
+    garage:
+      condition: service_started
+    mailpit:
+      condition: service_started
+
+services:
+  mysql:
+    image: mysql:8.4@sha256:a81d043930e51745522bd5c430961cf8286f0a23f0a9a2a6e0108f7ea71b0902
+    environment:
+      MYSQL_DATABASE: esign
+      MYSQL_USER: esign
+      MYSQL_PASSWORD: esign-e2e-synthetic
+      MYSQL_ROOT_PASSWORD: esign-e2e-synthetic-root
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pesign-e2e-synthetic-root"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  garage:
+    image: dxflrs/garage:v2.5.0@sha256:677e5b758e4425a325b811c425c026bf35a4bf42f7ddbaa773de3f4fd779a5a5
+    volumes:
+      - ./garage.toml:/etc/garage.toml:ro
+
+  # SMTP capture: the production mail guard refuses a mailer that cannot deliver, so mail is
+  # delivered here, inside the stack, and goes nowhere else.
+  mailpit:
+    image: axllent/mailpit:v1.33.1@sha256:aef2aacc11f075ec0fb6874275ee4a421e688e11a96ebb296134d1735c7761ce
+
+  # TLS in front of the web role, as a production reverse proxy is: invitation URLs must be
+  # HTTPS in production. Caddy's own internal CA issues the certificate for `localhost`; the
+  # driver trusts that root and nothing else.
+  proxy:
+    image: caddy:2.11.9-alpine@sha256:0bbb055bda6793c999bde78b1b5ce3e89f829fb031af2cf50056ea1246559fee
+    command: ["caddy", "reverse-proxy", "--from", "localhost:8443", "--to", "esign:8080", "--internal-certs"]
+    ports:
+      - "127.0.0.1:8443:8443"
+    depends_on:
+      - esign
+
+  esign:
+    <<: *esign
+    command: ["web"]
+
+  # The only role with key material, as in docker-compose.prod.example.yml: the synthetic seal
+  # fixtures, read-only.
+  esign-worker:
+    <<: *esign
+    command: ["worker"]
+    volumes:
+      - ../../Fixtures/crypto:/keys:ro
+
+  # One-shot release step against the disposable database this file creates, as the production
+  # example's `esign-migrate` is.
+  esign-migrate:
+    <<: *esign
+    profiles: [release]
+    command: ["artisan", "migrate", "--force"]
+    restart: "no"

@@ -54,3 +54,5 @@ training_data/.codex
 /.cursor/
 /public/fonts-manifest.dev.json
 _ide_helper.php
+tests/EndToEnd/compose/e2e.env
+tests/EndToEnd/compose/caddy-root.crt
