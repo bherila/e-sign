@@ -14,6 +14,8 @@ x-esign: &esign
       condition: service_healthy
     garage:
       condition: service_started
+    mailpit:
+      condition: service_started
 
 services:
   mysql:
@@ -34,11 +36,25 @@ services:
     volumes:
       - ./garage.toml:/etc/garage.toml:ro
 
+  # SMTP capture: the production mail guard refuses a mailer that cannot deliver, so mail is
+  # delivered here, inside the stack, and goes nowhere else.
+  mailpit:
+    image: axllent/mailpit:v1.33.1@sha256:aef2aacc11f075ec0fb6874275ee4a421e688e11a96ebb296134d1735c7761ce
+
+  # TLS in front of the web role, as a production reverse proxy is: invitation URLs must be
+  # HTTPS in production. Caddy's own internal CA issues the certificate for `localhost`; the
+  # driver trusts that root and nothing else.
+  proxy:
+    image: caddy:2.11.9-alpine@sha256:0bbb055bda6793c999bde78b1b5ce3e89f829fb031af2cf50056ea1246559fee
+    command: ["caddy", "reverse-proxy", "--from", "localhost:8443", "--to", "esign:8080", "--internal-certs"]
+    ports:
+      - "127.0.0.1:8443:8443"
+    depends_on:
+      - esign
+
   esign:
     <<: *esign
     command: ["web"]
-    ports:
-      - "127.0.0.1:8080:8080"
 
   # The only role with key material, as in docker-compose.prod.example.yml: the synthetic seal
   # fixtures, read-only.

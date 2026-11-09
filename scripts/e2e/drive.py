@@ -7,9 +7,9 @@ Plays the two outside parties the stack serves, over real HTTP and nothing else:
 * the guest signer, through the signing pages as a browser does (`sign`): landing GET, Continue
   POST, values POST, accept POST, carrying the session cookies and the CSRF token forward.
 
-Standard library only. Cookies are kept by hand rather than by `http.cookiejar` because every
-cookie the production build issues is `Secure`, and this job talks to the container over plain
-HTTP on loopback, where a browser treats the origin as secure and the standard jar does not.
+Standard library only. The stack is reached over HTTPS through its TLS front end, trusting that
+front end's own root (`--ca`) and nothing else. Cookies are kept by hand, so every `Set-Cookie`
+on a redirect hop is carried forward exactly as a browser would.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ import argparse
 import base64
 import hashlib
 import html
+import ssl
 import json
 import re
 import struct
@@ -36,6 +37,15 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 OPENER = urllib.request.build_opener(NoRedirect, urllib.request.ProxyHandler({}))
+
+
+def trust(cafile: str) -> None:
+    """Trust the stack's own TLS root, and only it: no system store, verification on."""
+    global OPENER
+    context = ssl.create_default_context(cafile=cafile)
+    OPENER = urllib.request.build_opener(
+        NoRedirect, urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler(context=context),
+    )
 
 
 class Browser:
@@ -208,6 +218,7 @@ def main() -> None:
 
     p = sub.add_parser("send")
     p.add_argument("--base", required=True)
+    p.add_argument("--ca", required=True)
     p.add_argument("--key", required=True)
     p.add_argument("--pdf", required=True)
     p.add_argument("--email", required=True)
@@ -215,17 +226,20 @@ def main() -> None:
 
     p = sub.add_parser("sign")
     p.add_argument("--base", required=True)
+    p.add_argument("--ca", required=True)
     p.add_argument("--url", required=True)
     p.set_defaults(run=sign)
 
     p = sub.add_parser("download")
     p.add_argument("--base", required=True)
+    p.add_argument("--ca", required=True)
     p.add_argument("--key", required=True)
     p.add_argument("--envelope", required=True)
     p.add_argument("--sha256", required=True)
     p.set_defaults(run=download)
 
     args = parser.parse_args()
+    trust(args.ca)
     args.run(args)
 
 

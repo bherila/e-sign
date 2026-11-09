@@ -34,7 +34,7 @@ dump() {
     "${COMPOSE[@]}" ps -a || true
     "${COMPOSE[@]}" logs --no-color --tail=200 esign esign-worker garage 2>&1 || true
 }
-trap 'status=$?; [ "$status" -ne 0 ] && dump; "${COMPOSE[@]}" --profile release down -v --remove-orphans >/dev/null 2>&1 || true; rm -f e2e.env; exit "$status"' EXIT
+trap 'status=$?; [ "$status" -ne 0 ] && dump; "${COMPOSE[@]}" --profile release down -v --remove-orphans >/dev/null 2>&1 || true; rm -f e2e.env caddy-root.crt; exit "$status"' EXIT
 
 sql() {
     "${COMPOSE[@]}" exec -T mysql mysql -N -B "${DB_ROOT[@]}" -e "$1" 2>/dev/null
@@ -43,7 +43,7 @@ sql() {
 # --- 1. Storage and database --------------------------------------------------------------
 : > e2e.env
 log "Starting MySQL and Garage"
-"${COMPOSE[@]}" up -d --wait mysql garage
+"${COMPOSE[@]}" up -d --wait mysql garage mailpit
 
 garage() { "${COMPOSE[@]}" exec -T garage /garage "$@" 2>/dev/null; }
 
@@ -68,7 +68,8 @@ APP_NAME="BWH eSign E2E"
 APP_ENV=production
 APP_DEBUG=false
 APP_KEY=base64:$(openssl rand -base64 32)
-APP_URL=http://localhost:8080
+APP_URL=https://localhost:8443
+TRUSTED_PROXIES=*
 LOG_CHANNEL=stderr
 DB_CONNECTION=mysql
 DB_HOST=mysql
@@ -80,7 +81,10 @@ SESSION_DRIVER=database
 CACHE_STORE=database
 QUEUE_CONNECTION=database
 DB_QUEUE_RETRY_AFTER=30
-MAIL_MAILER=log
+MAIL_MAILER=smtp
+MAIL_HOST=mailpit
+MAIL_PORT=1025
+MAIL_FROM_ADDRESS=esign@e2e.example.test
 ESIGN_DOCUMENTS_DRIVER=s3
 ESIGN_DOCUMENTS_AWS_ACCESS_KEY_ID=${access_key}
 ESIGN_DOCUMENTS_AWS_SECRET_ACCESS_KEY=${secret_key}
@@ -100,13 +104,17 @@ ENV
 log "Running the release migration"
 "${COMPOSE[@]}" --profile release run --rm esign-migrate
 
-log "Starting the web and worker roles"
-"${COMPOSE[@]}" up -d esign esign-worker
+log "Starting the web and worker roles behind TLS"
+"${COMPOSE[@]}" up -d esign esign-worker proxy
+ca="$PWD/caddy-root.crt"
 for i in $(seq 1 60); do
-    curl -fsS http://localhost:8080/up >/dev/null 2>&1 && { echo "web up after ${i}s"; break; }
+    "${COMPOSE[@]}" cp proxy:/data/caddy/pki/authorities/local/root.crt "$ca" >/dev/null 2>&1 \
+        && curl -fsS --cacert "$ca" https://localhost:8443/up >/dev/null 2>&1 \
+        && { echo "web up behind TLS after ${i}s"; break; }
     sleep 1
 done
-curl -fsS http://localhost:8080/up >/dev/null
+curl -fsS --cacert "$ca" https://localhost:8443/up >/dev/null
+BASE=https://localhost:8443
 
 artisan() { "${COMPOSE[@]}" exec -T esign php artisan "$@"; }
 artisan esign:create-user --name='E2E Owner' --email=owner@e2e.example.test --password='synthetic-e2e-password' >/dev/null
@@ -129,7 +137,7 @@ done
 log "Creating and sending through the facade"
 signer=signer@e2e.example.test
 envelope=$(python3 ../../../scripts/e2e/drive.py send \
-    --base http://localhost:8080 --key "$api_key" \
+    --base "$BASE" --ca "$ca" --key "$api_key" \
     --pdf ../../Fixtures/pdf/single-page-letter.pdf --email "$signer")
 echo "envelope ${envelope}"
 
@@ -147,7 +155,7 @@ done
 "${COMPOSE[@]}" stop esign-worker >/dev/null
 
 log "Signing as the guest, over HTTP"
-python3 ../../../scripts/e2e/drive.py sign --base http://localhost:8080 --url "$invitation"
+python3 ../../../scripts/e2e/drive.py sign --base "$BASE" --ca "$ca" --url "$invitation"
 
 state=$(sql "SELECT state FROM envelopes WHERE public_id='${envelope}'")
 [ "$state" = finalizing ] || { echo "Expected finalizing after the last signature, got '${state}'"; exit 1; }
@@ -197,7 +205,7 @@ executed=$(sql "SELECT COUNT(*) FROM artifacts a JOIN envelopes e ON e.id = a.en
 # --- 5. The sealed PDF, from Garage, through the facade ---------------------------------------
 log "Downloading and verifying the sealed PDF"
 digest=$(sql "SELECT a.sha256 FROM artifacts a JOIN envelopes e ON e.id = a.envelope_id WHERE e.public_id='${envelope}' AND a.kind='executed_pdf'")
-python3 ../../../scripts/e2e/drive.py download --base http://localhost:8080 --key "$api_key" \
+python3 ../../../scripts/e2e/drive.py download --base "$BASE" --ca "$ca" --key "$api_key" \
     --envelope "$envelope" --sha256 "$digest"
 
 "${COMPOSE[@]}" exec -T esign-worker php artisan esign:artifacts:verify
