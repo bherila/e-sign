@@ -43,13 +43,13 @@ This facade reproduces **an HTTP API**. It does not reproduce a company.
 - **Private implementation.** Ids, internal enum members we have not observed, undocumented
   members, and anything the pinned document does not describe.
 
-**Reproduced:** the nine routes below, their request bodies, their response key sets
+**Reproduced:** the routes below, their request bodies, their response key sets
 (asserted against recorded responses), their status representations, their error envelopes,
 the raw-key `Authorization` syntax, and the webhook envelope and signature scheme
 ([`docs/delivery/webhooks.md`](../delivery/webhooks.md)).
 
 **Out of profile:** everything else the upstream document declares — templates, workspaces,
-documents, webhook administration, JWT and template tokens, custom fields, email templates,
+document *management* beyond the upload routes below, webhook administration, JWT and template tokens, custom fields, email templates,
 signer terms, domains, logos, the signing-request *list*, `PUT`/`DELETE` on a signing
 request, reminders, audit, resend, and the per-signer signature/initials/stamp/file routes.
 Those answer **`501`** naming the path, never `404` and never a plausible empty success. The
@@ -240,7 +240,7 @@ Refused options, and why each one:
 | `anchor_tags[]` | Anchors are supplied per field; see [Anchors](#anchors). |
 | `language`, `completion_title`, `completion_message`, `completion_redirect_url`, `completion_redirect_delay` | The signing and completion pages are this application's own; supplied copy would not be rendered, and there is no redirect to a third-party URL. |
 | `fields[].type` in `dropdown`, `file`, `image`, `number`, `radio`, `radio_buttons`, `stamp`, `url` | Declared upstream, not placeable here. Never coerced into a text box: a field a signer was never asked to complete is worse than a rejected request. |
-| PATCH properties (`name`, `description`, `expiration_hours`) | The title is part of the immutable snapshot. |
+| PATCH properties (`name`, `description`, `expiration_hours`) | Fixed when the request is created; this build has no transition that changes them. A `501` naming them. |
 | PATCH `field.prefilled_editable` / `field.read_only` that **changes** the field | Editability belongs to the copied schema. A value that agrees with the field is honoured as the no-op it is. |
 | `content_type` other than `application/pdf` on `POST /documents` | Upstream converts a Word document to PDF; this build does not. The sender makes the PDF every party reviews. |
 | `fields[].anchor` with `document_ids` of more than one document | Which document an anchor's text is in is not said per field; place fields by `page_number` across the set. |

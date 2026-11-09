@@ -145,9 +145,13 @@ from the database. See [`backups.md`](backups.md).
 | `ESIGN_SEAL_READINESS_MAX_AGE_MINUTES` | Optional, default `15`: how old the worker's last check may be before the send gate stops trusting it. |
 
 `esign` and `esign-scheduler` receive these same variables (one shared env file) but never mount
-`/keys`, so the paths simply do not resolve there — `signing_material` in `/health/ready`
-correctly reports `fail` if a non-worker container is ever asked to seal, which cannot happen in
-the state machine but is a second line of defense.
+`/keys`, so the paths simply do not resolve there: a non-worker container asked to seal fails,
+which cannot happen in the state machine but is a second line of defense. Because the key is not
+there, `signing_material` in the web role's `/health/ready` does not try to open it: with
+`ESIGN_SEAL_READINESS=attested` it reports the worker's attestation (below), `ok` while that is
+fresh and valid and `fail` when it is missing, stale, or reports the material unusable. So
+release step 5 holds: a `fail` there means the worker cannot seal, or has not checked yet. Give a
+freshly restarted worker a few seconds to record its first check before polling.
 
 #### Seal readiness
 

@@ -412,13 +412,13 @@ survive one (the attestation chain, the material digest) uses an unkeyed hash of
 input instead.
 
 
-## Deferred
+## Formerly deferred, now landed
 
-| To | What |
+| Was | Now |
 |---|---|
-| **#36 delivery binding** | Nothing here mails anything. `App\Domain\Delivery\Events\SigningUrlMinter` is the port the Delivery module calls for an invitation's one link, `PlaceholderSigningUrlMinter` refuses loudly until something is bound to it, and `InvitationIssuer::issue()` is what that binding will return — an absolute, credential-bearing URL with no query string. Binding the two is #36's, and deliberately not done here: it changes when live credentials start being minted, which is a decision the module that sends mail should make visibly. |
-| **Reminders** | `MailKind::Reminder` exists and `ReminderScheduler` schedules it. A reminder that re-sends the *same* link cannot work here, because the original invitation is one-shot: whoever wires #36 has to reissue on reminder, which revokes the earlier credential. That is correct behaviour and worth stating out loud, because it means an old reminder in a mailbox stops working. |
-| **#28 finalization** | The confirmation page promises a sealed copy once everyone signs. Producing, validating, storing, and delivering it is the finalizer's. |
+| **#36 delivery binding** | `App\Domain\Delivery\Events\SigningUrlMinter` is bound to `InvitationSigningUrlMinter`, which returns what `InvitationIssuer::issue()` mints: an absolute, credential-bearing URL with no query string, one per invitation ([`docs/delivery/mail.md`](../delivery/mail.md)). |
+| **Reminders** | `ReminderScheduler` sends `MailKind::Reminder` with the same single link as the invitation, **minted fresh** through `SigningUrlMinter`, because the one-shot credential behind the original invitation may have been used, rotated or expired since. An old invitation in a mailbox can stop working once a reminder is sent; that is correct, and worth saying to a confused signer. |
+| **#28 finalization** | The confirmation page's promise of a sealed copy is kept by `EnvelopeFinalizer` ([`docs/evidence/finalization.md`](../evidence/finalization.md)): produced, validated, durably stored and published before any completion event. |
 
 ## One-time-code evidence
 

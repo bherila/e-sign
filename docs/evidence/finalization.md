@@ -140,7 +140,8 @@ handled separately from a real failure precisely so a superseded attempt does no
 completed envelope into `finalization_failed`.
 
 There is also a database-level backstop: `artifacts` has a unique key on
-`(envelope_id, kind)`, and rows are only ever inserted in this transaction.
+`(envelope_id, kind, slot)` (`slot` is 0, or a set member's position for `executed_document`),
+and rows are only ever inserted in this transaction.
 
 ### Step 4 — failure
 
@@ -213,13 +214,15 @@ digest whose subject is unstated proves nothing.
 
 | Digest | Covers |
 |---|---|
-| `document_sha256` | the complete bytes of the reviewed document revision, as retained, and as every attestation binds it — **not** the executed PDF |
+| `document_sha256` | the complete bytes of the reviewed document revision, as retained, and as every attestation binds it — **not** the executed PDF. For a document set of two or more, the **set digest** instead: SHA-256 of the canonical `esign.document_set.v1` encoding of every member's review digest in order ([document-sets.md](../preparation/document-sets.md#what-an-acceptance-binds)) |
+| `document_sha256:<position>` | document sets only: the complete bytes of that member's reviewed revision, as retained |
 | `field_schema_sha256` | the canonical JSON of the field schema copied onto the envelope at creation, with its anchors resolved at send — the form every attestation binds. Recompute it with the reference (PHP) canonical form, `FieldSchemaDocument::canonicalJson()`: for a 1.0 schema a JavaScript encoder can spell a number differently ([field-schema.md](../preparation/field-schema.md#precision-is-refused-from-11-and-rounded-in-10)) |
 | `material_values_sha256` | the canonical encoding of the shared agreement content only; signer-specific values are excluded by design |
 | `field_value_sha256:<id>` | the canonical JSON encoding of one stored field value |
 | `attestation_sha256:<id>` | one acceptance: envelope and recipient ids, the document/schema/material digests, the consent version displayed, the session it was given in, the server acceptance time, the verification method, minimized client evidence, and the previous acceptance's digest |
 | `artifact_sha256:executed_pdf` | the complete published bytes of the sealed executed PDF, computed **outside** that PDF |
 | `artifact_sha256:completion_report` | the complete published bytes of the standalone report |
+| `artifact_sha256:executed_document:<position>` | document sets only: the complete published bytes of that member's own sealed copy |
 | `seal_certificate_sha256` | the DER of the certificate the CMS verified against |
 
 An object store's ETag is never any of these. An ETag is a transfer checksum whose algorithm
@@ -242,11 +245,15 @@ the completion page bound into that PDF. Both would be self-referential.
 the file: the document is written and durably stored *before* publication, so a publication
 time inside it would be a prediction.
 
-## The three artifacts
+## The artifacts
+
+Three for every envelope, plus one `executed_document` per member when the envelope is over a
+document set of two or more ([document-sets.md](../preparation/document-sets.md#what-finalization-publishes)):
 
 | Kind | Format | What it is |
 |---|---|---|
 | `executed_pdf` | PDF | the reviewed revision with every field value drawn on it, the completion report appended, sealed under the service certificate |
+| `executed_document` | PDF | document sets only, one per member (`slot` = its position): that document's pages with its fields drawn, the completion report appended, sealed and validated like `executed_pdf` |
 | `completion_report` | PDF | the same report content on its own, for a reader who should not have to open the agreement |
 | `evidence_json` | JSON | the canonical machine record: `evidence_version: 1`, every digest and what it covers, the attestation chain, the distinct timestamps, and an explicit list of limitations |
 

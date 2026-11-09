@@ -203,13 +203,15 @@ A digest whose subject is unstated proves nothing, so each is named:
 
 | Digest | Covers |
 |---|---|
-| `document_sha256` | the complete bytes of the reviewed document revision as retained, and as every attestation binds it — **not** the executed PDF |
+| `document_sha256` | the complete bytes of the reviewed document revision as retained, and as every attestation binds it — **not** the executed PDF. For a document set of two or more, the **set digest** instead: SHA-256 of the canonical `esign.document_set.v1` encoding of every member's review digest in order ([document-sets.md](preparation/document-sets.md#what-an-acceptance-binds)) |
+| `document_sha256:<position>` | document sets only: the complete bytes of that member's reviewed revision, as retained |
 | `field_schema_sha256` | the canonical JSON of the field schema copied onto the envelope at creation, with its anchors resolved at send — the form every attestation binds |
 | `material_values_sha256` | the canonical encoding of the shared agreement content; signer-specific values are excluded by design |
 | `field_value_sha256:<id>` | the canonical JSON encoding of one stored field value |
 | `attestation_sha256:<id>` | one acceptance — envelope and recipient ids, the document/schema/material digests, the consent version displayed, the session it was given in, the server acceptance time, the verification method, minimized client evidence, and the previous acceptance's digest |
 | `artifact_sha256:executed_pdf` | the complete published bytes of the sealed executed PDF, computed **outside** that PDF |
 | `artifact_sha256:completion_report` | the complete published bytes of the standalone report |
+| `artifact_sha256:executed_document:<position>` | document sets only: the complete published bytes of that member's own sealed copy |
 | `seal_certificate_sha256` | the DER of the certificate the CMS verified against |
 
 Three points that are easy to get wrong and are pinned by tests:
@@ -234,7 +236,7 @@ identity proof** and nothing in the pipeline treats them as any.
 
 | Tool | What it is run against | What it establishes |
 |---|---|---|
-| **pyHanko 0.37.0** (+ `pyhanko-cli` 0.5.0), in the `validation` CI job via `scripts/validate-seal.sh` | every committed synthetic artifact in `tests/Fixtures/validation/`, **resealed first** | the CMS verifies over the byte-ranged content, the signer's certificate chains to a configured anchor, and the signature covers the whole file |
+| **pyHanko** (+ `pyhanko-cli`; the current release, unpinned, so validator fixes are picked up), in the `validation` CI job via `scripts/validate-seal.sh` | every committed synthetic artifact in `tests/Fixtures/validation/`, **resealed first** | the CMS verifies over the byte-ranged content, the signer's certificate chains to a configured anchor, and the signature covers the whole file |
 | **European Commission DSS 6.5**, in the `pades-profile` CI job via `scripts/validate-pades-profile.sh` | the same artifacts, **committed bytes, not resealed**, against `tests/Fixtures/validation/pades-profile-manifest.tsv`; the two seal-key rotation artifacts under **both** anchors | which ETSI EN 319 142-1 baseline profile each signature actually satisfies — reported as a `SignatureLevel` — plus DSS's own AdES conclusion and a separate conclusion per timestamp token |
 | **`ArtifactValidator`** (in-process, tc-lib-pdf) | the sealer's own output, before it is returned | the produced artifact reaches the level that was requested; below it, `SealFailedException` |
 

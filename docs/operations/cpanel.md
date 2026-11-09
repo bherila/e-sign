@@ -10,7 +10,7 @@ qualification and is not repeated in full below.
 
 ## Prerequisites
 
-- **PHP 8.4 or newer**, on **both** the CLI binary (`php artisan …`) and the account's web vhost
+- **PHP 8.5 or newer**, on **both** the CLI binary (`php artisan …`) and the account's web vhost
   handler — they are not automatically the same version on a cPanel account, and a mismatch is
   the single most common cause of "the deploy pipeline reported success but the site 500s."
   The shared deployment action verifies the live handler; `htaccess-append.txt` supplies the

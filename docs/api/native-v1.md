@@ -218,7 +218,7 @@ returned whole and still carry `meta.next_cursor: null`, so one paging loop work
 | `GET` | `/me` | — | Credential, workspace, scopes. |
 | `GET` | `/templates` | `templates:read` | Paginated. Published versions only. |
 | `GET` | `/templates/{template}` | `templates:read` | With the published version history. |
-| `POST` | `/envelopes` | `envelopes:write` | From a template version **or** a document + field schema. |
+| `POST` | `/envelopes` | `envelopes:write` | From a template version, **or** a document (`document_id`) or document set (`document_ids`) + field schema. |
 | `GET` | `/envelopes/{envelope}` | `envelopes:read` | The polling endpoint. |
 | `PATCH` | `/envelopes/{envelope}` | `envelopes:write` | Drafts only: prefills and contact corrections. |
 | `POST` | `/envelopes/{envelope}/send` | `envelopes:write` | Issues the invitations. |
@@ -262,8 +262,11 @@ anything is persisted, so the envelope, its recipients, and their identity snaps
 the first row written. An id the schema does not declare is `422 unknown_recipient`, never
 quietly ignored.
 
-The alternative source is `document_id` plus the `field_schema` to place on it. Sending both,
-or neither, is a `422`.
+The alternative source is a document plus the `field_schema` to place on it: `document_id` for
+one document, or `document_ids` for a set of 2 to 20, in order, with fields placed on absolute
+page numbers across the set ([`docs/preparation/document-sets.md`](../preparation/document-sets.md)).
+Exactly one of `template_version_id`, `document_id` or `document_ids` is required; sending more
+than one, or none, is a `422`.
 
 `expires_in_hours` is the one field where absent and null differ: omit it for the seven-day
 default, or send `null` for an envelope that never expires.
@@ -332,7 +335,8 @@ PDF. The seam is `App\Domain\Integration\Native\ArtifactLocator`; it is bound to
 completion has been asserted over, so it is invisible here rather than filtered later.
 
 A completed envelope publishes three artifacts: `executed_pdf`, `completion_report` and
-`evidence_json`. `sha256` on each is the digest finalization computed and then re-read through
+`evidence_json`. An envelope over a document set also publishes one `executed_document` per
+member, its own sealed copy, carrying the member's `document_position`. `sha256` on each is the digest finalization computed and then re-read through
 the storage adapter before writing the row — a recorded fact, never a fresh measurement of
 whatever is on the disk today, which is what makes it worth comparing against the completion
 event.

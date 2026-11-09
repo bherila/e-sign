@@ -26,14 +26,15 @@ gating the rest by touched path:
 
 | Job | Runs when | What it does |
 |---|---|---|
-| `test` | frontend or backend changed | PHP 8.4 **and** 8.5. Frontend: `tsc --noEmit`, `oxlint --type-aware`, `jest`. Backend: `pint --parallel --test`, then `composer test` (`artisan test --parallel`, the `Unit`, `Feature` and `EndToEnd` suites on in-memory SQLite). |
+| `test` | frontend or backend changed | PHP 8.5 (the supported runtime; `composer.json` requires `^8.5`). Frontend: `tsc --noEmit`, `oxlint --type-aware`, `jest`. Backend: `pint --parallel --test`, then `composer test` (`artisan test --parallel`, the `Unit`, `Feature` and `EndToEnd` suites on in-memory SQLite). |
 | `database` | backend changed | `php artisan migrate --force` and the feature suite against disposable **MySQL 8.4**, **MariaDB 11.4**, and **MariaDB 10.6** service containers, PHP 8.5. |
 | `licenses` | dependency manifests changed | Production-only installs, `composer licenses` + `pnpm licenses`, checked against an allowlist; builds and uploads an SBOM. Not a vulnerability check. |
 | `compose-e2e` | frontend, backend or Docker changed | The production image's web and worker roles against MySQL 8.4 and Garage: one agreement signed end to end over HTTP, the worker killed mid-finalization and recovered, the sealed PDF verified from Garage (`scripts/e2e/compose-smoke.sh`). |
 | `audit` | dependency manifests changed, **and weekly on a schedule** | `composer audit` + `pnpm audit`, checked against `.audit-allowlist.json` by `scripts/check-audit.php`. Scheduled as well as diff-gated, because an advisory database gains entries after a merge rather than when a lock file changes. |
-| `image` | backend, frontend, or docker changed | Builds the production image and smoke-tests the **web** role (`/up`, then `esign-healthcheck`) and **role dispatch** (`artisan`, `worker --stop-when-empty`), with `APP_ENV=production APP_DEBUG=false`. |
-| `validation` | backend or docker changed | PHP 8.4, installs pyHanko 0.37 + `pyhanko-cli`, runs `scripts/validate-seal.sh --regenerate` over every committed artifact against `tests/Fixtures/validation/manifest.tsv`. Uploads the validator output. |
+| `image` | backend, frontend, or docker changed | Builds the production image and smoke-tests the **web** role (`/up`, then `esign-healthcheck`), document isolation under FPM, **role dispatch** (`artisan`, `worker --stop-when-empty`) and the **scheduler** role, with `APP_ENV=production APP_DEBUG=false`; then checks the production Compose example's key-mount and hardening contract. |
+| `validation` | backend or docker changed | PHP 8.5, installs the current pyHanko + `pyhanko-cli` (unpinned, so a validator release is picked up), runs `scripts/validate-seal.sh --regenerate` over every committed artifact against `tests/Fixtures/validation/manifest.tsv`. Uploads the validator output. |
 | `pades-profile` | backend or docker changed | Temurin JDK 21, runs `scripts/validate-pades-profile.sh`: European Commission **DSS 6.5** over the committed artifact bytes (no resealing, no PHP), matched against `tests/Fixtures/validation/pades-profile-manifest.tsv` on level *and* conclusion. A separate job from `validation` on purpose, so a JVM or Maven Central problem cannot mask a pyHanko regression. Uploads DSS's reports. |
+| `auth-manager-integration` | backend changed | auth-manager's real delegated-access transport, from its `main` branch, against this commit over HTTPS, each on its own database in one disposable MySQL container (`docs/operations/delegated-access.md`). |
 | `result` | always | Aggregating gate; fails if any of the above failed or was cancelled. |
 
 `deploy.yml` (cPanel, off until `DEPLOY_ENABLED`) runs the suite, then calls the pinned shared
@@ -145,7 +146,7 @@ and PHP schema contracts agree.
 > Wrong-order, duplicate, stale, cancelled/expired, concurrent signer, and finalize/cancel races
 > preserve invariants. Required fields and consent cannot be bypassed.
 
-`EnvelopeTransitionMatrixTest` attempts all 79 illegal transitions and asserts the code table
+`EnvelopeTransitionMatrixTest` attempts all 95 illegal transitions and asserts the code table
 matches `docs/signing/state-machine.md`. `EnvelopeRaceTest` covers cancel-vs-signature in both
 directions, complete-vs-fail finalization, expiry losing to a completed finalization, and two
 parallel signers. `EnvelopeSigningOrderTest` covers wrong order, stage activation, a signed
@@ -154,9 +155,10 @@ material and stale version in both directions, consent substitution, required fi
 in this branch — a required checkbox stored as `false`, a required text field of whitespace, and
 acceptance after `expires_at`.
 
-Two residuals are open and named in [`review-2026-09.md`](review-2026-09.md): S-5 (`updateDraft`
-races `send` without a lock) and S-6 (a genuinely concurrent double-accept reports a stale
-review rather than a replay).
+One residual is open and named in [`review-2026-09.md`](review-2026-09.md): S-6 (a genuinely
+concurrent double-accept reports a stale review rather than a replay). S-5 (`updateDraft` racing
+`send`) is fixed and pinned by
+`EnvelopeRaceTest::test_a_recipient_correction_read_before_send_cannot_rewrite_the_invited_address`.
 
 ### 6. Artifact durability — **proven**
 
@@ -224,7 +226,7 @@ deduplicates.
 
 | Surface | Proof |
 |---|---|
-| IDs, slugs, autoincrement ids, route binding, memberships, service credentials | `tests/Feature/Identity/CrossWorkspaceIsolationTest.php` (13 cases) |
+| IDs, slugs, autoincrement ids, route binding, memberships, service credentials | `tests/Feature/Identity/CrossWorkspaceIsolationTest.php` (14 cases) |
 | Native API: envelopes, templates and versions, a body-supplied `document_id`, webhook endpoints, events, `/me` | `tests/Feature/Integration/Native/NativeApiIsolationTest.php` |
 | Scope matrix over the whole `/api/v1` route surface, each route with a credential holding every *other* scope | `tests/Feature/Integration/Native/NativeApiAuthTest.php` |
 | Documents, templates, and editor routes | `DocumentHttpTest`, `TemplateHttpTest`, `FieldEditorPageTest` — each asserts another workspace's resource is a 404 |
@@ -280,13 +282,13 @@ identifier ([`review-2026-09.md`](review-2026-09.md) G-3).
 
 | Part | Status |
 |---|---|
-| PHP 8.4 **and** 8.5 | proven — the `test` job matrix |
+| PHP 8.5 | proven — the `test` job |
 | MySQL 8.4, MariaDB 11.4, MariaDB 10.6: migrations and the whole feature suite | proven — the `database` job |
 | Cron-driven bounded queue work with a database lease | proven — `WorkBoundedCommandTest`, `WorkerLeaseManagerTest` |
 | No remote signing service in the path | proven by construction — sealing is in-process; the only outbound calls are the TSA and webhooks, both through `DestinationPolicy` |
 | Docker image builds; web role answers `/up` and `esign-healthcheck`; role dispatch works | proven — the `image` job |
 | cPanel runtime diagnostics | proven — `DoctorCommandTest`, `PhpRuntimeProbeTest`, `WebPhpVersionProbeTest`, `ResourceLimitsProbeTest`, `WritablePathsProbeTest` |
-| The functional flow such a smoke test would run — authenticate with a service credential, prepare, invite, sign, seal, download, validate, deliver a **verified** webhook, and recover after a worker interruption — end to end, on both PHP versions and all three database engines | proven — `tests/EndToEnd/` (25 cases), which runs inside the `test` and `database` jobs. Finalization is now started by the application rather than by the harness ([#94](https://github.com/bherila/e-sign/issues/94)); the suite asserts the job was queued and then runs it, as a worker would. |
+| The functional flow such a smoke test would run — authenticate with a service credential, prepare, invite, sign, seal, download, validate, deliver a **verified** webhook, and recover after a worker interruption — end to end, on PHP 8.5 and all three database engines | proven — `tests/EndToEnd/` (25 cases), which runs inside the `test` and `database` jobs. Finalization is now started by the application rather than by the harness ([#94](https://github.com/bherila/e-sign/issues/94)); the suite asserts the job was queued and then runs it, as a worker would. |
 | **That same flow on a deployment profile** | **Docker: proven; cPanel: not proven.** The `compose-e2e` job (issue [#37](https://github.com/bherila/e-sign/issues/37), `scripts/e2e/compose-smoke.sh`) runs the production image's web and worker roles against MySQL 8.4 and Garage, creates and sends one agreement through the Firma facade, signs it as the guest over HTTP with CSRF and cookies, kills the worker with SIGKILL while it is inside the finalization job, recovers it with a fresh worker and `esign:finalization:resume`, and requires exactly one executed PDF whose download hashes to the published digest and whose every artifact `esign:artifacts:verify` re-reads from Garage and re-validates. It found that the worker role served only the `default` queue, so mail was never sent in a Docker deployment; fixed in the same change. The cPanel path has `scripts/build-release.sh` and a runbook but no automated smoke test. |
 | **A host without pcntl / process-spawning** | **not proven** — claimed support, no CI entry |
 
@@ -347,7 +349,7 @@ consumer).
 | The same discrimination, on a second independent validator, plus the fact that a rotation does not change the artifacts' profile: DSS reports `PAdES_BASELINE_B` for both rotation artifacts under **either** anchor, and `TOTAL_PASSED` only under the artifact's own | proven — `pades-profile` job, `tests/Fixtures/validation/pades-profile-manifest.tsv`, and [`docs/stage0/pades-profile.md`](../stage0/pades-profile.md) §3.1 |
 | A deployment that can no longer resolve an artifact's seal key id says so rather than passing quietly | proven — `esign:artifacts:verify` counts it as `unresolvable_keys` and exits non-zero; the `signing_material` probe fails; both pinned in `SealRotationDrillTest` |
 | New material is checked before the environment changes, and material that would produce unattributable artifacts is refused | proven — `esign:seal:rotate` (`App\Domain\Evidence\Sealing\Console\RotateSealCommand`), `SealRotationDrillTest` |
-| Webhook backlog visible and replayable; a disabled endpoint is a visible state | proven — `WebhookConsoleTest`, `WebhookBacklogProbeTest`, `esign:webhooks:replay` |
+| Webhook backlog visible and replayable; a disabled endpoint is a visible state | proven — `WebhookConsoleTest`, `WebhookBacklogProbeTest`, `esign:webhook:replay` |
 | Mail backlog visible and resendable | proven — `MailConsoleCommandTest`, `MailBacklogProbeTest` |
 | Pending finalization visible, and started | proven — `finalization_runs`, the `finalization_backlog` probe, and `esign:finalization:resume`, which re-dispatches a finalization whose queued job never ran; `FinalizationBacklogProbeTest`, `FinalizationResumeCommandTest` |
 | **A restore drill exercised against a real backup on real infrastructure** | **not proven** — the runbook exists (`docs/operations/backups.md`); the drill has not been run |
@@ -375,12 +377,11 @@ Ordered by what a first production use would most want closed.
 
 | Gap | Gate | Owner |
 |---|---|---|
-| No end-to-end smoke test on either deployment *profile* (the functional flow itself is now covered by `tests/EndToEnd/`) | 11 | [#38](https://github.com/bherila/e-sign/issues/38) |
+| No end-to-end smoke test on the cPanel deployment profile (Docker is covered by the `compose-e2e` job; the functional flow itself by `tests/EndToEnd/`) | 11 | [#38](https://github.com/bherila/e-sign/issues/38) |
 | Object-stream bodies are parsed in a nested parser instance that does not charge the preflight budget (residual of U-1; covered by the time and memory backstops) | 3 | new — [`review-2026-09.md`](review-2026-09.md) U-1 |
 | The hazard scan fails open past depth 32, and on a null-resolving xref entry | 3 | new — [`review-2026-09.md`](review-2026-09.md) U-3, U-4 |
 | **No static analysis beyond formatting and `tsc`** (the `composer audit` / `pnpm audit` half of [`review-2026-09.md`](review-2026-09.md) X-13 landed as the `audit` job) | all | new — [`review-2026-09.md`](review-2026-09.md) X-13 |
 | `publish()` does not re-check object presence before committing | 6 | new — [`review-2026-09.md`](review-2026-09.md) B-2 |
-| `updateDraft()` races `send()` without a lock | 5 | [#33](https://github.com/bherila/e-sign/issues/33) |
 | No browser-driven accessibility or mobile check | 15 | new |
 | Egress is blocked at the process level, not the network level | 12 | new — see the caveat under gate 12 |
 | Real browser SSO callback; entitlement re-check window | 9 | [#44](https://github.com/bherila/e-sign/issues/44) |
