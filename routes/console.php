@@ -4,6 +4,7 @@ use App\Domain\Delivery\Events\Console\ExpireCommand;
 use App\Domain\Delivery\Events\Console\RemindCommand;
 use App\Domain\Delivery\Health\SchedulerHeartbeat;
 use App\Domain\Evidence\Finalization\Console\ResumeCommand;
+use App\Domain\Evidence\Sealing\Readiness\AttestSealReadiness;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -108,3 +109,14 @@ Schedule::command(ResumeCommand::class)
     ->everyFiveMinutes()
     ->withoutOverlapping()
     ->name('finalization:resume');
+
+/*
+ * Seal readiness, re-checked on the worker (issue #37). Only where the key is mounted into the
+ * worker alone (`ESIGN_SEAL_READINESS=attested`): queued, so the worker that holds the key runs
+ * it, and every five minutes, inside the send gate's fifteen-minute freshness window.
+ */
+if (config('esign.seal.readiness') === 'attested') {
+    Schedule::job(new AttestSealReadiness)
+        ->everyFiveMinutes()
+        ->name('seal:attest');
+}

@@ -192,6 +192,22 @@ return [
         'digest_algorithm' => env('ESIGN_SEAL_DIGEST_ALGORITHM', 'sha256'),
 
         /*
+        | How the send gate learns that the seal material is usable (issue #37).
+        |
+        | `local` (default): the process that sends opens the material itself.
+        | Right wherever every role shares one filesystem (cPanel, a single host).
+        |
+        | `attested`: the worker, the only role the key is mounted into in the
+        | Docker layout, opens it and records the outcome
+        | (`esign:seal:attest`, at worker start and every five minutes on the
+        | queue). The send gate accepts that record only while it is fresh and
+        | the certificate is still valid; anything else refuses to send.
+        | docs/operations/deploy-docker.md, "Seal readiness".
+        */
+        'readiness' => env('ESIGN_SEAL_READINESS', 'local') === 'attested' ? 'attested' : 'local',
+        'readiness_max_age_minutes' => max(1, (int) env('ESIGN_SEAL_READINESS_MAX_AGE_MINUTES', 15)),
+
+        /*
         | Certificates of key versions this deployment has retired.
         |
         | Sealing always uses the active key above. Verification cannot: an

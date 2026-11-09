@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Domain\Evidence\Contracts\PdfSealer;
+use App\Domain\Signing\Assurance\AttestedSealAssurancePolicyCheck;
 use App\Domain\Signing\Assurance\ConfiguredSealAssurancePolicyCheck;
 use App\Domain\Signing\Assurance\SealMaterialAssurancePolicyCheck;
 use App\Domain\Signing\Contracts\AnchorResolution;
@@ -51,10 +52,14 @@ final class SigningServiceProvider extends ServiceProvider
 
         $this->app->bind(
             AssurancePolicyCheck::class,
-            fn (Application $app): AssurancePolicyCheck => new SealMaterialAssurancePolicyCheck(
-                new ConfiguredSealAssurancePolicyCheck($app->make('config')),
-                $app->make(PdfSealer::class),
-            ),
+            // `attested`: the key is mounted into the worker alone (Docker), which records what
+            // it finds; the sending process trusts that record only while it is fresh (issue #37).
+            fn (Application $app): AssurancePolicyCheck => $app->make('config')->get('esign.seal.readiness') === 'attested'
+                ? new AttestedSealAssurancePolicyCheck($app->make('config'))
+                : new SealMaterialAssurancePolicyCheck(
+                    new ConfiguredSealAssurancePolicyCheck($app->make('config')),
+                    $app->make(PdfSealer::class),
+                ),
         );
     }
 }

@@ -43,6 +43,13 @@ case "$ROLE" in
         # Compose end-to-end job found exactly that (issue #37). ESIGN_WORKER_QUEUES overrides
         # the list for a deployment that splits queues across workers.
         queues="${ESIGN_WORKER_QUEUES:-${ESIGN_MAIL_QUEUE:-mail},${ESIGN_WEBHOOK_QUEUE:-default},default}"
+        # The worker is the only role the seal key is mounted into, so it is the one that can say
+        # whether the key is usable. Recorded for the web role's send gate when
+        # ESIGN_SEAL_READINESS=attested (issue #37); the scheduler re-queues the check every five
+        # minutes. A failure is a recorded reason, never a reason not to start.
+        if [ "${ESIGN_SEAL_READINESS:-local}" = "attested" ]; then
+            php artisan esign:seal:attest || echo "esign:seal:attest could not record seal readiness" >&2
+        fi
         exec php artisan queue:work --queue="$queues" --tries=3 --timeout=600 --sleep=3 --max-time=3600 "$@"
         ;;
     scheduler)

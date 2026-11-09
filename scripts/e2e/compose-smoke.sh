@@ -93,6 +93,7 @@ ESIGN_SEAL_CERTIFICATE_PATH=/keys/seal.test.crt
 ESIGN_SEAL_PRIVATE_KEY_PATH=/keys/seal.test.pkey
 ESIGN_SEAL_CHAIN_PATH=/keys/root.test.crt
 ESIGN_FINALIZATION_RESUME_AFTER_MINUTES=1
+ESIGN_SEAL_READINESS=attested
 ENV
 
 # --- 2. Release, roles, identities ---------------------------------------------------------
@@ -114,6 +115,15 @@ api_key=$(artisan esign:credential:issue --workspace=e2e --label='compose e2e' \
     --scope=compat:firma-v1 --scope=envelopes:read --scope=envelopes:write \
     | grep -oE 'esk_[A-Za-z0-9]+_[A-Za-z0-9]+' | head -1)
 [ -n "$api_key" ] || { echo "No credential was issued"; exit 1; }
+
+# The web role holds no key: it sends on the worker's attestation that the key is usable.
+attested=""
+for _ in $(seq 1 30); do
+    [ "$(sql "SELECT COUNT(*) FROM seal_readiness_attestations WHERE key_id='fixture-seal-2026-a'")" = 1 ] && { attested=1; break; }
+    sleep 1
+done
+[ -n "$attested" ] || { echo "The worker never attested seal readiness"; exit 1; }
+"${COMPOSE[@]}" exec -T esign test ! -e /keys/seal.test.pkey || { echo "The web role can see the private key"; exit 1; }
 
 # --- 3. Create, send, sign -------------------------------------------------------------------
 log "Creating and sending through the facade"

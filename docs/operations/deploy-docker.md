@@ -141,11 +141,30 @@ from the database. See [`backups.md`](backups.md).
 | `ESIGN_SEAL_CHAIN_PATH` | `/keys/seal-chain.pem`, optional. |
 | `ESIGN_SEAL_DIGEST_ALGORITHM` | `sha256`, `sha384`, or `sha512`. |
 | `ESIGN_SEAL_RETIRED_KEYS` | Certificates of key versions retired by an earlier rotation, so their artifacts stay verifiable. Blank until the first rotation. Comma-separated `key-id\|certificate-path[\|chain-path]`. **Certificates only.** |
+| `ESIGN_SEAL_READINESS` | **`attested` in this layout.** See "Seal readiness" below. |
+| `ESIGN_SEAL_READINESS_MAX_AGE_MINUTES` | Optional, default `15`: how old the worker's last check may be before the send gate stops trusting it. |
 
 `esign` and `esign-scheduler` receive these same variables (one shared env file) but never mount
 `/keys`, so the paths simply do not resolve there — `signing_material` in `/health/ready`
 correctly reports `fail` if a non-worker container is ever asked to seal, which cannot happen in
 the state machine but is a second line of defense.
+
+#### Seal readiness
+
+Before anybody is invited, the send gate refuses an assurance level the seal material cannot meet:
+absent, unreadable, expired, or a key that does not match its certificate (`docs/HANDOFF.md`
+section 9). The send happens in `esign`, which has no `/keys`, so it cannot open the material
+itself. With `ESIGN_SEAL_READINESS=attested` the worker does: `esign:seal:attest` runs when
+`esign-worker` starts and every five minutes on its queue (scheduled by `esign-scheduler`). It
+opens the material exactly as sealing would and records, in `seal_readiness_attestations`, the key
+id, the certificate's fingerprint and expiry, and for each assurance level either that it is
+available or why not. No key material or path is stored.
+
+`esign` sends only on a record for the configured `ESIGN_SEAL_KEY_ID` that is fresh (checked within
+`ESIGN_SEAL_READINESS_MAX_AGE_MINUTES`) and whose certificate is still valid. No record, a stale one
+(the worker is down, or the scheduler is), or one that names a reason is a refusal that says
+which. Leaving the setting at `local` in this layout means every send is refused, because the
+web role cannot read the key: that is the failure the Compose end-to-end job found (issue #37).
 
 ### RFC 3161 timestamp authority
 

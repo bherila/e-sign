@@ -11,7 +11,9 @@
 #     (including esign and esign-scheduler) ever sees signing key material; that is the whole
 #     point of running worker as a separate container. ESIGN_SEAL_CERTIFICATE_PATH,
 #     ESIGN_SEAL_PRIVATE_KEY_PATH, and ESIGN_SEAL_CHAIN_PATH in the env file must point under
-#     /keys (e.g. /keys/seal.crt), not somewhere else in the container.
+#     /keys (e.g. /keys/seal.crt), not somewhere else in the container. Set
+#     ESIGN_SEAL_READINESS=attested in the env file: the web role cannot open the key, so it sends
+#     on the worker's recorded check instead (docs/operations/deploy-docker.md, "Seal readiness").
 #   - Release steps (pull, migrate, restart, health-check) are documented in
 #     docs/operations/deploy-docker.md, run by the consumer's own pipeline, not by this file.
 #
