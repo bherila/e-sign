@@ -114,9 +114,9 @@ that one does; the bytes come from the download endpoint, authorized per request
 **No `first_name` / `last_name`.** This product stores one display name. Splitting it would
 be a guess about a person's name, and `docs/HANDOFF.md` §2 does not guess identity facts.
 
-**`designation` is always `Signer`.** There is no approver or CC concept here yet, and
-emitting a per-recipient authority that nothing enforces would be worse than emitting the
-constant that is true.
+**`designation` is the recipient's own**: `Signer`, `Approver` or `CC` (issue #169), the
+designation the state machine enforces. A CC recipient's `order` is its 1-based place among the
+envelope's CC recipients, since CC recipients take no part in the signing order.
 
 ## Links in messages
 

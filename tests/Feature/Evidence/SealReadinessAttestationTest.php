@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Evidence;
 
+use App\Domain\Delivery\Health\HealthStatus;
+use App\Domain\Delivery\Health\Probes\SigningMaterialProbe;
 use App\Domain\Evidence\Contracts\SealIdentity;
 use App\Domain\Evidence\Sealing\AssuranceLevel;
 use App\Domain\Evidence\Sealing\Readiness\AttestSealReadiness;
@@ -122,5 +124,34 @@ final class SealReadinessAttestationTest extends TestCase
         config(['esign.seal.readiness' => 'local']);
 
         $this->assertInstanceOf(SealMaterialAssurancePolicyCheck::class, app(AssurancePolicyCheck::class));
+    }
+
+    public function test_the_readiness_probe_in_a_process_without_the_key_reports_the_attestation(): void
+    {
+        app(SealReadinessAttester::class)->attest();
+        // The web role: same configuration, but /keys is not mounted.
+        config(['esign.seal.private_key_path' => '/nonexistent/keys/seal.pkey']);
+
+        $result = app(SigningMaterialProbe::class)->check();
+
+        $this->assertSame(HealthStatus::Ok, $result->status, $result->message);
+        $this->assertStringContainsString('as attested by the worker', $result->message);
+    }
+
+    public function test_the_readiness_probe_fails_without_a_fresh_attestation(): void
+    {
+        config(['esign.seal.private_key_path' => '/nonexistent/keys/seal.pkey']);
+        $this->assertSame(HealthStatus::Fail, app(SigningMaterialProbe::class)->check()->status);
+
+        app(SealReadinessAttester::class)->attest(CarbonImmutable::now()->subMinutes(16));
+        $this->assertSame(HealthStatus::Fail, app(SigningMaterialProbe::class)->check()->status);
+    }
+
+    public function test_the_readiness_probe_without_the_key_in_local_mode_still_fails(): void
+    {
+        app(SealReadinessAttester::class)->attest();
+        config(['esign.seal.readiness' => 'local', 'esign.seal.private_key_path' => '/nonexistent/keys/seal.pkey']);
+
+        $this->assertSame(HealthStatus::Fail, app(SigningMaterialProbe::class)->check()->status);
     }
 }

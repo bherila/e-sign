@@ -15,7 +15,7 @@ use App\Domain\Delivery\Health\ProbeResult;
  */
 final class PhpRuntimeProbe implements HealthProbe
 {
-    private const MINIMUM_VERSION = '8.4.0';
+    private const MINIMUM_VERSION = '8.5.0';
 
     private const REQUIRED_EXTENSIONS = [
         'pdo_mysql',

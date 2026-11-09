@@ -47,7 +47,11 @@ Four rules, each enforced in `TemplateService` and again at the model or in the 
 1. **A version snapshots a review revision, not a document.** It references
    `document_revisions.id` for a `review` revision of a `ready` document. Binding to the
    document would let a later upload change what the template means; architecture invariant 2
-   binds an acceptance to a specific immutable revision.
+   binds an acceptance to a specific immutable revision. A version over a **document set**
+   (issue #163: `additional_document_ids` after `document_id` when drafting) snapshots one
+   `review` revision per member, in order, in `template_version_documents`; its
+   `document_revision_id` is the first member's. A single-document version keeps no set rows.
+   See [document-sets.md](document-sets.md).
 2. **Publishing resolves the version's anchors, and then the version is never edited.**
    `published_at` is the lock. `TemplateVersion`
    refuses updates and deletes after it is set, with
@@ -74,7 +78,8 @@ both directions are audited (`preparation.template_retired` / `..._restored`).
 | Column | Contents |
 |---|---|
 | `version` | per-template counter from 1, unique with `template_id` |
-| `document_revision_id` | the `review` revision this version snapshots. `RESTRICT` |
+| `document_revision_id` | the `review` revision this version snapshots (for a document set, the first member's). `RESTRICT` |
+| `template_version_documents` rows | document sets only: `position`, `document_revision_id`, `title`, `sha256`, `page_count`, `first_page` for each member, unique on (`template_version_id`, `position`). `RESTRICT` |
 | `field_schema` | the canonical field schema document (`FieldSchemaDocument::canonicalJson()`, decoded) |
 | `field_schema_sha256` | digest of those canonical bytes |
 | `recipients` | the roles/placeholders from the same schema, with each one's signing stage |

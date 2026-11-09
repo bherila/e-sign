@@ -7,6 +7,7 @@ namespace App\Domain\Delivery\Health\Probes;
 use App\Domain\Delivery\Health\HealthProbe;
 use App\Domain\Delivery\Health\ProbeResult;
 use App\Domain\Evidence\Sealing\Exceptions\SealingException;
+use App\Domain\Evidence\Sealing\Readiness\SealReadinessAttestation;
 use App\Domain\Evidence\Sealing\SealCertificateDirectory;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\ConnectionInterface;
@@ -64,6 +65,10 @@ final class SigningMaterialProbe implements HealthProbe
             return ProbeResult::warn($this->name(), 'Signing certificate/key are not configured.');
         }
 
+        if (! is_readable($privateKeyPath) && config('esign.seal.readiness') === 'attested') {
+            return $this->fromAttestation();
+        }
+
         if (! is_readable($privateKeyPath)) {
             return ProbeResult::fail($this->name(), 'Signing private key is not readable.');
         }
@@ -115,6 +120,71 @@ final class SigningMaterialProbe implements HealthProbe
             $active,
             $daysRemaining,
             $retired,
+        ));
+    }
+
+    /**
+     * The worker's account of the material, for a process the key is not mounted into.
+     *
+     * `ESIGN_SEAL_READINESS=attested` (issue #37): in the Docker layout the web role never sees
+     * `/keys`, so opening the material here would always fail and fail every release's readiness
+     * check. The answer comes instead from the record the worker keeps fresh, judged as the send
+     * gate judges it: the configured key id, checked within the readiness window, a certificate
+     * still valid. The rotation half (every published key id resolvable) needs the certificates,
+     * so it is left to the worker's own `esign:doctor` and `esign:artifacts:verify`.
+     */
+    private function fromAttestation(): ProbeResult
+    {
+        $keyId = (string) config('esign.seal.key_id', '');
+
+        if ($keyId === '') {
+            return ProbeResult::fail($this->name(), 'The service seal key id is not configured.');
+        }
+
+        try {
+            $attestation = SealReadinessAttestation::query()->where('key_id', $keyId)->first();
+        } catch (Throwable) {
+            // DatabaseProbe reports an unreachable database; this is only its consequence.
+            return ProbeResult::fail($this->name(), 'The worker\'s seal readiness record could not be read.');
+        }
+
+        if (! $attestation instanceof SealReadinessAttestation) {
+            return ProbeResult::fail($this->name(), "The worker has not yet checked seal key id {$keyId}.");
+        }
+
+        $now = CarbonImmutable::now();
+        $maxAge = (int) config('esign.seal.readiness_max_age_minutes', 15);
+
+        if ($attestation->checked_at->lessThan($now->subMinutes($maxAge))) {
+            return ProbeResult::fail($this->name(), sprintf(
+                'The worker last checked seal key id %s at %s, more than %d minute(s) ago.',
+                $keyId,
+                $attestation->checked_at->toIso8601String(),
+                $maxAge,
+            ));
+        }
+
+        if ($attestation->material_error !== null) {
+            return ProbeResult::fail($this->name(), "The worker reports seal key id {$keyId} unusable: {$attestation->material_error}");
+        }
+
+        $expiresAt = $attestation->certificate_not_after;
+
+        if ($expiresAt === null || $expiresAt->lessThanOrEqualTo($now)) {
+            return ProbeResult::fail($this->name(), "Signing certificate (key id {$keyId}) has expired.");
+        }
+
+        $daysRemaining = (int) $now->diffInDays($expiresAt, false);
+
+        if ($daysRemaining < (int) config('esign.health.cert_warn_days', 30)) {
+            return ProbeResult::warn($this->name(), "Signing certificate (key id {$keyId}) expires in {$daysRemaining} day(s), as attested by the worker.");
+        }
+
+        return ProbeResult::ok($this->name(), sprintf(
+            'Signing certificate (key id %s) expires in %d day(s), as attested by the worker at %s.',
+            $keyId,
+            $daysRemaining,
+            $attestation->checked_at->toIso8601String(),
         ));
     }
 

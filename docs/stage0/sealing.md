@@ -22,7 +22,7 @@ Measured on the run that produced the committed artifacts.
 | `tecnickcom/tc-lib-pdf` | 8.73.6 | LGPL-3.0-or-later |
 | `tecnickcom/tc-lib-pdf-sign` | 2.0.3 | LGPL-3.0-or-later |
 | `tecnickcom/tc-lib-pdf-parser` | 3.15.2 | LGPL-3.0-or-later |
-| PHP | 8.5.10 (CI floor 8.4) | — |
+| PHP | 8.5.10 (CI floor 8.4 at the time; 8.5 since issue #155) | — |
 | PHP OpenSSL | OpenSSL 3.6.3 | — |
 | pyHanko | 0.37.0 | MIT |
 | `pyhanko-cli` | 0.5.0 | MIT |
@@ -341,6 +341,10 @@ flaky crypto.
    `SealMaterial::$notAfter`; a rotation procedure that preserves verification of old
    artifacts by key id; and a compromise response. A single-account shared host cannot
    isolate the key from application PHP, and the deployment documentation has to say so.
+   *Since addressed:* [`docs/operations/seal-key-management.md`](../operations/seal-key-management.md)
+   covers custody, expiry monitoring, `esign:seal:rotate` with verification by key id, and
+   compromise response; the Docker layout mounts the key into the worker alone, and the web role
+   sends on the worker's seal readiness attestation (issue #37).
 4. **No CA-issued certificate.** Per
    [`ADR 0003`](../adr/0003-seal-material-and-timestamp-authority.md) the first release
    seals with a self-issued certificate. Artifacts are cryptographically verifiable, and
@@ -376,7 +380,8 @@ scripts/validate-seal.sh --regenerate
 scripts/validate-pades-profile.sh
 ```
 
-The `validation` CI job runs the last command on every change under the backend or docker
+The `validation` CI job runs `scripts/validate-seal.sh --regenerate` (and the `pades-profile` job
+runs `scripts/validate-pades-profile.sh`) on every change under the backend or docker
 filters. When no timestamp authority answers, the B-T rows stay in the manifest and the script
 reports them as `SKIPPED`, counts them in its own tally (`Checked N; M skipped`), and emits a
 `::warning::` plus a job-summary note. Listing them either way is the point: an artifact simply

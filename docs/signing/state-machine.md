@@ -68,7 +68,7 @@ renames or removes a draft's document (issue #182; docs/preparation/document-set
 rows, the first document, the digest an acceptance will bind and every field's absolute page move
 in one compare-and-swap. `update` corrects a draft recipient's
 name or address (and the identity snapshot beside them) under the envelope lock, so it cannot
-race a `send` (S-5). `submit_values` and `set_sender_values` write field values; all three
+race a `send` (S-5). `submit_values` and `set_sender_values` write field values. All four
 advance the envelope's `version`; `submit_values` also moves `sent` to
 `in_progress`, because `sent` stops being an accurate description the moment somebody acts.
 
@@ -311,7 +311,7 @@ argument rather than pretending to check it.
 |---|---|
 | **#25 guest access** | Landed. `sessionRef` is still an opaque string to this module, and it is now `signing_sessions.public_id`: `App\Domain\Signing\Sessions` issues, scopes, expires, and rotates the credential behind it, and keeps every GET harmless. See `docs/signing/guest-access.md`. |
 | **#26 capture and consent** | Landed. Typed and drawn adoption, the accessible default, controlled image re-encoding, and the consent notice live in `App\Domain\Signing\Capture` and `resources/js/signing`. `FieldValueValidator` still checks only that a value is the right *kind of thing*; nothing anywhere decides that a canvas represents intent. |
-| **#28 finalization** | Rendering, sealing, validation, digesting, upload, read-back, and publication. `markCompleted()` takes an `artifactRef` this module cannot verify, which is exactly why completion is something the finalizer asserts after the fact. The artifacts table, the generation id, and crash recovery live there. |
+| **#28 finalization** | Landed. Rendering, sealing, validation, digesting, upload, read-back, and publication live in `App\Domain\Evidence\Finalization` (`EnvelopeFinalizer`; see `docs/evidence/finalization.md`). `markCompleted()` still takes an `artifactRef` this module cannot verify, which is exactly why completion is something the finalizer asserts after the fact. The artifacts table, the generation id, and crash recovery live there. |
 | **#29 webhook outbox** | Landed. `App\Domain\Delivery\Events\DeliveryEnvelopeEventSink` is the second sink, composed with the audit sink rather than replacing it, and `docs/delivery/envelope-events.md` maps every transition to its event and its mail. Nothing in this module changed: the outbox write is the same in-transaction database write the port already required, and mail is scheduled after commit by the Delivery module. `EnvelopeEventSinkTest` still asserts every name published here is one `WebhookEventName` would accept. |
 | **templates (#22)** | Landed. `EnvelopeSourceSnapshot::fromTemplateVersion()` maps `TemplateVersion::snapshotForEnvelope()` onto the snapshot this module accepts, translating the two keys the modules name differently. `envelopes.source_template_version_id` holds the version's public ULID and carries no foreign key: an envelope must survive the deletion of the version it came from. |
 

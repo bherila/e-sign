@@ -104,9 +104,9 @@ behaviour:
 - **Pagination and identifiers.** The native API pages with an opaque keyset cursor and
   reports public ULIDs. The facade reproduces whatever the profile documents.
 
-`ArtifactLocator` is the seam between this and finalization: the API is written against it and
-ships with `NoArtifactsYetLocator`, so artifact routes fail closed until a real locator is
-bound.
+`ArtifactLocator` is the seam between this and finalization: the API is written against it, and
+it is bound to `FinalizedArtifactLocator`, which serves only artifacts whose completion has been
+published (`published_at` set). Anything else is invisible to the artifact routes.
 
 ## Deployment shape
 

@@ -365,35 +365,55 @@ and this document is not going to say otherwise.
 
 ### Docker — mount the key into the worker only
 
-The same image runs three roles: web, queue worker, scheduler. **Only the worker seals.** Mount
-the key material into that service and no other:
+The same image runs three roles: web, queue worker, scheduler, chosen by the entrypoint's role
+argument (`.docker/scripts/entrypoint.sh`). **Only the worker seals.** Mount the key material into
+that service and no other. Shape only; the complete file is
+[`docker-compose.prod.example.yml`](../../docker-compose.prod.example.yml), and every variable is
+in [deploy-docker.md](deploy-docker.md):
 
 ```yaml
 services:
-  web:
+  esign:
     image: esign
+    command: ["web"]
+    env_file: /etc/esign/esign.env
     # no seal material here
 
-  worker:
+  esign-worker:
     image: esign
-    command: php artisan queue:work
-    environment:
-      ESIGN_SEAL_KEY_ID: seal-2026-a
-      ESIGN_SEAL_CERTIFICATE_PATH: /run/secrets/esign-seal/2026-01/seal.crt
-      ESIGN_SEAL_PRIVATE_KEY_PATH: /run/secrets/esign-seal/2026-01/seal.key
-      # Certificates of retired generations. Empty until the first rotation; after one, this
-      # is what keeps the previous generation's artifacts verifiable. Certificates only.
-      ESIGN_SEAL_RETIRED_KEYS: ""
+    # The entrypoint's worker role: every queue the application uses (mail first), bounded,
+    # and `esign:seal:attest` at start. Do not replace it with a bare `php artisan queue:work`,
+    # which serves `default` only and never sends mail.
+    command: ["worker"]
+    env_file: /etc/esign/esign.env
     volumes:
       # Dated subdirectory from day one, so the first rotation adds a mount instead of
       # rearranging the ones that already exist.
       - /srv/esign-keys/2026-01:/run/secrets/esign-seal/2026-01:ro
 
-  scheduler:
+  esign-scheduler:
     image: esign
-    command: php artisan schedule:work
+    command: ["scheduler"]
+    env_file: /etc/esign/esign.env
     # no seal material here
 ```
+
+with, in the shared env file:
+
+```dotenv
+ESIGN_SEAL_KEY_ID=seal-2026-a
+ESIGN_SEAL_CERTIFICATE_PATH=/run/secrets/esign-seal/2026-01/seal.crt
+ESIGN_SEAL_PRIVATE_KEY_PATH=/run/secrets/esign-seal/2026-01/seal.key
+# Certificates of retired generations. Empty until the first rotation; after one, this is what
+# keeps the previous generation's artifacts verifiable. Certificates only.
+ESIGN_SEAL_RETIRED_KEYS=
+# The web role sends; it cannot open a key it never mounts, so it trusts the worker's fresh
+# record of the material instead (deploy-docker.md, "Seal readiness").
+ESIGN_SEAL_READINESS=attested
+```
+
+The paths resolve only in the worker. That is the point: the other roles read the same
+variables and find nothing at them.
 
 Rules that go with it:
 
@@ -403,10 +423,12 @@ Rules that go with it:
   That is the whole point of the split — it is worth more than any amount of care inside the
   application.
 - `esign:seal:status` run in the web container will report the material as unusable. That is
-  correct, and it is why the readiness probe's `signing_material` check is meaningful only in
-  the worker. The same applies to its rotation half: the web role cannot resolve any key id,
-  so it reports the missing material first and does not additionally report every artifact as
-  unattributable.
+  correct: run it in the worker. With `ESIGN_SEAL_READINESS=attested`, the readiness probe's
+  `signing_material` check in the web container reports the worker's attestation instead of
+  opening the key: `ok` while it is fresh, for the configured key id, and for a certificate
+  still valid; `fail` otherwise. Its rotation half (every published key id still resolvable)
+  needs the certificates, so it runs only where they are mounted: `esign:doctor` and
+  `esign:artifacts:verify` in the worker.
 - A retired generation's mount stays. It holds only a certificate once the private key has
   been destroyed, and removing it is what breaks verification of everything that key sealed.
 
