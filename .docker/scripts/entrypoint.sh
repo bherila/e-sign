@@ -36,7 +36,14 @@ case "$ROLE" in
     worker)
         # Bounded worker: exits after --max-time so the orchestrator restarts it with fresh code
         # and memory. Sealing jobs run here, so this is the only role that needs key material.
-        exec php artisan queue:work --tries=3 --timeout=600 --sleep=3 --max-time=3600 "$@"
+        #
+        # Every queue the application dispatches to, mail first so a notice never waits behind
+        # sealing (docs/delivery/mail.md). Without `--queue` a worker serves only `default`,
+        # and mail scheduling and sending, which go on ESIGN_MAIL_QUEUE, would never run: the
+        # Compose end-to-end job found exactly that (issue #37). ESIGN_WORKER_QUEUES overrides
+        # the list for a deployment that splits queues across workers.
+        queues="${ESIGN_WORKER_QUEUES:-${ESIGN_MAIL_QUEUE:-mail},${ESIGN_WEBHOOK_QUEUE:-default},default}"
+        exec php artisan queue:work --queue="$queues" --tries=3 --timeout=600 --sleep=3 --max-time=3600 "$@"
         ;;
     scheduler)
         exec sh -c 'while true; do php artisan schedule:run --no-interaction; sleep 60; done'

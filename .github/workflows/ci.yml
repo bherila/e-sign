@@ -84,6 +84,8 @@ jobs:
               - 'docker-compose.yml'
               - 'docker-compose.prod.example.yml'
               - 'scripts/refresh-base-image-digests.sh'
+              - 'scripts/e2e/**'
+              - 'tests/EndToEnd/compose/**'
             licenses:
               - 'composer.json'
               - 'composer.lock'
@@ -572,6 +574,35 @@ jobs:
           jq -e '[.services | to_entries[] | select(.value.ports != null) | .key] == ["esign"]' /tmp/compose.json
           jq -e '.services.esign.ports | all(.host_ip == "127.0.0.1")' /tmp/compose.json
 
+  compose-e2e:
+    name: Compose end-to-end (MySQL, Garage, worker interruption)
+    needs: changes
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true' || needs.changes.outputs.docker == 'true'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v3
+      - name: Build production target
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: .docker/Dockerfile
+          target: production
+          push: false
+          load: true
+          tags: bwh-esign:ci
+          cache-from: type=gha
+      # Issue #37: the production image, its web and worker roles, MySQL 8.4 and Garage for S3.
+      # One agreement is created and sent through the Firma facade, signed as the guest over
+      # HTTP, and finalized by a worker that is killed with SIGKILL inside the job; the product's
+      # own recovery must complete it exactly once, and the sealed PDF must verify from Garage.
+      # The database is the disposable one the Compose file starts; the release step migrates it.
+      - name: Run the Compose end-to-end smoke test
+        run: scripts/e2e/compose-smoke.sh
+        env:
+          ESIGN_IMAGE: bwh-esign:ci
+
   validation:
     name: Independent seal validation (pyHanko)
     needs: changes
@@ -828,7 +859,7 @@ jobs:
 
   result:
     name: CI result
-    needs: [changes, test, database, auth-manager-integration, licenses, audit, image, validation, pades-profile]
+    needs: [changes, test, database, auth-manager-integration, licenses, audit, image, compose-e2e, validation, pades-profile]
     if: always()
     runs-on: ubuntu-24.04-arm
     steps:
@@ -853,6 +884,9 @@ jobs:
             exit 1
           fi
           if [[ "${{ needs.image.result }}" == "failure" || "${{ needs.image.result }}" == "cancelled" ]]; then
+            exit 1
+          fi
+          if [[ "${{ needs['compose-e2e'].result }}" == "failure" || "${{ needs['compose-e2e'].result }}" == "cancelled" ]]; then
             exit 1
           fi
           if [[ "${{ needs.validation.result }}" == "failure" || "${{ needs.validation.result }}" == "cancelled" ]]; then

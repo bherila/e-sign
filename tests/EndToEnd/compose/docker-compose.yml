@@ -1,0 +1,57 @@
+# The Compose end-to-end job (issue #37): the production image, as its roles run in production,
+# against MySQL 8.4 and Garage for S3 — the same S3-compatible store the reference deployment
+# uses. Driven from outside by scripts/e2e/compose-smoke.sh; never deployed, never used locally
+# with real data. Every credential here is synthetic and protects a container on a CI runner.
+name: esign-e2e
+
+x-esign: &esign
+  image: ${ESIGN_IMAGE:-bwh-esign:ci}
+  # Written by scripts/e2e/compose-smoke.sh once Garage has issued the bucket key.
+  env_file:
+    - ./e2e.env
+  depends_on:
+    mysql:
+      condition: service_healthy
+    garage:
+      condition: service_started
+
+services:
+  mysql:
+    image: mysql:8.4@sha256:a81d043930e51745522bd5c430961cf8286f0a23f0a9a2a6e0108f7ea71b0902
+    environment:
+      MYSQL_DATABASE: esign
+      MYSQL_USER: esign
+      MYSQL_PASSWORD: esign-e2e-synthetic
+      MYSQL_ROOT_PASSWORD: esign-e2e-synthetic-root
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pesign-e2e-synthetic-root"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  garage:
+    image: dxflrs/garage:v2.5.0@sha256:677e5b758e4425a325b811c425c026bf35a4bf42f7ddbaa773de3f4fd779a5a5
+    volumes:
+      - ./garage.toml:/etc/garage.toml:ro
+
+  esign:
+    <<: *esign
+    command: ["web"]
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  # The only role with key material, as in docker-compose.prod.example.yml: the synthetic seal
+  # fixtures, read-only.
+  esign-worker:
+    <<: *esign
+    command: ["worker"]
+    volumes:
+      - ../../Fixtures/crypto:/keys:ro
+
+  # One-shot release step against the disposable database this file creates, as the production
+  # example's `esign-migrate` is.
+  esign-migrate:
+    <<: *esign
+    profiles: [release]
+    command: ["artisan", "migrate", "--force"]
+    restart: "no"

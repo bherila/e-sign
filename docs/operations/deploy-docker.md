@@ -86,6 +86,7 @@ independently of code deploys.
 | `SESSION_DOMAIN` | `null` — never a shared parent domain; see `AGENTS.md`. |
 | `SESSION_COOKIE` | Distinct per instance if multiple eSign instances share a domain. |
 | `QUEUE_CONNECTION` | `database`. No Redis in the production path. |
+| `ESIGN_WORKER_QUEUES` | Optional. The queues `esign-worker` serves, in priority order. Default: `ESIGN_MAIL_QUEUE` (`mail`), then `ESIGN_WEBHOOK_QUEUE` (`default`), then `default` — every queue the application dispatches to. Set it only to split queues across several workers, and then make sure every queue has one: a queue no worker serves is mail or finalization that silently never runs. Before issue #37 the worker served `default` alone, so mail was never scheduled or sent in a Docker deployment. |
 | `CACHE_STORE` | `database`. |
 
 ### Storage (documents; never local disk in production)
