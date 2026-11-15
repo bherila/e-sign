@@ -39,8 +39,7 @@ class OAuthLoginTest extends TestCase
     {
         parent::setUp();
 
-        // Restated in full: the package merges its own defaults shallowly, so an omitted key
-        // here would be blank rather than inherited.
+        // Restated in full to make the synthetic provider endpoints explicit.
         config(['bherila-auth.oauth_client' => [
             'provider' => self::ISSUER,
             'base_url' => self::BASE_URL,
@@ -355,11 +354,53 @@ class OAuthLoginTest extends TestCase
             ->assertNotFound();
         $this->postJson('/api/auth/reset-password', [])->assertNotFound();
         $this->post('/api/change-password')->assertNotFound();
+        $this->postJson('/api/auth/confirm-password', [])->assertNotFound();
         $this->postJson('/api/auth/two-factor/verify', [])->assertNotFound();
         $this->postJson('/api/auth/two-factor/resend', [])->assertNotFound();
         $this->getJson('/api/passkeys')->assertNotFound();
         $this->postJson('/api/passkeys/register/options', [])->assertNotFound();
         $this->postJson('/api/passkeys/auth/options', [])->assertNotFound();
+    }
+
+    public function test_explicitly_unverified_identity_is_refused_before_provisioning(): void
+    {
+        $this->fakeProvider(['email_verified' => false]);
+
+        $this->completeCallback()->assertForbidden();
+
+        $this->assertGuest();
+        $this->assertDatabaseCount('users', 0);
+        $this->assertDatabaseCount('identity_bindings', 0);
+        $this->assertDatabaseHas('auth_audit_log', [
+            'event' => AuthAuditLog::EVENT_LOGIN_FAILED,
+            'succeeded' => false,
+            'user_id' => null,
+            'email' => null,
+        ]);
+    }
+
+    public function test_unverified_identity_cannot_refresh_an_existing_binding(): void
+    {
+        $user = User::factory()->create(['name' => 'Preserved Operator', 'email' => 'preserved@example.test']);
+        IdentityBinding::create([
+            'user_id' => $user->getKey(), 'issuer' => self::ISSUER,
+            'subject' => self::SUBJECT, 'last_seen_at' => null,
+        ]);
+        $this->fakeProvider(['email_verified' => false]);
+
+        $this->completeCallback()->assertForbidden();
+
+        $this->assertGuest();
+        $this->assertSame('Preserved Operator', $user->fresh()->name);
+        $this->assertSame('preserved@example.test', $user->fresh()->email);
+        $this->assertNull($user->identityBindings()->sole()->last_seen_at);
+    }
+
+    public function test_verified_identity_is_admitted_and_missing_claim_remains_compatible(): void
+    {
+        $this->fakeProvider(['email_verified' => true]);
+        $this->completeCallback()->assertRedirect(route('dashboard'));
+        $this->assertAuthenticated();
     }
 
     // ------------------------------------------------------------------ helpers

@@ -52,6 +52,8 @@ jobs:
               - 'package.json'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
+              - 'patches/**'
+              - 'scripts/dependencies/**'
               - 'tsconfig*.json'
               - 'vite.config.*'
               - 'jest.config.*'
@@ -153,6 +155,10 @@ jobs:
       - name: Build frontend assets
         if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.backend == 'true'
         run: pnpm run build
+
+      - name: Verify dependency security contracts
+        if: needs.changes.outputs.frontend == 'true'
+        run: pnpm run test:dependency-security
 
       - name: Frontend checks
         if: needs.changes.outputs.frontend == 'true'

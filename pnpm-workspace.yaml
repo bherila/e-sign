@@ -1,4 +1,6 @@
 overrides:
+  minimatch: '^11.0.8'
+  '@tailwindcss/typography>postcss-selector-parser': '^6.1.5'
   glob: ">=10.5.0"
 
 # Dependencies whose install scripts may run. Everything else is blocked (pnpm default).
@@ -20,3 +22,7 @@ ignoredOptionalDependencies:
 
 minimumReleaseAgeExclude:
   - react-hook-form@7.90.0
+
+# Repair prototype assignment in the actual Jest consumer; retain the upstream version.
+patchedDependencies:
+  deepmerge@4.3.1: patches/deepmerge-4.3.1.patch

@@ -37,7 +37,7 @@ return [
     // two-factor, and passkeys are the standalone mode's supporting flows, and the
     // application owns the pages that call them. Nothing in SSO mode can use a local
     // password — there is no password login route, and the standalone controller refuses
-    // any user that has an identity binding — so these four route families follow the
+    // any user that has an identity binding — so these route families follow the
     // resolved auth mode automatically: enabled in standalone mode, disabled in SSO mode.
     // Override with ESIGN_LOCAL_AUTH_ROUTES=on|off; default is auto.
     'routes' => [
@@ -47,6 +47,7 @@ return [
         'passkeys' => $localAuthRoutesEnabled,
         'password_resets' => $localAuthRoutesEnabled,
         'change_password' => $localAuthRoutesEnabled,
+        'confirm_password' => $localAuthRoutesEnabled,
         'two_factor' => $localAuthRoutesEnabled,
     ],
 

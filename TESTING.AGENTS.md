@@ -67,3 +67,7 @@ values win over the shell environment even without touching the file), the job g
 and runs `php artisan test --configuration=phpunit.ci-db.xml --parallel`. Laravel's
 `ParallelTesting` creates one `esign_ci_test_test_{token}` database per paratest process, which
 the CI root user is permitted to do.
+
+## Focused local validation
+
+Use CI for full test suites, builds, full Pint/PHPStan and mutation/coverage runs. Locally run only small relevant tests and targeted formatting/lint. Required CI on the exact candidate commit is the merge gate.

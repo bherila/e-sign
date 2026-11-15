@@ -26,5 +26,6 @@ class LocalAuthRoutesOverrideTest extends TestCase
     {
         $this->postJson('/api/auth/forgot-password', ['email' => 'someone@example.test'])
             ->assertStatus(200);
+        $this->postJson('/api/auth/confirm-password', [])->assertUnauthorized();
     }
 }
