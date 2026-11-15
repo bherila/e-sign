@@ -54,6 +54,14 @@ class OAuthLoginController extends Controller
         // replayed callback finds nothing to compare against and is refused.
         $identity = $oauth->identityFromCallback($request);
 
+        // Refuse an explicitly unverified address before provisioning or refreshing a
+        // subject binding. Providers omitting the claim retain their legacy behavior.
+        if ($identity->emailVerified === false && (bool) config('bherila-auth.oauth_login.refuse_unverified_email', true)) {
+            $this->auditLoginFailed($request, null, null, 'Identity email not verified by provider', self::AUTH_METHOD);
+
+            abort(403, 'The identity provider has not verified this email address.');
+        }
+
         // Resolved on (issuer, subject). Never on the email address, however convenient the
         // provider has just made it.
         $user = $identities->resolve($identity);

@@ -52,6 +52,8 @@ return Application::configure(basePath: dirname(__DIR__))
         ListServiceCredentialsCommand::class,
     ])
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->authenticateSessions();
+
         // Service credentials are their own kind of principal (docs/HANDOFF.md section 10),
         // so these are aliases applied per route and never global middleware: most of the
         // application is for people, and an API caller has no session, no membership, and no

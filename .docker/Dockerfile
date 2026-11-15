@@ -85,6 +85,7 @@ RUN corepack enable && corepack prepare pnpm@11.5.0 --activate
 # pnpm-workspace.yaml carries install policy (overrides, allowBuilds); it must be present before install.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY scripts/spotlight-noindex.mjs ./scripts/
+COPY patches/ ./patches/
 RUN pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm run build
