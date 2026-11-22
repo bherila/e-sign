@@ -11,6 +11,8 @@ use BWH\Auth\Concerns\SignsOutThroughProvider;
 use BWH\Auth\Contracts\AuthUserPolicy;
 use BWH\Auth\OAuth\OAuthClient;
 use BWH\Auth\OAuth\ProviderApplications;
+use BWH\Auth\OAuth\Session\ProviderSession;
+use BWH\Auth\OAuth\Session\ProviderStatusUnavailable;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -84,6 +86,23 @@ class OAuthLoginController extends Controller
 
         Auth::login($user);
         $request->session()->regenerate();
+
+        // The provider credential generation this login was made under: the baseline every
+        // later RequireActiveProviderSession check of this session compares against. Recorded
+        // while enforcement is off too, so turning enforcement on does not end every session
+        // at once. With enforcement on (the setting, or a recorded cutover), a login that
+        // cannot be verified has already been undone by the package (logout, new session, new
+        // CSRF token) and the person retries; docs/operations/provider-identity.md.
+        try {
+            app(ProviderSession::class)->establish($request, $identity, Auth::guard());
+        } catch (ProviderStatusUnavailable) {
+            $this->auditLoginFailed($request, $user, $identity->email, 'Provider session unverified', self::AUTH_METHOD);
+
+            abort(503, 'Sign-in verification is unavailable. Please retry.', [
+                'Retry-After' => '30',
+                'Cache-Control' => 'private, no-store',
+            ]);
+        }
 
         // Only now, once the application has decided to admit this person. A sign-in that
         // was refused leaves nothing behind in the visitor's session.

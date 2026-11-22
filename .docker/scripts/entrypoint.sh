@@ -2,9 +2,9 @@
 # Role dispatcher for the BWH eSign image. The same image runs as web, worker, or scheduler.
 #
 # Laravel's caches are built here at container start, not at image build, so they capture the
-# environment injected at runtime. Migrations are deliberately NOT run here: run
-# `php artisan migrate --force` once per release from an operator step or a one-shot job so
-# concurrent replicas never race.
+# environment injected at runtime. Migrations are deliberately NOT run by the long-running roles:
+# run the `release` role (or `php artisan migrate --force`) once per release from an operator step
+# or a one-shot job so concurrent replicas never race.
 set -eu
 
 ROLE="${1:-web}"
@@ -55,6 +55,16 @@ case "$ROLE" in
         ;;
     scheduler)
         exec sh -c 'while true; do php artisan schedule:run --no-interaction; sleep 60; done'
+        ;;
+    release)
+        # The one-shot release step (docker-compose.prod.example.yml's esign-migrate): migrate,
+        # then refuse a configuration that disagrees with a recorded provider identity cutover
+        # (the setting off, or the provider client incomplete), which would otherwise answer every
+        # protected request 503 once the new release starts. Passes while no cutover is recorded.
+        # A failure exits non-zero before the pipeline restarts anything
+        # (docs/operations/provider-identity.md).
+        php artisan migrate --force
+        exec php artisan bherila-auth:provider-identity-cutover check --no-ansi
         ;;
     artisan)
         exec php artisan "$@"

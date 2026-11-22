@@ -116,6 +116,9 @@ jobs:
             LICENSE
             THIRD_PARTY_NOTICES.md
           quiesce-script: scripts/deploy/quiesce.sh
+          # After migrations, before selection: refuses a candidate whose configuration disagrees
+          # with a recorded provider identity cutover. Passes while none is recorded.
+          post-deploy-script: scripts/deploy/verify-candidate.sh
           verification-script: scripts/deploy/verify-live.sh
           extra-cron-lines: |
             * * * * * cd "$HOME/e-sign-laravel" && /opt/cpanel/ea-php85/root/usr/bin/php -d memory_limit=1G artisan esign:queue:work-bounded > /dev/null 2>&1 # JOB:e-sign-laravel-queue-worker

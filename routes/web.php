@@ -42,6 +42,6 @@ if (AuthMode::current()->isSso()) {
     Route::post('/logout', [LocalLoginController::class, 'destroy'])->name('logout');
 }
 
-Route::middleware('auth')->group(function (): void {
+Route::middleware(['auth', 'provider-session'])->group(function (): void {
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
 });

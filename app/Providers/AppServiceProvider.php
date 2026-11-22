@@ -2,14 +2,18 @@
 
 namespace App\Providers;
 
+use App\Domain\Identity\Auth\EsignLocalCredentialPolicy;
 use App\Domain\Identity\Auth\EsignUserPolicy;
+use App\Domain\Identity\Auth\IdentityBindingResolver;
 use App\Domain\Identity\Credentials\CurrentPrincipal;
 use App\Domain\Identity\DelegatedAccess\ApplicationAccessAdapter;
 use App\Domain\Identity\Models\Workspace;
 use App\Domain\Identity\Policies\WorkspacePolicy;
 use App\Listeners\UpdateLastLoginDate;
 use BWH\Auth\Contracts\AuthUserPolicy;
+use BWH\Auth\Contracts\LocalCredentialPolicy;
 use BWH\Auth\OAuth\DelegatedAccess\ApplicationAccessAdapter as AccessAdapter;
+use BWH\Auth\OAuth\Session\ProviderBindingResolver;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Http\Kernel;
@@ -42,6 +46,17 @@ class AppServiceProvider extends ServiceProvider
         // question and get the same answer. Registered here rather than in boot() because
         // the package binds its default during registration.
         $this->app->bind(AuthUserPolicy::class, EsignUserPolicy::class);
+
+        // Provider identity enforcement (docs/operations/provider-identity.md). A binding is an
+        // `identity_bindings` row, not the `oauth_provider` / `oauth_subject` columns the
+        // package's default resolver reads, so every package path that asks for an account's
+        // binding asks this one. The local-credential policy keeps a provider-bound account off
+        // the package's password, passkey and two-factor paths while enforcement is on. Both are
+        // inert until BHERILA_AUTH_PROVIDER_IDENTITY_ENABLED or a recorded cutover turns
+        // enforcement on: with it off the policy is the package's own (`local_credentials`,
+        // default 'allow'), which is the only thing that would then consult the resolver.
+        $this->app->bind(ProviderBindingResolver::class, IdentityBindingResolver::class);
+        $this->app->bind(LocalCredentialPolicy::class, EsignLocalCredentialPolicy::class);
 
         // Delegated access (issue #111). The package serves POST /application-access, verifies the
         // provider's assertion and validates both sides of the contract once an adapter is bound;

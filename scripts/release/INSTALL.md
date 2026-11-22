@@ -48,7 +48,11 @@ and cannot actually detect.
 
 ```bash
 php artisan migrate --force
+php artisan bherila-auth:provider-identity-cutover check
 ```
+
+The check passes while no provider identity cutover is recorded; once one is, it fails when the
+configuration disagrees with it. See `docs/operations/provider-identity.md`.
 
 ## 6. Bootstrap the first owner
 

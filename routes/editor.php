@@ -35,7 +35,7 @@ $versionNumber = '[1-9][0-9]{0,8}';
 /** Laravel's own ULID pattern, as used by `whereUlid()`. */
 $ulid = '[0-7][0-9a-hjkmnp-tv-zA-HJKMNP-TV-Z]{25}';
 
-Route::middleware(['web', 'auth'])
+Route::middleware(['web', 'auth', 'provider-session'])
     ->prefix('workspaces/{workspace}')
     ->whereUlid(['workspace', 'template'])
     ->where(['version' => $versionNumber.'|'.$ulid])

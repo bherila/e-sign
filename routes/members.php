@@ -33,7 +33,7 @@ Route::get('/invitations/{token}', [InvitationRedemptionController::class, 'land
     ->where('token', '[0-9a-f]{64}')
     ->name('invitations.show');
 
-Route::middleware(['web', 'auth'])->group(function (): void {
+Route::middleware(['web', 'auth', 'provider-session'])->group(function (): void {
     Route::prefix('workspaces/{workspace}')
         ->whereUlid(['workspace', 'member', 'invitation'])
         ->name('members.')

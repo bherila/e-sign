@@ -72,7 +72,14 @@ sha256sum -c bwh-esign-<version>.tar.gz.sha256
 
    ```bash
    php artisan migrate --force
+   php artisan bherila-auth:provider-identity-cutover check
    ```
+
+   The second command passes while no provider identity cutover is recorded. Once one is, it
+   fails when the configuration disagrees with it (enforcement setting off, or the identity
+   provider client incomplete); fix `.env` before bringing the site up. The GitHub deployment
+   runs it from `scripts/deploy/verify-candidate.sh` before selecting a release
+   ([provider-identity.md](provider-identity.md)).
 5. **Bootstrap the first owner.** There is no default administrator and the first person to
    sign in is never promoted automatically — see
    [`docs/operations/bootstrap.md`](bootstrap.md) for the full SSO/standalone walkthrough:
