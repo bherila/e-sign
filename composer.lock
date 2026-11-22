@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "dc80abe4d9570d9318c140dadbaede04",
+    "content-hash": "39602057e15ae7376317bf00031c2e76",
     "packages": [
         {
             "name": "aws/aws-crt-php",
@@ -218,16 +218,16 @@
         },
         {
             "name": "bherila/auth-laravel",
-            "version": "v0.30.0",
+            "version": "v0.30.3",
             "source": {
                 "type": "git",
                 "url": "https://github.com/bherila/auth-laravel.git",
-                "reference": "18ebb2002409c881dc2a032a4fd4ac2d678ae3d4"
+                "reference": "c53972c2f4a7e7dbf879660ffbb5173eea5dfb18"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/bherila/auth-laravel/zipball/18ebb2002409c881dc2a032a4fd4ac2d678ae3d4",
-                "reference": "18ebb2002409c881dc2a032a4fd4ac2d678ae3d4",
+                "url": "https://api.github.com/repos/bherila/auth-laravel/zipball/c53972c2f4a7e7dbf879660ffbb5173eea5dfb18",
+                "reference": "c53972c2f4a7e7dbf879660ffbb5173eea5dfb18",
                 "shasum": ""
             },
             "require": {
@@ -277,7 +277,7 @@
                 "issues": "https://github.com/bherila/auth-laravel/issues",
                 "source": "https://github.com/bherila/auth-laravel"
             },
-            "time": "2026-11-15T07:11:49+00:00"
+            "time": "2026-11-22T05:49:26+00:00"
         },
         {
             "name": "brick/math",

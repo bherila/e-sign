@@ -403,6 +403,53 @@ class OAuthLoginTest extends TestCase
         $this->assertAuthenticated();
     }
 
+    public function test_required_proof_refuses_an_identity_without_the_claim_before_provisioning(): void
+    {
+        config(['bherila-auth.oauth_login.require_verified_email' => true]);
+        $this->fakeProvider();
+
+        $this->completeCallback()->assertForbidden();
+
+        $this->assertGuest();
+        $this->assertDatabaseCount('users', 0);
+        $this->assertDatabaseCount('identity_bindings', 0);
+        $this->assertDatabaseHas('auth_audit_log', [
+            'event' => AuthAuditLog::EVENT_LOGIN_FAILED,
+            'succeeded' => false,
+            'user_id' => null,
+            'email' => null,
+        ]);
+    }
+
+    public function test_required_proof_refuses_a_loosely_spelled_claim(): void
+    {
+        config(['bherila-auth.oauth_login.require_verified_email' => true]);
+        $this->fakeProvider(['email_verified' => 'true']);
+
+        $this->completeCallback()->assertForbidden();
+
+        $this->assertGuest();
+        $this->assertDatabaseCount('identity_bindings', 0);
+    }
+
+    public function test_required_proof_admits_a_native_true_claim(): void
+    {
+        config(['bherila-auth.oauth_login.require_verified_email' => true]);
+        $this->fakeProvider(['email_verified' => true]);
+
+        $this->completeCallback()->assertRedirect(route('dashboard'));
+        $this->assertAuthenticated();
+    }
+
+    public function test_without_required_proof_a_missing_claim_is_still_admitted(): void
+    {
+        $this->assertFalse((bool) config('bherila-auth.oauth_login.require_verified_email'));
+        $this->fakeProvider();
+
+        $this->completeCallback()->assertRedirect(route('dashboard'));
+        $this->assertAuthenticated();
+    }
+
     // ------------------------------------------------------------------ helpers
 
     /**
