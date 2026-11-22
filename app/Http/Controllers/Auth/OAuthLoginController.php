@@ -62,6 +62,16 @@ class OAuthLoginController extends Controller
             abort(403, 'The identity provider has not verified this email address.');
         }
 
+        // Strict proof (oauth_login.require_verified_email, off by default): only the JSON
+        // boolean true passes, so an absent claim and a loosely spelled "true" are refused too.
+        // The same rule as the package's RelyingPartyLoginController, which this controller
+        // does not extend.
+        if (! $identity->emailVerifiedNative && (bool) config('bherila-auth.oauth_login.require_verified_email', false)) {
+            $this->auditLoginFailed($request, null, null, 'Identity email not proven by provider', self::AUTH_METHOD);
+
+            abort(403, 'The identity provider has not verified this email address.');
+        }
+
         // Resolved on (issuer, subject). Never on the email address, however convenient the
         // provider has just made it.
         $user = $identities->resolve($identity);
