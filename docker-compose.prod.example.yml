@@ -97,5 +97,6 @@ services:
     <<: *esign-image
     container_name: esign-migrate
     profiles: [release]
-    command: ["artisan", "migrate", "--force"]
+    # Migrate, then `bherila-auth:provider-identity-cutover check` (.docker/scripts/entrypoint.sh).
+    command: ["release"]
     restart: "no"

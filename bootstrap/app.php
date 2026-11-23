@@ -11,6 +11,7 @@ use App\Http\Middleware\AuthenticateServiceCredential;
 use App\Http\Middleware\Compat\FirmaRequestSizeLimit;
 use App\Http\Middleware\RequireScope;
 use App\Http\Middleware\SecurityHeaders;
+use BWH\Auth\Http\Middleware\RequireActiveProviderSession;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -59,9 +60,19 @@ return Application::configure(basePath: dirname(__DIR__))
         // application is for people, and an API caller has no session, no membership, and no
         // role. Scope enforcement is a second alias on purpose, so a route states the scope
         // it needs next to itself.
+        //
+        // `provider-session` is provider identity enforcement for browser sessions
+        // (docs/operations/provider-identity.md): a session whose provider identity was disabled,
+        // deleted, reset or ungranted since sign-in is signed out. Listed next to `auth` on every
+        // session-authenticated person route, never on the `web` group: the guest signing surface
+        // uses `web` for its CSRF session, and a guest signer is not a provider identity. A
+        // pass-through until enforcement is on (the setting, or a recorded cutover).
+        // tests/Feature/Auth/ProviderSessionRouteCensusTest.php fails any `auth` route registered
+        // without it. One alias() call: each call replaces the previous list.
         $middleware->alias([
             'service-credential' => AuthenticateServiceCredential::class,
             'require-scope' => RequireScope::class,
+            'provider-session' => RequireActiveProviderSession::class,
         ]);
 
         // Global, because "every response" is the requirement and a route group is a place

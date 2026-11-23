@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\User;
+use BWH\Auth\Http\Middleware\RequireActiveProviderSession;
 
 // The route-family toggles below must track App\Domain\Identity\Enums\AuthMode's decision,
 // but this file is `require`d by Illuminate\Foundation\Bootstrap\LoadConfiguration before the
@@ -40,10 +41,16 @@ return [
     // any user that has an identity binding — so these route families follow the
     // resolved auth mode automatically: enabled in standalone mode, disabled in SSO mode.
     // Override with ESIGN_LOCAL_AUTH_ROUTES=on|off; default is auto.
+    //
+    // RequireActiveProviderSession runs on all of them: the ones behind `auth` (passkey
+    // management, change and confirm password, the audit-log routes) are session-authenticated
+    // person routes, and on the guest ones (forgot/reset password, passkey sign-in, two-factor)
+    // it has no signed-in user and passes straight through. A pass-through until provider
+    // identity enforcement is on; docs/operations/provider-identity.md.
     'routes' => [
         'enabled' => true,
         'prefix' => 'api',
-        'middleware' => ['web'],
+        'middleware' => ['web', RequireActiveProviderSession::class],
         'passkeys' => $localAuthRoutesEnabled,
         'password_resets' => $localAuthRoutesEnabled,
         'change_password' => $localAuthRoutesEnabled,
@@ -71,6 +78,33 @@ return [
         // Relying-party initiated logout. Ending only the local session leaves the provider
         // still recognising the person, so the next sign-in returns them without a prompt.
         'end_session_path' => '/oauth/end-session',
+    ],
+
+    // Provider identity (lifecycle) enforcement: a browser session whose identity the provider
+    // has since disabled, deleted, reset or ungranted is signed out here, and a sign-in the
+    // provider cannot verify is refused. Off by default and inert while off; adoption, cutover
+    // and the inventory of what it covers are in docs/operations/provider-identity.md. The
+    // package defaults fill in everything not named here.
+    'provider_identity' => [
+        // Before cutover, the switch. Once `bherila-auth:provider-identity-cutover record` has
+        // run, enforcement stays on whatever this says. Application code never reads this key:
+        // it asks ProviderIdentityEnforcement::enabled(), which honours the recorded cutover.
+        'enabled' => (bool) env('BHERILA_AUTH_PROVIDER_IDENTITY_ENABLED', false),
+        'cutover_connection' => env('BHERILA_AUTH_PROVIDER_IDENTITY_CUTOVER_CONNECTION'),
+        // One status observation per provider subject, shared by every session of that person.
+        // Must be a store every web worker shares. Null uses CACHE_STORE, which every supported
+        // deployment sets to `database` (shared by construction); never `array` or a per-host
+        // `file` store behind more than one web host.
+        'cache_store' => env('BHERILA_AUTH_PROVIDER_IDENTITY_CACHE_STORE'),
+        // The binding lives in `identity_bindings`, read by IdentityBindingResolver
+        // (app/Domain/Identity/Auth, bound in AppServiceProvider), so the package's `binding`
+        // column names are not used.
+        //
+        // An ended session is sent to the sign-in page, which offers single sign-on again.
+        'expired_redirect_route' => 'login',
+        // Both modes name their sign-out route `logout` (routes/web.php). It carries no
+        // provider-session middleware in any case; listed so it stays reachable if it ever does.
+        'except_routes' => ['logout'],
     ],
 
     // Optional OAuth authorization-server helpers for applications exposing an

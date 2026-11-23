@@ -23,8 +23,15 @@ Release) deploy, the same way it already refreshes its other service images:
    ```bash
    docker compose -f docker-compose.prod.example.yml --profile release run --rm esign-migrate
    ```
-   This runs `php artisan migrate --force` once. It must complete successfully before step 4;
-   a failed migration aborts the release and the previous containers keep running unchanged.
+   This runs the image's `release` role once: `php artisan migrate --force`, then
+   `php artisan bherila-auth:provider-identity-cutover check`. It must complete successfully
+   before step 4; a failed migration aborts the release and the previous containers keep
+   running unchanged. The check passes while no provider identity cutover is recorded; once one
+   is, it fails when `BHERILA_AUTH_PROVIDER_IDENTITY_ENABLED` is off or the identity provider
+   client is incomplete, because that release would answer every protected request 503
+   ([provider-identity.md](provider-identity.md)). A pipeline that copied an older
+   `esign-migrate` (`command: ["artisan", "migrate", "--force"]`) must switch to
+   `command: ["release"]` or run the check itself after migrating.
 4. **Restart.** Recreate `esign`, `esign-worker`, and `esign-scheduler` on the new digest:
    ```bash
    docker compose -f docker-compose.prod.example.yml up -d esign esign-worker esign-scheduler

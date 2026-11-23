@@ -1,6 +1,6 @@
 # Docker
 
-One image, three roles. `.docker/Dockerfile` builds a PHP 8.5 + nginx image that runs as the
+One image, three long-running roles and two one-shot ones. `.docker/Dockerfile` builds a PHP 8.5 + nginx image that runs as the
 unprivileged `www-data` user and serves HTTP on **8080**. The container command selects the role:
 
 | Command | What runs | Notes |
@@ -8,7 +8,8 @@ unprivileged `www-data` user and serves HTTP on **8080**. The container command 
 | `web` (default) | php-fpm on a unix socket + nginx in the foreground | health at `/up` |
 | `worker` | `queue:work` on the database queue, bounded by `--max-time` | the only role that needs signing key material; mount keys here and nowhere else |
 | `scheduler` | `schedule:run` every 60 s | |
-| `artisan …` | one-shot artisan command | e.g. `migrate --force` as a release step |
+| `release` | one-shot release step: `migrate --force`, then `bherila-auth:provider-identity-cutover check` | what `esign-migrate` runs; exits non-zero on a failed migration or a configuration that disagrees with a recorded provider identity cutover ([docs/operations/provider-identity.md](docs/operations/provider-identity.md)) |
+| `artisan …` | one-shot artisan command | e.g. `migrate --force` |
 
 Caches (`config`, `route`, `view`) are built at container start when `APP_ENV=production`, so the
 image is environment-agnostic. Migrations never run automatically.
